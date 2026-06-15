@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Secrets / local config. .env is gitignored; .env.example is NOT.
+.env
+.env.*
+!.env.example
+
+# Local runtime data (the WhatsApp session). Never commit it.
+data/
+
+# Logs
+*.log
+
+# Test coverage
+coverage/
+
+# Claude Code local session/settings
+.claude/
+
+# OS / editor
+.DS_Store
+Thumbs.db
