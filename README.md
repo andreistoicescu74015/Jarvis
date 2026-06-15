@@ -19,5 +19,6 @@ Early. The core and a first set of commands are under construction.
 ## Develop
 
 ```bash
-npm test    # node:test suite
+npm run cli   # drive the bot from the terminal (no WhatsApp)
+npm test      # node:test suite
 ```
