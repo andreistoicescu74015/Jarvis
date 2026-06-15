@@ -12,6 +12,7 @@
  * @property {string} sender                        Sender id.
  * @property {'private'|'group'|'community'} level  Conversation level.
  * @property {boolean} fromMe                       True if sent by the bot's own account.
+ * @property {boolean} [isAdmin]                    Sender is an admin of this chat (groups).
  * @property {unknown} [raw]                        Platform-native payload (escape hatch).
  *
  * @typedef {string | { text: string }} OutboundMessage
