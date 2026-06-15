@@ -2,10 +2,11 @@
  * A command the bot can run.
  *
  * @typedef {Object} Command
- * @property {string} name                  Unique, lowercase (e.g. 'ping').
- * @property {string} summary               One line, shown by `help`.
- * @property {string} [usage]               Optional usage hint.
- * @property {object} [params]              Optional parameter schema (seed for AI tools; ADR-0005).
+ * @property {string} name                       Unique, lowercase (e.g. 'ping').
+ * @property {string} summary                    One line, shown by `help`.
+ * @property {string} [usage]                    Optional usage hint.
+ * @property {object} [params]                   Optional parameter schema (seed for AI tools; ADR-0005).
+ * @property {import('./scope.js').Scope} [scope] Optional permission requirements.
  * @property {(ctx: import('./dispatch.js').Ctx) => unknown} run
  *
  * @typedef {Object} Registry

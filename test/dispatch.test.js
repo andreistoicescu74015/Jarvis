@@ -71,3 +71,16 @@ test('dispatch: a throwing command is isolated', async () => {
 test('registry: rejects duplicate command names', () => {
   assert.throws(() => createRegistry([ping, ping]), /duplicate/);
 });
+
+test('dispatch: a command can reply via ctx.reply (lines collected and joined)', async () => {
+  const chatty = {
+    name: 'chatty',
+    summary: 'uses ctx.reply',
+    run: (ctx) => {
+      ctx.reply('line 1');
+      ctx.reply('line 2');
+    },
+  };
+  const sent = await run('jarvis chatty', [chatty]);
+  assert.deepEqual(sent, [{ chatId: 'test-chat', text: 'line 1\nline 2' }]);
+});
