@@ -12,8 +12,10 @@
  */
 
 /**
- * Compare two ids as the same user. String match for now (tolerates an `id:device`
- * suffix); LID/PN bridging is handled by the WhatsApp adapter later.
+ * Compare two ids as the same user. Drops a `:device` suffix (`user:3@domain` ->
+ * `user@domain`) but keeps the domain, so different id spaces never collide
+ * (`x@lid` is NOT `x@s.whatsapp.net`). Bridging those two spaces for one person is
+ * the identity store's job (it maps LID <-> phone), not this comparison.
  *
  * @param {string} a
  * @param {string} b
@@ -21,7 +23,7 @@
  */
 export function sameUser(a, b) {
   if (!a || !b) return false;
-  const bare = (s) => String(s).split(':')[0].trim().toLowerCase();
+  const bare = (s) => String(s).trim().toLowerCase().replace(/:\d+(?=@|$)/, '');
   return bare(a) === bare(b);
 }
 
