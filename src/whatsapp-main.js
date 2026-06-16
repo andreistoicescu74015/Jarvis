@@ -25,20 +25,23 @@ const adapter = createWhatsAppAdapter({
   authState: createSqliteAuthState(authDb, { logger: socketLogger(log) }),
   log,
   prefix: process.env.JARVIS_PREFIX ?? 'jarvis',
+  // On logout the creds are wiped; exit non-zero so a supervisor restarts us and
+  // shows a fresh QR. In dev (no supervisor) it simply stops - rerun `npm start`.
+  onLogout: () => shutdown(1),
 });
 const app = createApp(adapter, {
   handle: createDispatcher(registry, { owner: process.env.OWNER_JID ?? '', store, log }),
 });
 
 let closing = false;
-const shutdown = async () => {
+const shutdown = async (code = 0) => {
   if (closing) return;
   closing = true;
   log.info('Jarvis shutting down...');
   await adapter.stop();
   store.close();
   authDb.close();
-  process.exit(0);
+  process.exit(code);
 };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
