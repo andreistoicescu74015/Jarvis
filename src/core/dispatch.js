@@ -31,7 +31,7 @@ import { nullLogger } from './log.js';
  */
 export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger } = {}) {
   return async function handle(msg) {
-    const parsed = parse(msg.text, prefix);
+    const parsed = parse(msg.text, prefix, { addressed: msg.addressed });
     if (!parsed) return undefined; // not addressed to the bot
 
     const { command, args, rest } = parsed;

@@ -28,6 +28,15 @@ test('parse: bare prefix yields an empty command', () => {
   assert.deepEqual(parse('jarvis'), { command: '', args: [], rest: '' });
 });
 
+test('parse: the addressed flag parses a bare command without a prefix', () => {
+  assert.deepEqual(parse('ping milk', 'jarvis', { addressed: true }), {
+    command: 'ping',
+    args: ['milk'],
+    rest: 'milk',
+  });
+  assert.equal(parse('ping milk'), null); // without the flag (or prefix) it is ignored
+});
+
 async function run(text, commands = [ping, help]) {
   const adapter = createTestAdapter();
   const app = createApp(adapter, { handle: createDispatcher(createRegistry(commands)) });
@@ -54,6 +63,14 @@ test('dispatch: unknown command returns a hint', async () => {
 
 test('dispatch: a non-prefixed message is ignored', async () => {
   assert.deepEqual(await run('just chatting'), []);
+});
+
+test('dispatch: an addressed message (e.g. @mention) runs without a prefix', async () => {
+  const adapter = createTestAdapter();
+  const app = createApp(adapter, { handle: createDispatcher(createRegistry([ping])) });
+  await app.start();
+  await adapter.receive({ text: 'ping', addressed: true });
+  assert.deepEqual(adapter.sent, [{ chatId: 'test-chat', text: 'pong' }]);
 });
 
 test('dispatch: a throwing command is isolated - logged, never posted to chat', async () => {
