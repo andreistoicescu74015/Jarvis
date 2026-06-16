@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { createStore } from '../src/store/index.js';
 
 test('store: a fresh db is migrated (the kv table exists and works)', () => {
@@ -42,6 +45,20 @@ test('store: scoped() binds a single namespace', () => {
   assert.equal(s.kv.get('a', 'k'), 1); // same row underneath
   assert.deepEqual(a.list(), [{ key: 'k', value: 1 }]);
   s.close();
+});
+
+test('store: creates the database parent directory if it is missing', () => {
+  const base = mkdtempSync(join(tmpdir(), 'jarvis-store-'));
+  try {
+    const dbPath = join(base, 'nested', 'deeper', 'jarvis.db'); // none of these dirs exist yet
+    const s = createStore({ path: dbPath });
+    s.kv.set('n', 'k', 'v');
+    assert.equal(s.kv.get('n', 'k'), 'v');
+    assert.ok(existsSync(dbPath));
+    s.close();
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });
 
 test('store: migrations are idempotent (reopening the same db re-applies nothing)', () => {

@@ -1,5 +1,6 @@
 import { parse } from './parse.js';
 import { checkScope, sameUser } from './scope.js';
+import { nullLogger } from './log.js';
 
 /**
  * The capabilities a command receives. Grows over later issues (store, ai, ...).
@@ -16,6 +17,7 @@ import { checkScope, sameUser } from './scope.js';
  * @property {import('./registry.js').Command[]} commands  Registered commands (for help/man).
  * @property {(text: string) => void} reply                Queue a line to send back.
  * @property {import('../store/index.js').ScopedStore} [store] Per-conversation scoped KV (when configured).
+ * @property {import('./log.js').Logger} log               Structured logger (never posts to chat).
  */
 
 /**
@@ -24,10 +26,10 @@ import { checkScope, sameUser } from './scope.js';
  * command never crashes the bot. Returns a `handle(msg)` for `createApp`.
  *
  * @param {import('./registry.js').Registry} registry
- * @param {{ prefix?: string, owner?: string }} [opts]
+ * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger }} [opts]
  * @returns {(msg: import('./app.js').InboundMessage) => Promise<string | undefined>}
  */
-export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store } = {}) {
+export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger } = {}) {
   return async function handle(msg) {
     const parsed = parse(msg.text, prefix);
     if (!parsed) return undefined; // not addressed to the bot
@@ -59,13 +61,21 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       commands: registry.all(),
       reply: (text) => replies.push(text),
       store: store ? store.scoped(`${level}:${msg.chatId ?? 'cli'}`) : undefined,
+      log,
     };
 
     try {
       const result = await cmd.run(ctx);
       if (result != null && result !== '') replies.push(String(result));
     } catch (err) {
-      return `Command "${command}" failed: ${err?.message ?? err}`;
+      // A command failure is logged internally and never surfaced in chat: it
+      // would be noise and could leak internals. Any partial replies are dropped.
+      log.error(`command "${command}" failed`, {
+        error: err?.message ?? String(err),
+        sender,
+        level,
+      });
+      return undefined;
     }
 
     return replies.length ? replies.join('\n') : undefined;
