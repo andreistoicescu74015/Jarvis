@@ -9,5 +9,8 @@
   "scripts": {
     "cli": "node --disable-warning=ExperimentalWarning src/cli.js",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+  },
+  "dependencies": {
+    "baileys": "7.0.0-rc13"
   }
 }
