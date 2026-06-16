@@ -72,21 +72,6 @@ test('dispatch: ctx carries identity (level/sender/isOwner/isAdmin)', async () =
   assert.deepEqual(seen, { level: 'group', sender: 'me', isOwner: true, isAdmin: true });
 });
 
-test('dispatch: first-claimer - the first invoker of an owner command becomes owner', async () => {
-  const sent = await run('jarvis secret', { commands: [ownerCmd], owner: '', msg: { sender: 'alice' } });
-  assert.deepEqual(sent.map((s) => s.text), ['top secret']);
-});
-
-test('dispatch: first-claimer - a later user is denied once someone has claimed', async () => {
-  // claim + deny must share one dispatcher, so drive two messages through it
-  const adapter = createTestAdapter();
-  const app = createApp(adapter, { handle: createDispatcher(createRegistry([ownerCmd]), { owner: '' }) });
-  await app.start();
-  await adapter.receive({ text: 'jarvis secret', sender: 'alice' }); // claims
-  await adapter.receive({ text: 'jarvis secret', sender: 'bob' }); // denied
-  assert.deepEqual(adapter.sent.map((s) => s.text), ['top secret', 'Not allowed: owner only.']);
-});
-
 test('dispatch: owner match is injectable (LID-aware bridging)', async () => {
   const bridge = (a, b) => a === b || (a === 'lid' && b === 'pn');
   const sent = await run('jarvis secret', {

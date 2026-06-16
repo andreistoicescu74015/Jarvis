@@ -7,13 +7,15 @@ import ping from './commands/ping.js';
 import help from './commands/help.js';
 import whoami from './commands/whoami.js';
 import note from './commands/note.js';
+import owner from './commands/owner.js';
 import shutdown from './commands/shutdown.js';
 import restart from './commands/restart.js';
 import logout from './commands/logout.js';
 import { createStore } from './store/index.js';
 
-// In CLI dev you are the owner (owner-only commands work).
-const registry = createRegistry([ping, help, whoami, note, shutdown, restart, logout]);
+// No preset owner (mirrors production): claim it in-session with `jarvis owner claim`,
+// or set OWNER_JID. The CLI sender is `cli-user`.
+const registry = createRegistry([ping, help, whoami, note, owner, shutdown, restart, logout]);
 const store = createStore({ path: 'data/jarvis.db' });
 const log = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
 // On the CLI, shutdown/restart just end the dev process; logout has no session.
@@ -22,7 +24,7 @@ const lifecycle = {
   restart: () => setTimeout(() => process.exit(1), 50),
 };
 const app = createApp(createCliAdapter(), {
-  handle: createDispatcher(registry, { owner: 'cli-user', store, log, lifecycle }),
+  handle: createDispatcher(registry, { owner: process.env.OWNER_JID ?? '', store, log, lifecycle }),
 });
 
 await app.start();
