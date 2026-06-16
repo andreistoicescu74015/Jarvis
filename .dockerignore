@@ -1,0 +1,16 @@
+# Reinstalled inside the image
+node_modules
+
+# Never bake runtime data / credentials into the image
+data
+.env
+.env.*
+!.env.example
+
+# Not needed at runtime
+.git
+.github
+docs
+test
+*.log
+.claude

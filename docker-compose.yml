@@ -1,0 +1,17 @@
+services:
+  jarvis:
+    build: .
+    image: jarvis
+    init: true # PID 1 signal handling, so SIGTERM reaches our graceful shutdown
+    restart: on-failure # clean shutdown stays down; restart/logout and OOM come back
+    stdin_open: true # first-run QR pairing needs an attached terminal
+    tty: true
+    env_file:
+      - path: .env
+        required: false # all variables are optional (see .env.example)
+    mem_limit: 512m # cap memory so the v7 leak triggers a restart instead of growing
+    volumes:
+      - jarvis-data:/app/data # auth session + sqlite persist across restarts
+
+volumes:
+  jarvis-data:
