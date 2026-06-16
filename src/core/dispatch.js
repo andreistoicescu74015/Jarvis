@@ -1,5 +1,6 @@
 import { parse } from './parse.js';
-import { checkScope, sameUser } from './scope.js';
+import { checkScope } from './scope.js';
+import { createOwnerResolver } from './owner.js';
 import { nullLogger } from './log.js';
 
 /**
@@ -18,6 +19,7 @@ import { nullLogger } from './log.js';
  * @property {(text: string) => void} reply                Queue a line to send back.
  * @property {import('../store/index.js').ScopedStore} [store] Per-conversation scoped KV (when configured).
  * @property {import('./log.js').Logger} log               Structured logger (never posts to chat).
+ * @property {{ shutdown?: () => void, restart?: () => void, logout?: () => void }} [lifecycle] Process lifecycle controls (owner commands; injected per platform).
  */
 
 /**
@@ -26,10 +28,11 @@ import { nullLogger } from './log.js';
  * command never crashes the bot. Returns a `handle(msg)` for `createApp`.
  *
  * @param {import('./registry.js').Registry} registry
- * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger }} [opts]
+ * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object }} [opts]
  * @returns {(msg: import('./app.js').InboundMessage) => Promise<string | undefined>}
  */
-export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger } = {}) {
+export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle } = {}) {
+  const ownerResolver = createOwnerResolver({ owner, match });
   return async function handle(msg) {
     const parsed = parse(msg.text, prefix, { addressed: msg.addressed });
     if (!parsed) return undefined; // not addressed to the bot
@@ -43,7 +46,12 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     const level = msg.level ?? 'private';
     const sender = msg.sender ?? '';
     const isAdmin = msg.isAdmin ?? false;
-    const isOwner = !!owner && sameUser(sender, owner);
+    // Owner-scoped commands trigger first-claimer when no owner is configured yet
+    // (ADR-0007): the first such invoker becomes the ephemeral owner.
+    const isOwner =
+      cmd.scope?.owner && !ownerResolver.current
+        ? ownerResolver.claimIfUnset(sender)
+        : ownerResolver.isOwner(sender);
 
     const scoped = checkScope(cmd.scope, { level, isAdmin, isOwner });
     if (!scoped.ok) return `Not allowed: ${scoped.reason}.`;
@@ -62,6 +70,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       reply: (text) => replies.push(text),
       store: store ? store.scoped(`${level}:${msg.chatId ?? 'cli'}`) : undefined,
       log,
+      lifecycle,
     };
 
     try {

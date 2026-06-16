@@ -46,6 +46,20 @@ test('adapter: exposes the Adapter contract', () => {
   assert.equal(typeof a.stop, 'function');
 });
 
+test('adapter: learns identity pairs from every inbound key (even non-commands)', async () => {
+  const makeSocket = fakeSocketFactory();
+  const learned = [];
+  const a = createWhatsAppAdapter(opts({ makeSocket, learn: (key) => learned.push(key) }));
+  a.start({ onMessage: async () => {} });
+  makeSocket.sockets[0].ev.emit('messages.upsert', {
+    type: 'notify',
+    messages: [{ key: { remoteJid: 'G@g.us', participant: '111@lid', participantPn: '40712@s.whatsapp.net' }, message: { conversation: 'hello' } }],
+  });
+  await tick();
+  assert.equal(learned.length, 1);
+  assert.equal(learned[0].participant, '111@lid');
+});
+
 test('adapter: only addressed inbound reaches onMessage; mention becomes a bare command', async () => {
   const makeSocket = fakeSocketFactory();
   const received = [];

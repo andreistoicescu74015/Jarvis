@@ -37,6 +37,7 @@ function timestampMs(wa) {
  *   sleep?: (ms: number) => Promise<void>,
  *   renderQr?: (qr: string) => void,
  *   onLogout?: () => void,
+ *   learn?: (key: object) => void,
  *   random?: () => number,
  *   now?: () => number,
  *   groupCacheTtlMs?: number,
@@ -53,6 +54,7 @@ export function createWhatsAppAdapter({
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   renderQr = (qr) => qrcode.generate(qr, { small: true }),
   onLogout = () => {},
+  learn = () => {},
   random = Math.random,
   now = () => Date.now(),
   groupCacheTtlMs = 5 * 60 * 1000,
@@ -140,6 +142,8 @@ export function createWhatsAppAdapter({
         const ts = timestampMs(wa);
         if (connectedAt && ts && ts < connectedAt - offlineGraceMs) continue;
 
+        learn(wa.key); // lazily record LID <-> phone pairs from the key
+
         const isGroup = String(wa?.key?.remoteJid || '').endsWith('@g.us');
         const inbound = toInbound(wa, { groupMetadata: isGroup ? await groupMetadata(wa.key.remoteJid) : undefined });
         if (!inbound) continue;
@@ -171,9 +175,24 @@ export function createWhatsAppAdapter({
       }
     },
 
+    async logout() {
+      stopped = true;
+      try {
+        await sock?.logout?.(); // ask WhatsApp to unlink this device (best-effort)
+      } catch {
+        // ignore - we wipe local creds regardless
+      }
+      try {
+        authState.clear();
+      } catch {
+        // ignore
+      }
+    },
+
     async stop() {
       stopped = true;
       try {
+        sock?.ev?.removeAllListeners?.(); // don't react to teardown events while closing
         sock?.end?.(undefined);
       } catch {
         // already closed - ignore
