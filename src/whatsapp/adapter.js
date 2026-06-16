@@ -8,12 +8,25 @@ import { toContent } from './render.js';
 import { createRateLimiter } from './pacing.js';
 import { disconnectAction, backoffMs } from './connection.js';
 
+/** Read a WAMessage timestamp (seconds, number or Long) as epoch ms, or 0 if absent. */
+function timestampMs(wa) {
+  const t = wa?.messageTimestamp;
+  if (t == null) return 0;
+  const n = typeof t === 'number' ? t : typeof t?.toNumber === 'function' ? t.toNumber() : Number(t);
+  return Number.isFinite(n) ? n * 1000 : 0;
+}
+
 /**
  * WhatsApp adapter (Baileys v7-rc). Realizes the platform Adapter contract over a
  * live socket: normalize inbound, enforce the prefix-or-@mention trigger, pace
  * outbound. The socket is recreated on every reconnect and never held outside
  * this module (commands must not cache it). Auth state persists via the injected
- * `authState`. `makeSocket` / `sleep` / `renderQr` are injectable for testing.
+ * `authState`.
+ *
+ * Hardening: the offline backlog delivered on reconnect is skipped (we only act
+ * on messages at/after the connection), group metadata is cached with a TTL and
+ * invalidated on group/participant updates, and a logout wipes creds and signals
+ * a clean exit. `makeSocket` / `sleep` / `renderQr` / `now` are injectable for tests.
  *
  * @param {{
  *   authState: { state: object, saveCreds: () => void, clear: () => void },
@@ -23,7 +36,11 @@ import { disconnectAction, backoffMs } from './connection.js';
  *   makeSocket?: typeof makeWASocket,
  *   sleep?: (ms: number) => Promise<void>,
  *   renderQr?: (qr: string) => void,
+ *   onLogout?: () => void,
  *   random?: () => number,
+ *   now?: () => number,
+ *   groupCacheTtlMs?: number,
+ *   offlineGraceMs?: number,
  * }} opts
  * @returns {import('../core/app.js').Adapter}
  */
@@ -35,7 +52,11 @@ export function createWhatsAppAdapter({
   makeSocket = makeWASocket,
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   renderQr = (qr) => qrcode.generate(qr, { small: true }),
+  onLogout = () => {},
   random = Math.random,
+  now = () => Date.now(),
+  groupCacheTtlMs = 5 * 60 * 1000,
+  offlineGraceMs = 15 * 1000,
 } = {}) {
   const waLog = socketLogger(log);
   /** @type {any} */
@@ -43,17 +64,19 @@ export function createWhatsAppAdapter({
   let onMessage = async () => {};
   let stopped = false;
   let attempts = 0;
-  /** @type {Map<string, any>} group metadata cache (community + admin resolution). */
+  let connectedAt = 0; // epoch ms of the latest 'open'; 0 = never connected
+  /** @type {Map<string, { meta: any, at: number }>} group metadata cache with TTL. */
   const groupCache = new Map();
 
   async function groupMetadata(jid) {
-    if (groupCache.has(jid)) return groupCache.get(jid);
+    const cached = groupCache.get(jid);
+    if (cached && now() - cached.at < groupCacheTtlMs) return cached.meta;
     try {
       const meta = await sock.groupMetadata(jid);
-      groupCache.set(jid, meta);
+      groupCache.set(jid, { meta, at: now() });
       return meta;
     } catch {
-      return undefined; // first contact / not yet available - degrade gracefully
+      return cached?.meta; // fall back to stale on a fetch error, else undefined
     }
   }
 
@@ -68,6 +91,12 @@ export function createWhatsAppAdapter({
     sock.ev.on('creds.update', authState.saveCreds);
     sock.ev.on('connection.update', onConnectionUpdate);
     sock.ev.on('messages.upsert', onUpsert);
+    sock.ev.on('groups.update', (updates) => {
+      for (const u of updates ?? []) if (u?.id) groupCache.delete(u.id);
+    });
+    sock.ev.on('group-participants.update', (u) => {
+      if (u?.id) groupCache.delete(u.id);
+    });
   }
 
   async function onConnectionUpdate({ connection, lastDisconnect, qr } = {}) {
@@ -77,6 +106,7 @@ export function createWhatsAppAdapter({
     }
     if (connection === 'open') {
       attempts = 0;
+      connectedAt = now();
       log.info('wa: connected', { user: sock?.user?.id });
       return;
     }
@@ -90,6 +120,7 @@ export function createWhatsAppAdapter({
       authState.clear();
       stopped = true;
       log.warn('wa: logged out - creds wiped, not reconnecting');
+      onLogout();
     } else if (action === 'restart') {
       connect();
     } else {
@@ -104,6 +135,11 @@ export function createWhatsAppAdapter({
     for (const wa of messages ?? []) {
       try {
         if (wa?.key?.fromMe) continue;
+        // Skip the offline backlog redelivered on (re)connect: messages sent before
+        // we came online. Messages without a timestamp can't be aged, so they pass.
+        const ts = timestampMs(wa);
+        if (connectedAt && ts && ts < connectedAt - offlineGraceMs) continue;
+
         const isGroup = String(wa?.key?.remoteJid || '').endsWith('@g.us');
         const inbound = toInbound(wa, { groupMetadata: isGroup ? await groupMetadata(wa.key.remoteJid) : undefined });
         if (!inbound) continue;
