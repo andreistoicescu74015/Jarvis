@@ -15,6 +15,7 @@ import { checkScope, sameUser } from './scope.js';
  * @property {boolean} isAdmin                             Sender is an admin here (groups).
  * @property {import('./registry.js').Command[]} commands  Registered commands (for help/man).
  * @property {(text: string) => void} reply                Queue a line to send back.
+ * @property {import('../store/index.js').ScopedStore} [store] Per-conversation scoped KV (when configured).
  */
 
 /**
@@ -26,7 +27,7 @@ import { checkScope, sameUser } from './scope.js';
  * @param {{ prefix?: string, owner?: string }} [opts]
  * @returns {(msg: import('./app.js').InboundMessage) => Promise<string | undefined>}
  */
-export function createDispatcher(registry, { prefix = 'jarvis', owner = '' } = {}) {
+export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store } = {}) {
   return async function handle(msg) {
     const parsed = parse(msg.text, prefix);
     if (!parsed) return undefined; // not addressed to the bot
@@ -57,6 +58,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '' } = {
       isAdmin,
       commands: registry.all(),
       reply: (text) => replies.push(text),
+      store: store ? store.scoped(`${level}:${msg.chatId ?? 'cli'}`) : undefined,
     };
 
     try {
