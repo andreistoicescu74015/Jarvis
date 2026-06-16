@@ -56,7 +56,7 @@ test('dispatch: a non-prefixed message is ignored', async () => {
   assert.deepEqual(await run('just chatting'), []);
 });
 
-test('dispatch: a throwing command is isolated', async () => {
+test('dispatch: a throwing command is isolated - logged, never posted to chat', async () => {
   const boom = {
     name: 'boom',
     summary: 'throws',
@@ -64,8 +64,17 @@ test('dispatch: a throwing command is isolated', async () => {
       throw new Error('kaboom');
     },
   };
-  const sent = await run('jarvis boom', [boom]);
-  assert.match(sent[0].text, /Command "boom" failed: kaboom/);
+  const errors = [];
+  const log = { debug() {}, info() {}, warn() {}, error: (msg, fields) => errors.push({ msg, fields }) };
+  const adapter = createTestAdapter();
+  const app = createApp(adapter, { handle: createDispatcher(createRegistry([boom]), { log }) });
+  await app.start();
+  await adapter.receive({ text: 'jarvis boom' });
+
+  assert.deepEqual(adapter.sent, []); // the failure never reaches the chat
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].msg, /command "boom" failed/);
+  assert.equal(errors[0].fields.error, 'kaboom');
 });
 
 test('registry: rejects duplicate command names', () => {

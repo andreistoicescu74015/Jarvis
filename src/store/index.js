@@ -1,4 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { migrate } from './migrations.js';
 import { createKv } from './kv.js';
 
@@ -23,6 +25,9 @@ import { createKv } from './kv.js';
  * @property {() => { key: string, value: unknown }[]} list
  */
 export function createStore({ path = ':memory:' } = {}) {
+  // node:sqlite opens the file but will not create its parent directory, so a
+  // fresh checkout (where `data/` is gitignored) would fail on first run.
+  if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
   db.exec('PRAGMA foreign_keys = ON;');
   migrate(db);
