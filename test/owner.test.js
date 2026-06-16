@@ -12,16 +12,24 @@ test('owner: an env-configured owner matches via the comparator', () => {
   assert.equal(r.isOwner(''), false);
 });
 
-test('owner: first-claimer takes ownership when none is configured', () => {
+test('owner: claim records the first-claimer owner', () => {
   const r = createOwnerResolver();
   assert.equal(r.fromEnv, false);
   assert.equal(r.current, '');
   assert.equal(r.isOwner('alice'), false); // nobody is owner yet
-  assert.equal(r.claimIfUnset('alice'), true); // alice claims
+  r.claim('alice');
   assert.equal(r.current, 'alice');
   assert.equal(r.isOwner('alice'), true);
-  assert.equal(r.claimIfUnset('bob'), false); // already claimed -> bob is not the owner
-  assert.equal(r.isOwner('bob'), false);
+  assert.equal(r.isOwner('bob'), false); // someone else is not the owner
+});
+
+test('owner: resign clears the current owner', () => {
+  const r = createOwnerResolver();
+  r.claim('alice');
+  assert.equal(r.isOwner('alice'), true);
+  r.resign();
+  assert.equal(r.current, '');
+  assert.equal(r.isOwner('alice'), false);
 });
 
 test('owner: identity match is injectable (e.g. LID<->PN bridging)', () => {

@@ -6,21 +6,25 @@ import { sameUser } from './scope.js';
  * ephemerally, until restart. Identity comparison is injectable so a platform can
  * bridge its id forms (e.g. the WhatsApp identity store maps LID <-> phone).
  *
+ * Eligibility for a first-claim (a private chat, the command passing its scope) is
+ * decided by the dispatcher; this resolver just records the decision via `claim`.
+ *
  * @param {{ owner?: string, match?: (a: string, b: string) => boolean }} [opts]
- * @returns {{ isOwner: (sender: string) => boolean, claimIfUnset: (sender: string) => boolean, readonly current: string, readonly fromEnv: boolean }}
+ * @returns {{ isOwner: (sender: string) => boolean, claim: (sender: string) => void, resign: () => void, readonly current: string, readonly fromEnv: boolean }}
  */
 export function createOwnerResolver({ owner = '', match = sameUser } = {}) {
   const fromEnv = !!owner;
   let current = owner ? String(owner) : '';
 
-  const isOwner = (sender) => !!current && !!sender && match(sender, current);
-
   return {
-    isOwner,
-    /** First-claimer: if no owner is set yet, the sender claims it. Returns whether it is now the owner. */
-    claimIfUnset(sender) {
-      if (!current && sender) current = String(sender);
-      return isOwner(sender);
+    isOwner: (sender) => !!current && !!sender && match(sender, current),
+    /** Record the owner (via `jarvis owner claim`); the command checks the slot is free first. */
+    claim(sender) {
+      if (sender) current = String(sender);
+    },
+    /** Relinquish ownership (the `owner` command restricts this to the current owner). */
+    resign() {
+      current = '';
     },
     get current() {
       return current;

@@ -20,6 +20,7 @@ import { nullLogger } from './log.js';
  * @property {import('../store/index.js').ScopedStore} [store] Per-conversation scoped KV (when configured).
  * @property {import('./log.js').Logger} log               Structured logger (never posts to chat).
  * @property {{ shutdown?: () => void, restart?: () => void, logout?: () => void }} [lifecycle] Process lifecycle controls (owner commands; injected per platform).
+ * @property {{ exists: boolean, isMe: boolean, fromEnv: boolean, contact: string, claim: () => boolean, resign: () => void }} [owner] Owner-slot management (the `owner` command).
  */
 
 /**
@@ -46,15 +47,29 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     const level = msg.level ?? 'private';
     const sender = msg.sender ?? '';
     const isAdmin = msg.isAdmin ?? false;
-    // Owner-scoped commands trigger first-claimer when no owner is configured yet
-    // (ADR-0007): the first such invoker becomes the ephemeral owner.
-    const isOwner =
-      cmd.scope?.owner && !ownerResolver.current
-        ? ownerResolver.claimIfUnset(sender)
-        : ownerResolver.isOwner(sender);
+    const isOwner = ownerResolver.isOwner(sender);
 
     const scoped = checkScope(cmd.scope, { level, isAdmin, isOwner });
     if (!scoped.ok) return `Not allowed: ${scoped.reason}.`;
+
+    // Owner-slot management for the `owner` command (claim only if free; resign only
+    // by the owner). Ownership is established here explicitly, never as a side effect.
+    const owner = {
+      exists: !!ownerResolver.current,
+      isMe: isOwner,
+      fromEnv: ownerResolver.fromEnv,
+      contact: ownerResolver.current,
+      claim: () => {
+        if (ownerResolver.current) return false;
+        ownerResolver.claim(sender);
+        log.warn('owner claimed', { sender });
+        return true;
+      },
+      resign: () => {
+        log.warn('owner resigned', { sender });
+        ownerResolver.resign();
+      },
+    };
 
     const replies = [];
     const ctx = {
@@ -71,6 +86,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       store: store ? store.scoped(`${level}:${msg.chatId ?? 'cli'}`) : undefined,
       log,
       lifecycle,
+      owner,
     };
 
     try {
