@@ -4,6 +4,7 @@ import { createOwnerResolver } from './owner.js';
 import { createAccessPolicy } from './access.js';
 import { createLinks } from './links.js';
 import { nullLogger } from './log.js';
+import { mono, esc } from './format.js';
 
 /**
  * The capabilities a command receives. Grows over later issues (ai, scheduler, ...).
@@ -83,10 +84,10 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       return undefined;
     }
 
-    if (!command) return `Try "${prefix} help".`;
+    if (!command) return `Try ${mono(`${prefix} help`)}.`;
 
     const cmd = registry.get(command);
-    if (!cmd) return `Unknown command "${command}". Try "${prefix} help".`;
+    if (!cmd) return `Unknown command ${mono(esc(command))}. Try ${mono(`${prefix} help`)}.`;
 
     // Per-command gate: only a non-owner on a non-owner command is subject to it
     // (owner-only commands are governed by `scope`; `owner` is exempt above).

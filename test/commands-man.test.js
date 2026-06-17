@@ -6,8 +6,10 @@ import man from '../src/commands/man.js';
 import ping from '../src/commands/ping.js';
 import shutdown from '../src/commands/shutdown.js';
 import whitelist from '../src/commands/whitelist.js';
+import { toPlain } from '../src/core/format.js';
 
-const handle = createDispatcher(createRegistry([man, ping, shutdown, whitelist]));
+const dispatch = createDispatcher(createRegistry([man, ping, shutdown, whitelist]));
+const handle = async (msg) => toPlain(await dispatch(msg)); // render like an adapter, for assertions
 
 test('man: shows a command summary, usage, and audience', async () => {
   const out = await handle({ text: 'jarvis man ping', sender: 'x' });

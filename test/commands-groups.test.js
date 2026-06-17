@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createRegistry } from '../src/core/registry.js';
 import { createDispatcher } from '../src/core/dispatch.js';
 import groups from '../src/commands/groups.js';
+import { toPlain } from '../src/core/format.js';
 
 test('groups: lists the known groups with ids, sorted by name', async () => {
   const listGroups = async () => [
@@ -10,9 +11,9 @@ test('groups: lists the known groups with ids, sorted by name', async () => {
     { id: '456-2@g.us', name: 'Friends' },
   ];
   const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', listGroups });
-  const out = await handle({ text: 'jarvis groups', sender: 'boss', level: 'private' });
-  assert.match(out, /Groups \(2\):/);
-  assert.match(out, /- Friends - 456-2@g\.us\n- Study - 123-1@g\.us/); // alphabetical
+  const out = toPlain(await handle({ text: 'jarvis groups', sender: 'boss', level: 'private' }));
+  assert.match(out, /Groups \(2\)/);
+  assert.match(out, /- Friends 456-2@g\.us\n- Study 123-1@g\.us/); // alphabetical
 });
 
 test('groups: is owner-only', async () => {

@@ -1,3 +1,5 @@
+import { b, i, mono, bullet, esc } from '../core/format.js';
+
 /**
  * Owner-only: list the groups Jarvis is a member of, each with its id, so the owner
  * can target a group remotely (e.g. `jarvis blacklist note add @user in <id>`). The
@@ -18,8 +20,8 @@ export default {
     if (!groups.length) return 'No groups found (or not available here).';
     const lines = groups
       .slice()
-      .sort((a, b) => String(a.name).localeCompare(String(b.name)))
-      .map((g) => `- ${g.name} - ${g.id}`);
-    return [`Groups (${groups.length}):`, ...lines].join('\n');
+      .sort((a, b2) => String(a.name).localeCompare(String(b2.name)))
+      .map((g) => `${b(esc(g.name))} ${mono(esc(g.id))}`);
+    return [`${b('Groups')} ${i(`(${groups.length})`)}`, bullet(lines)].join('\n');
   },
 };

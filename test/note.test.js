@@ -23,7 +23,7 @@ test('note: add then list (persisted through ctx.store)', async () => {
   const out = await run(store, ['jarvis note add milk', 'jarvis note add bread', 'jarvis note list']);
   assert.match(out[0], /Added note #1\./);
   assert.match(out[1], /Added note #2\./);
-  assert.equal(out[2], '1. milk\n2. bread');
+  assert.equal(out[2], 'Notes\n1. milk\n2. bread');
   store.close();
 });
 
@@ -38,7 +38,7 @@ test('note: get and del work by 1-based index', async () => {
   ]);
   assert.equal(out[2], 'b');
   assert.match(out[3], /Deleted note: a/);
-  assert.equal(out[4], '1. b');
+  assert.equal(out[4], 'Notes\n1. b');
   store.close();
 });
 
@@ -70,6 +70,6 @@ test('note: the subcommand is case-insensitive', async () => {
   const store = createStore({ path: ':memory:' });
   const out = await run(store, ['jarvis note ADD milk', 'jarvis note LIST']);
   assert.match(out[0], /Added note #1\./);
-  assert.equal(out[1], '1. milk'); // the note text keeps its original case
+  assert.equal(out[1], 'Notes\n1. milk'); // the note text keeps its original case
   store.close();
 });

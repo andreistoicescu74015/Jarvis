@@ -1,3 +1,5 @@
+import { b, mono, esc } from '../core/format.js';
+
 /** Map a link failure reason to a clear message. */
 function linkError(r) {
   return (
@@ -6,7 +8,7 @@ function linkError(r) {
       expired: 'That code has expired - ask for a new one.',
       'already-linked': 'Already linked (unlink first).',
       'same-chat': 'A chat cannot link to itself.',
-      conflict: `Conflicting data (${(r.conflicts ?? []).join(', ')}); clear one side, "adopt" instead, or try again.`,
+      conflict: `Conflicting data (${(r.conflicts ?? []).map((c) => esc(c)).join(', ')}); clear one side, "adopt" instead, or try again.`,
     }[r.reason] ?? 'Could not link.'
   );
 }
@@ -38,15 +40,15 @@ export default {
 
     if (!sub) {
       const others = ctx.chats.filter((c) => c !== ctx.chatId);
-      return others.length ? `Linked with: ${others.join(', ')}.` : 'Not linked.';
+      return others.length ? `${b('Linked with')}: ${others.map((c) => mono(esc(c))).join(', ')}.` : 'Not linked.';
     }
     if (sub === 'new') {
       const code = ctx.links.propose();
-      return `Linking code: ${code}\nShare it with the other chat; there an admin runs "jarvis link accept ${code}" (or "adopt ${code}"). It expires in 10 minutes.`;
+      return `${b('Linking code')}: ${mono(code)}\nShare it with the other chat; there an admin runs ${mono('jarvis link accept ' + code)} (or ${mono('adopt ' + code)}). It expires in 10 minutes.`;
     }
     if (sub === 'accept' || sub === 'adopt') {
       const code = ctx.args[1];
-      if (!code) return `Usage: jarvis link ${sub} <code>`;
+      if (!code) return `Usage: ${mono('jarvis link ' + sub + ' <code>')}`;
       const r = sub === 'adopt' ? ctx.links.adopt(code) : ctx.links.accept(code);
       if (!r.ok) return linkError(r);
       return sub === 'adopt'
@@ -57,6 +59,6 @@ export default {
       const r = ctx.links.unlink();
       return r.ok ? 'Unlinked - this chat keeps a copy of the shared data.' : 'This chat is not linked.';
     }
-    return 'Usage: jarvis link | link new | link accept <code> | link adopt <code> | link remove';
+    return `Usage: ${mono('jarvis link | link new | link accept <code> | link adopt <code> | link remove')}`;
   },
 };

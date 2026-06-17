@@ -1,13 +1,15 @@
+import { b, mono, bullet, esc } from '../core/format.js';
+
 /** @type {import('../core/registry.js').Command} */
 export default {
   name: 'help',
   summary: 'List available commands.',
   usage: 'jarvis help',
   run: (ctx) => {
-    const lines = ctx.commands
+    const items = ctx.commands
       .slice()
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map((c) => `- ${c.name}: ${c.summary}`);
-    return ['Commands:', ...lines].join('\n');
+      .sort((a, b2) => a.name.localeCompare(b2.name))
+      .map((c) => `${b(c.name)}: ${esc(c.summary)}`);
+    return [b('Commands'), bullet(items), `Try ${mono('jarvis man <command>')} for details.`].join('\n');
   },
 };

@@ -6,6 +6,7 @@ import { createOutbox } from '../src/core/outbox.js';
 import { createRegistry } from '../src/core/registry.js';
 import { createDispatcher } from '../src/core/dispatch.js';
 import broadcast from '../src/commands/broadcast.js';
+import { toPlain } from '../src/core/format.js';
 
 test('broadcast: queues a DM for every participant across the linked cluster (deduped, bot excluded)', async () => {
   const store = createStore({ path: ':memory:' });
@@ -20,7 +21,7 @@ test('broadcast: queues a DM for every participant across the linked cluster (de
     match: (a, b) => a === b, // so 'bot' (in self) is recognised
   });
   const out = await handle({ text: 'jarvis broadcast hello', sender: 'boss', chatId: 'A', level: 'group', self: ['bot'] });
-  assert.match(out, /Queued broadcast to 3 people/);
+  assert.match(toPlain(out), /Queued broadcast to 3 people/);
   assert.deepEqual(outbox.pending().map((i) => i.chatId).sort(), ['u1', 'u2', 'u3']); // deduped, no bot
   assert.ok(outbox.pending().every((i) => i.text === 'hello' && i.command === 'broadcast'));
 });
@@ -50,5 +51,5 @@ test('broadcast: needs a message', async () => {
     participantsOf: async () => ['u1'],
     outbox: createOutbox(store),
   });
-  assert.match(await handle({ text: 'jarvis broadcast', sender: 'boss', chatId: 'A' }), /Usage: jarvis broadcast/);
+  assert.match(toPlain(await handle({ text: 'jarvis broadcast', sender: 'boss', chatId: 'A' })), /Usage: jarvis broadcast/);
 });

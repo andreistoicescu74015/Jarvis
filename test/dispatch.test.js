@@ -58,7 +58,7 @@ test('dispatch: help lists commands from the registry', async () => {
 
 test('dispatch: unknown command returns a hint', async () => {
   const sent = await run('jarvis frobnicate');
-  assert.match(sent[0].text, /Unknown command "frobnicate"/);
+  assert.match(sent[0].text, /Unknown command frobnicate/);
 });
 
 test('dispatch: a non-prefixed message is ignored', async () => {
