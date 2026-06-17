@@ -33,6 +33,7 @@ import { nullLogger } from './log.js';
  * @property {(target: string, text: string) => unknown} [send]  Send a message to any chat/user (proactive; platform capability).
  * @property {() => Promise<string[]>} [participants]  Everyone in this context (all linked chats' participants, deduped, minus the bot).
  * @property {{ add: (when: string, text: string) => object, list: () => object[], cancel: (id: string) => object }} [scheduler] Schedule a message to post later, bound to this chat (when a scheduler is configured).
+ * @property {(command: string, items: { chatId: string, text: string }[]) => void} [enqueue]  Queue proactive messages (e.g. broadcast) for budget-paced delivery (when an outbox is configured).
  * @property {{ exists: boolean, isMe: boolean, fromEnv: boolean, contact: string, claim: () => boolean, resign: () => void }} [owner] Owner-slot management (the `owner` command).
  */
 
@@ -43,10 +44,10 @@ import { nullLogger } from './log.js';
  * `handle(msg)` for `createApp`.
  *
  * @param {import('./registry.js').Registry} registry
- * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, participantsOf?: (chatId: string) => Promise<string[]>, send?: (target: string, text: string) => unknown, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object } }} [opts]
+ * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, participantsOf?: (chatId: string) => Promise<string[]>, send?: (target: string, text: string) => unknown, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object }, outbox?: { enqueue: (command: string, items: object[]) => void } }} [opts]
  * @returns {(msg: import('./app.js').InboundMessage) => Promise<string | undefined>}
  */
-export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, participantsOf, send, scheduler } = {}) {
+export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, participantsOf, send, scheduler, outbox } = {}) {
   const ownerResolver = createOwnerResolver({ owner, match });
   const access = store ? createAccessPolicy(store, { match }) : null;
   const links = store ? createLinks(store) : null;
@@ -163,6 +164,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
             cancel: (id) => scheduler.cancel(id, chatId),
           }
         : undefined,
+      enqueue: outbox ? (command, items) => outbox.enqueue(command, items) : undefined,
       owner: ownerCap,
     };
 

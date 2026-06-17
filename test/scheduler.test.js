@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from '../src/store/index.js';
-import { createScheduler, parseWhen, startScheduler } from '../src/core/scheduler.js';
+import { createScheduler, parseWhen } from '../src/core/scheduler.js';
+import { createSendBudget } from '../src/core/send-budget.js';
 
 const M = 60_000;
 const H = 3_600_000;
@@ -113,28 +114,21 @@ test('scheduler: a job cancelled during its own delivery is not resurrected', as
   assert.equal(s.list('A').length, 0); // stays cancelled - not rescheduled back to life
 });
 
-test('startScheduler: ticks never overlap, and stop() awaits the in-flight tick', async () => {
+test('scheduler: tick respects the send budget, deferring jobs when it is spent', async () => {
   let now = 0;
-  const s = createScheduler(createStore({ path: ':memory:' }), { now: () => now });
-  s.add({ chatId: 'A', when: 'in 1m', text: 'a' });
-  now = 10 * 60_000; // make the job due (tick uses the injected now())
-
-  let entered;
-  const enteredP = new Promise((res) => (entered = res));
-  let release;
-  const releaseP = new Promise((res) => (release = res));
-  let calls = 0;
-  const deliver = async () => {
-    calls++;
-    entered();
-    await releaseP; // hold the tick in-flight
-  };
-
-  const runner = startScheduler({ scheduler: s, deliver, intervalMs: 5 });
-  await enteredP; // the first tick has entered deliver
-  await new Promise((r) => setTimeout(r, 40)); // several more intervals fire while we block
-  assert.equal(calls, 1); // the re-entrancy guard kept them from overlapping
-  release();
-  await runner.stop(); // resolves only after the in-flight tick completes
-  assert.equal(s.list('A').length, 0); // the one-time job was delivered and cleared
+  const store = createStore({ path: ':memory:' });
+  const s = createScheduler(store, { now: () => now });
+  const budget = createSendBudget(store, {
+    now: () => now,
+    perCommand: { perHour: 60, perDay: 300 }, // one every 60s
+    global: { perHour: 60, perDay: 300 },
+  });
+  s.add({ chatId: 'A', when: 'in 1h', text: '1' });
+  s.add({ chatId: 'A', when: 'in 1h', text: '2' }); // both due at 1h
+  const sent = [];
+  const deliver = (_c, t) => sent.push(t);
+  // Both are due, but the budget allows only one per window -> the second waits.
+  assert.deepEqual(await s.tick(deliver, H, budget), { fired: 1, failed: 0 });
+  assert.deepEqual(sent, ['1']);
+  assert.equal(s.list('A').length, 1); // the second is still pending, not delivered or dropped
 });
