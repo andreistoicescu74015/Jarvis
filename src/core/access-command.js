@@ -140,6 +140,6 @@ function show(ctx, list, target, context) {
 
 const usage = (list) => `Usage: ${makeAccessCommand(list).usage}`;
 const label = (target) => (target === '*' ? 'the whole bot' : `"${target}"`);
-const display = (person) => (person === '*' ? 'everyone' : person);
+const display = (person) => (person === '*' ? 'everyone' : String(person).split('@')[0]);
 const where = (context, ctx) =>
   context === '*' ? ' everywhere' : context === ctx.chatId ? '' : ` in ${context}`;

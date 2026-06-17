@@ -65,3 +65,11 @@ test('note: usage hint when misused', async () => {
   assert.match(out[1], /Usage: jarvis note add/);
   store.close();
 });
+
+test('note: the subcommand is case-insensitive', async () => {
+  const store = createStore({ path: ':memory:' });
+  const out = await run(store, ['jarvis note ADD milk', 'jarvis note LIST']);
+  assert.match(out[0], /Added note #1\./);
+  assert.equal(out[1], '1. milk'); // the note text keeps its original case
+  store.close();
+});
