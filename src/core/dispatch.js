@@ -2,6 +2,7 @@ import { parse } from './parse.js';
 import { checkScope, sameUser } from './scope.js';
 import { createOwnerResolver } from './owner.js';
 import { createAccessPolicy } from './access.js';
+import { createLinks } from './links.js';
 import { nullLogger } from './log.js';
 
 /**
@@ -15,6 +16,7 @@ import { nullLogger } from './log.js';
  * @property {'private'|'group'|'community'} level         Conversation level.
  * @property {string} sender                               Sender id.
  * @property {string} chatId                               Conversation id (the access "context").
+ * @property {string[]} chats                               Chats sharing this context (the link cluster); just [chatId] when unlinked.
  * @property {string[]} mentions                           Ids @mentioned in the message (naming people).
  * @property {boolean} isOwner                             Sender is the bot owner.
  * @property {boolean} isAdmin                             Sender is an admin here (groups).
@@ -43,6 +45,7 @@ import { nullLogger } from './log.js';
 export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups } = {}) {
   const ownerResolver = createOwnerResolver({ owner, match });
   const access = store ? createAccessPolicy(store, { match }) : null;
+  const links = store ? createLinks(store) : null;
 
   return async function handle(msg) {
     const parsed = parse(msg.text, prefix, { addressed: msg.addressed });
@@ -122,7 +125,8 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       isAdmin,
       commands: registry.all(),
       reply: (text) => replies.push(text),
-      store: store ? store.scoped(`${level}:${chatId}`) : undefined,
+      store: store ? store.scoped(links.nsFor(chatId, `${level}:${chatId}`)) : undefined,
+      chats: links ? links.chats(chatId) : [chatId],
       access: access ?? undefined,
       resolveUser: resolveUser ?? ((token) => String(token ?? '').trim()),
       isSelf,
