@@ -26,6 +26,7 @@ import { nullLogger } from './log.js';
  * @property {ReturnType<typeof createAccessPolicy>} [access] Owner-managed access lists (when a store is configured).
  * @property {import('./log.js').Logger} log               Structured logger (never posts to chat).
  * @property {{ shutdown?: () => void, restart?: () => void, logout?: () => void }} [lifecycle] Process lifecycle controls (owner commands; injected per platform).
+ * @property {() => Promise<{ id: string, name: string }[]>} listGroups  Groups the bot is in (platform capability; empty off a group platform).
  * @property {{ exists: boolean, isMe: boolean, fromEnv: boolean, contact: string, claim: () => boolean, resign: () => void }} [owner] Owner-slot management (the `owner` command).
  */
 
@@ -36,10 +37,10 @@ import { nullLogger } from './log.js';
  * `handle(msg)` for `createApp`.
  *
  * @param {import('./registry.js').Registry} registry
- * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string }} [opts]
+ * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]> }} [opts]
  * @returns {(msg: import('./app.js').InboundMessage) => Promise<string | undefined>}
  */
-export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser } = {}) {
+export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups } = {}) {
   const ownerResolver = createOwnerResolver({ owner, match });
   const access = store ? createAccessPolicy(store, { match }) : null;
 
@@ -127,6 +128,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       isSelf,
       log,
       lifecycle,
+      listGroups: listGroups ?? (() => []),
       owner: ownerCap,
     };
 

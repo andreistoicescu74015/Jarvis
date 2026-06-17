@@ -177,6 +177,17 @@ export function createWhatsAppAdapter({
       }
     },
 
+    async listGroups() {
+      if (!sock || stopped) return [];
+      try {
+        const all = await sock.groupFetchAllParticipating();
+        return Object.values(all || {}).map((g) => ({ id: g.id, name: g.subject || g.id }));
+      } catch (err) {
+        log.error('wa: failed to list groups', { error: err?.message ?? String(err) });
+        return [];
+      }
+    },
+
     async logout() {
       stopped = true;
       try {
