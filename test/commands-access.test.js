@@ -148,6 +148,15 @@ test('access cmd: the command target is case-insensitive (matches lowercase comm
   assert.equal(await as('bob', 'jarvis ping'), undefined); // resolved to "ping" and applied
 });
 
+test('access cmd: list members are shown by their readable user part, not a raw jid', async () => {
+  const store = createStore({ path: ':memory:' });
+  const handle = createDispatcher(createRegistry([ping, owner, whitelist, blacklist]), { store, owner: 'boss' });
+  await handle({ text: 'jarvis blacklist ping add 40712345678@s.whatsapp.net', sender: 'boss', chatId: 'c1', level: 'group' });
+  const out = await handle({ text: 'jarvis blacklist ping', sender: 'boss', chatId: 'c1', level: 'group' });
+  assert.match(out, /40712345678/);
+  assert.doesNotMatch(out, /@s\.whatsapp\.net/);
+});
+
 test('access cmd: enabling one mode replaces the other; disable reports when not on', async () => {
   const { boss } = setup();
   await boss('jarvis blacklist ping add bob');

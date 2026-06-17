@@ -8,7 +8,8 @@ export default {
     'list (show all), get <n> (show one), del <n> (remove one).',
   run: (ctx) => {
     if (!ctx.store) return 'Notes are unavailable here.';
-    const [sub, ...rest] = ctx.args;
+    const sub = (ctx.args[0] ?? '').toLowerCase();
+    const rest = ctx.args.slice(1);
     const notes = /** @type {string[]} */ (ctx.store.get('notes') ?? []);
 
     switch (sub) {
