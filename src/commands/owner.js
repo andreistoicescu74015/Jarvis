@@ -7,8 +7,12 @@
  */
 export default {
   name: 'owner',
-  summary: 'Show, claim, or resign the bot owner.',
+  summary: 'Claim or resign bot ownership (and show who owns it).',
   usage: 'jarvis owner | owner claim | owner resign',
+  man:
+    'Bare "jarvis owner" shows who owns the bot (or that no one does yet). "claim" takes ' +
+    'a free owner slot; "resign" gives it up. The owner can also be set via OWNER_JID, in ' +
+    'which case it cannot resign from chat.',
   run: (ctx) => {
     if (!ctx.owner) return 'Owner management is unavailable here.';
     const sub = (ctx.args[0] ?? '').toLowerCase();

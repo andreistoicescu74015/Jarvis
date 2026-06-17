@@ -3,6 +3,9 @@ export default {
   name: 'note',
   summary: 'Keep simple notes, scoped to this conversation.',
   usage: 'jarvis note add <text> | list | get <n> | del <n>',
+  man:
+    'Notes are scoped to this conversation. Subcommands: add <text> (append a note), ' +
+    'list (show all), get <n> (show one), del <n> (remove one).',
   run: (ctx) => {
     if (!ctx.store) return 'Notes are unavailable here.';
     const [sub, ...rest] = ctx.args;
