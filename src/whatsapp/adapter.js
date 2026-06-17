@@ -151,7 +151,7 @@ export function createWhatsAppAdapter({
         if (!inbound) continue;
         const { handle, bare, text } = resolveAddressing(inbound, { selfId: selfIds, prefix });
         if (!handle) continue;
-        await onMessage({ ...inbound, text, addressed: bare });
+        await onMessage({ ...inbound, text, addressed: bare, self: selfIds });
       } catch (err) {
         log.error('wa: failed to handle an inbound message', { error: err?.message ?? String(err) });
       }

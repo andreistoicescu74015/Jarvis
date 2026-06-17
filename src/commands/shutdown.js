@@ -1,7 +1,7 @@
 /** @type {import('../core/registry.js').Command} */
 export default {
   name: 'shutdown',
-  summary: 'Stop Jarvis (owner only).',
+  summary: 'Owner: stop Jarvis.',
   usage: 'jarvis shutdown',
   scope: { owner: true },
   run: (ctx) => {

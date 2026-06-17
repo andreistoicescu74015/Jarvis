@@ -14,6 +14,7 @@
  * @property {boolean} fromMe                       True if sent by the bot's own account.
  * @property {boolean} [isAdmin]                    Sender is an admin of this chat (groups).
  * @property {boolean} [addressed]                  Platform already decided the bot is addressed without a prefix (e.g. @mention); the text is a bare command.
+ * @property {string[]} [self]                      The bot's own id forms, so a command can avoid acting on the bot.
  * @property {unknown} [raw]                        Platform-native payload (escape hatch).
  *
  * @typedef {string | { text: string }} OutboundMessage
