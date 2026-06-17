@@ -12,6 +12,8 @@ import help from './commands/help.js';
 import whoami from './commands/whoami.js';
 import note from './commands/note.js';
 import owner from './commands/owner.js';
+import whitelist from './commands/whitelist.js';
+import blacklist from './commands/blacklist.js';
 import shutdown from './commands/shutdown.js';
 import restart from './commands/restart.js';
 import logout from './commands/logout.js';
@@ -22,7 +24,7 @@ import logout from './commands/logout.js';
  * separate sqlite files so credentials stay isolated. Run with `npm start`.
  */
 const log = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
-const registry = createRegistry([ping, help, whoami, note, owner, shutdown, restart, logout]);
+const registry = createRegistry([ping, help, whoami, note, owner, whitelist, blacklist, shutdown, restart, logout]);
 const store = createStore({ path: process.env.JARVIS_DB ?? 'data/jarvis.db' });
 const authDb = createStore({ path: process.env.JARVIS_AUTH_DB ?? 'data/wa-auth.db' });
 const identity = createIdentityStore(store);
@@ -51,7 +53,23 @@ const lifecycle = {
 
 const app = createApp(adapter, {
   // match is LID-aware so an owner set by phone number matches a LID sender.
-  handle: createDispatcher(registry, { owner: process.env.OWNER_JID ?? '', store, log, match: identity.same, lifecycle }),
+  handle: createDispatcher(registry, {
+    owner: process.env.OWNER_JID ?? '',
+    store,
+    log,
+    match: identity.same,
+    lifecycle,
+    // Canonicalize a named person for the access lists: a JID (e.g. from an @mention)
+    // is resolved toward its phone form; a bare number becomes a phone JID. Matching
+    // then bridges LID <-> phone, so a person named one way matches a sender on the other.
+    resolveUser: (token) => {
+      const t = String(token ?? '').trim();
+      if (!t) return t;
+      if (t.includes('@')) return identity.resolve(t);
+      const digits = t.replace(/[^0-9]/g, '');
+      return digits ? identity.resolve(`${digits}@s.whatsapp.net`) : t;
+    },
+  }),
 });
 
 let closing = false;
