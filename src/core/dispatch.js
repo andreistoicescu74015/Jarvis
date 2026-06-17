@@ -30,6 +30,8 @@ import { nullLogger } from './log.js';
  * @property {import('./log.js').Logger} log               Structured logger (never posts to chat).
  * @property {{ shutdown?: () => void, restart?: () => void, logout?: () => void }} [lifecycle] Process lifecycle controls (owner commands; injected per platform).
  * @property {() => Promise<{ id: string, name: string }[]>} listGroups  Groups the bot is in (platform capability; empty off a group platform).
+ * @property {(target: string, text: string) => unknown} [send]  Send a message to any chat/user (proactive; platform capability).
+ * @property {() => Promise<string[]>} [participants]  Everyone in this context (all linked chats' participants, deduped, minus the bot).
  * @property {{ exists: boolean, isMe: boolean, fromEnv: boolean, contact: string, claim: () => boolean, resign: () => void }} [owner] Owner-slot management (the `owner` command).
  */
 
@@ -40,10 +42,10 @@ import { nullLogger } from './log.js';
  * `handle(msg)` for `createApp`.
  *
  * @param {import('./registry.js').Registry} registry
- * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]> }} [opts]
+ * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, participantsOf?: (chatId: string) => Promise<string[]>, send?: (target: string, text: string) => unknown }} [opts]
  * @returns {(msg: import('./app.js').InboundMessage) => Promise<string | undefined>}
  */
-export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups } = {}) {
+export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, participantsOf, send } = {}) {
   const ownerResolver = createOwnerResolver({ owner, match });
   const access = store ? createAccessPolicy(store, { match }) : null;
   const links = store ? createLinks(store) : null;
@@ -143,6 +145,16 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       log,
       lifecycle,
       listGroups: listGroups ?? (() => []),
+      send: send ?? undefined,
+      participants: participantsOf
+        ? async () => {
+            const ids = [];
+            for (const chat of links ? links.chats(chatId) : [chatId]) {
+              for (const p of (await participantsOf(chat)) ?? []) ids.push(p);
+            }
+            return [...new Set(ids)].filter((id) => !isSelf(id));
+          }
+        : undefined,
       owner: ownerCap,
     };
 

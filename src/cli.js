@@ -13,6 +13,7 @@ import whitelist from './commands/whitelist.js';
 import blacklist from './commands/blacklist.js';
 import groups from './commands/groups.js';
 import link from './commands/link.js';
+import broadcast from './commands/broadcast.js';
 import shutdown from './commands/shutdown.js';
 import restart from './commands/restart.js';
 import logout from './commands/logout.js';
@@ -20,7 +21,7 @@ import { createStore } from './store/index.js';
 
 // No preset owner (mirrors production): claim it in-session with `jarvis owner claim`,
 // or set OWNER_JID. The CLI sender is `cli-user`.
-const registry = createRegistry([ping, help, man, whoami, note, owner, whitelist, blacklist, groups, link, shutdown, restart, logout]);
+const registry = createRegistry([ping, help, man, whoami, note, owner, whitelist, blacklist, groups, link, broadcast, shutdown, restart, logout]);
 const store = createStore({ path: process.env.JARVIS_DB ?? 'data/jarvis.db' });
 const log = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
 // On the CLI, shutdown/restart just end the dev process; logout has no session.
