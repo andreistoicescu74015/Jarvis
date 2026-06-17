@@ -141,6 +141,13 @@ test('access cmd: resolveUser canonicalizes a typed number to match a JID sender
   assert.equal(await handle({ text: 'jarvis ping', sender: '40712345678@s.whatsapp.net', chatId: 'c1', level: 'group' }), undefined);
 });
 
+test('access cmd: the command target is case-insensitive (matches lowercase command names)', async () => {
+  const { boss, as } = setup();
+  await boss('jarvis blacklist Ping add bob'); // mixed-case target
+  await boss('jarvis blacklist PING enable');
+  assert.equal(await as('bob', 'jarvis ping'), undefined); // resolved to "ping" and applied
+});
+
 test('access cmd: enabling one mode replaces the other; disable reports when not on', async () => {
   const { boss } = setup();
   await boss('jarvis blacklist ping add bob');
