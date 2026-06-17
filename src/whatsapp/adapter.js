@@ -133,7 +133,9 @@ export function createWhatsAppAdapter({
 
   async function onUpsert({ type, messages } = {}) {
     if (type !== 'notify') return;
-    const selfId = jidNormalizedUser(sock?.user?.id || '');
+    // The bot is addressable by both its phone-number JID and its LID; in v7 groups a
+    // mention of the bot usually arrives as the LID, so match against both forms.
+    const selfIds = [sock?.user?.id, sock?.user?.lid].filter(Boolean).map((j) => jidNormalizedUser(j));
     for (const wa of messages ?? []) {
       try {
         if (wa?.key?.fromMe) continue;
@@ -147,7 +149,7 @@ export function createWhatsAppAdapter({
         const isGroup = String(wa?.key?.remoteJid || '').endsWith('@g.us');
         const inbound = toInbound(wa, { groupMetadata: isGroup ? await groupMetadata(wa.key.remoteJid) : undefined });
         if (!inbound) continue;
-        const { handle, bare, text } = resolveAddressing(inbound, { selfId, prefix });
+        const { handle, bare, text } = resolveAddressing(inbound, { selfId: selfIds, prefix });
         if (!handle) continue;
         await onMessage({ ...inbound, text, addressed: bare });
       } catch (err) {

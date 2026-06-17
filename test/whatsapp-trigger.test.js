@@ -59,3 +59,25 @@ test('trigger: resolveAddressing - prefix wins even when also mentioned', () => 
   assert.equal(r.bare, false);
   assert.equal(r.text, 'jarvis ping');
 });
+
+// The bot has two id forms; in v7 groups a mention of it usually arrives as the LID,
+// while sock.user.id is the phone-number JID. Matching must consider both.
+const PN = '1234@s.whatsapp.net';
+const LID = '5678@lid';
+
+test('trigger: mentionsBot matches across the bot phone-number and LID forms', () => {
+  assert.equal(mentionsBot([LID], [PN, LID]), true); // mention is the LID form
+  assert.equal(mentionsBot([PN], [PN, LID]), true); // mention is the phone-number form
+  assert.equal(mentionsBot([LID], PN), false); // the old single phone-number self misses a LID mention (the bug)
+  assert.equal(mentionsBot(['9@lid'], [PN, LID]), false); // someone else
+});
+
+test('trigger: stripBotMention removes whichever self id form was rendered', () => {
+  assert.equal(stripBotMention('@5678 ping', [PN, LID]), 'ping'); // LID-rendered mention
+  assert.equal(stripBotMention('@1234 ping', [PN, LID]), 'ping'); // phone-number-rendered mention
+});
+
+test('trigger: resolveAddressing detects a LID @mention of the bot', () => {
+  const r = resolveAddressing({ text: '@5678 ping', mentionedJid: [LID] }, { selfId: [PN, LID], prefix: 'jarvis' });
+  assert.deepEqual(r, { handle: true, bare: true, text: 'ping' });
+});
