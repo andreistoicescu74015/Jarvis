@@ -81,3 +81,15 @@ test('dispatch+access: the global gate and a per-command list both apply (two ti
   assert.equal(await handle({ text: 'jarvis note list', sender: 'alice', chatId: 'c1', level: 'group' }), undefined);
   assert.equal(await handle({ text: 'jarvis ping', sender: 'bob', chatId: 'c1', level: 'group' }), undefined); // fails the global gate
 });
+
+test('dispatch+access: a denial is logged for audit (never chatted)', async () => {
+  const store = createStore({ path: ':memory:' });
+  const access = createAccessPolicy(store);
+  access.add('blacklist', 'ping', 'c1', 'bob');
+  access.enable('blacklist', 'ping', 'c1');
+  const logs = [];
+  const log = { debug() {}, info: (m, f) => logs.push({ m, f }), warn() {}, error() {} };
+  const handle = createDispatcher(createRegistry([ping]), { store, log });
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'bob', chatId: 'c1', level: 'group' }), undefined);
+  assert.ok(logs.some((l) => /access deny/.test(l.m)), 'expected the denial to be logged');
+});
