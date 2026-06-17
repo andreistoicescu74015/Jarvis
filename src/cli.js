@@ -14,24 +14,38 @@ import blacklist from './commands/blacklist.js';
 import groups from './commands/groups.js';
 import link from './commands/link.js';
 import broadcast from './commands/broadcast.js';
+import schedule from './commands/schedule.js';
 import shutdown from './commands/shutdown.js';
 import restart from './commands/restart.js';
 import logout from './commands/logout.js';
 import { createStore } from './store/index.js';
+import { createScheduler, startScheduler } from './core/scheduler.js';
 
 // No preset owner (mirrors production): claim it in-session with `jarvis owner claim`,
 // or set OWNER_JID. The CLI sender is `cli-user`.
-const registry = createRegistry([ping, help, man, whoami, note, owner, whitelist, blacklist, groups, link, broadcast, shutdown, restart, logout]);
+const registry = createRegistry([ping, help, man, whoami, note, owner, whitelist, blacklist, groups, link, broadcast, schedule, shutdown, restart, logout]);
 const store = createStore({ path: process.env.JARVIS_DB ?? 'data/jarvis.db' });
 const log = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
+const scheduler = createScheduler(store);
 // On the CLI, shutdown/restart just end the dev process; logout has no session.
 const lifecycle = {
   shutdown: () => setTimeout(() => process.exit(0), 50),
   restart: () => setTimeout(() => process.exit(1), 50),
 };
-const app = createApp(createCliAdapter(), {
-  handle: createDispatcher(registry, { owner: process.env.OWNER_JID ?? '', store, log, lifecycle }),
+const adapter = createCliAdapter();
+const app = createApp(adapter, {
+  handle: createDispatcher(registry, { owner: process.env.OWNER_JID ?? '', store, log, lifecycle, scheduler }),
+});
+
+// Scheduled messages fire in the background; on the CLI they print to stdout. Started
+// before the (blocking) start() so the timer is live during the session.
+const runner = startScheduler({
+  scheduler,
+  deliver: (chatId, text) => adapter.send(chatId, text),
+  intervalMs: Number(process.env.JARVIS_TICK_MS),
+  log,
 });
 
 await app.start();
+await runner.stop();
 store.close();

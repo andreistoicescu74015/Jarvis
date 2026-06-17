@@ -3,6 +3,7 @@ import { createRegistry } from './core/registry.js';
 import { createDispatcher } from './core/dispatch.js';
 import { createLogger } from './core/log.js';
 import { createStore } from './store/index.js';
+import { createScheduler, startScheduler } from './core/scheduler.js';
 import { createSqliteAuthState } from './whatsapp/auth-store.js';
 import { createWhatsAppAdapter } from './whatsapp/adapter.js';
 import { createIdentityStore } from './whatsapp/identity-store.js';
@@ -18,6 +19,7 @@ import blacklist from './commands/blacklist.js';
 import groups from './commands/groups.js';
 import link from './commands/link.js';
 import broadcast from './commands/broadcast.js';
+import schedule from './commands/schedule.js';
 import shutdown from './commands/shutdown.js';
 import restart from './commands/restart.js';
 import logout from './commands/logout.js';
@@ -28,10 +30,11 @@ import logout from './commands/logout.js';
  * separate sqlite files so credentials stay isolated. Run with `npm start`.
  */
 const log = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
-const registry = createRegistry([ping, help, man, whoami, note, owner, whitelist, blacklist, groups, link, broadcast, shutdown, restart, logout]);
+const registry = createRegistry([ping, help, man, whoami, note, owner, whitelist, blacklist, groups, link, broadcast, schedule, shutdown, restart, logout]);
 const store = createStore({ path: process.env.JARVIS_DB ?? 'data/jarvis.db' });
 const authDb = createStore({ path: process.env.JARVIS_AUTH_DB ?? 'data/wa-auth.db' });
 const identity = createIdentityStore(store);
+const scheduler = createScheduler(store);
 
 const adapter = createWhatsAppAdapter({
   authState: createSqliteAuthState(authDb, { logger: socketLogger(log) }),
@@ -66,6 +69,7 @@ const app = createApp(adapter, {
     listGroups: () => adapter.listGroups(),
     participantsOf: (chatId) => adapter.participants(chatId),
     send: (target, message) => adapter.send(target, message),
+    scheduler,
     // Canonicalize a named person for the access lists: a JID (e.g. from an @mention)
     // is resolved toward its phone form; a bare number becomes a phone JID. Matching
     // then bridges LID <-> phone, so a person named one way matches a sender on the other.
@@ -79,11 +83,22 @@ const app = createApp(adapter, {
   }),
 });
 
+// Scheduled messages fire in the background. Started before the (blocking) start() so
+// the timer is live; the first tick is after one interval, so we never deliver before
+// the socket connects. Delivery reuses the adapter's send.
+const schedulerRunner = startScheduler({
+  scheduler,
+  deliver: (chatId, text) => adapter.send(chatId, text),
+  intervalMs: Number(process.env.JARVIS_TICK_MS),
+  log,
+});
+
 let closing = false;
 const quit = async (code = 0) => {
   if (closing) return;
   closing = true;
   log.info('Jarvis shutting down...');
+  await schedulerRunner.stop();
   await adapter.stop();
   store.close();
   authDb.close();
