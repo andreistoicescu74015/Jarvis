@@ -1,7 +1,7 @@
 /** @type {import('../core/registry.js').Command} */
 export default {
   name: 'logout',
-  summary: 'Disconnect and forget this WhatsApp session (owner only).',
+  summary: 'Owner: disconnect and forget this WhatsApp session.',
   usage: 'jarvis logout',
   scope: { owner: true },
   run: (ctx) => {

@@ -149,3 +149,23 @@ test('access cmd: enabling one mode replaces the other; disable reports when not
   assert.match(await boss('jarvis whitelist ping enable'), /replaces the blacklist/i);
   assert.match(await boss('jarvis blacklist ping disable'), /not on/i); // blacklist is not the active mode now
 });
+
+test('access cmd: the bot itself cannot be added to a list', async () => {
+  const store = createStore({ path: ':memory:' });
+  const handle = createDispatcher(createRegistry([ping, owner, whitelist, blacklist]), { store, owner: 'boss' });
+  // by the bot's trigger name
+  assert.match(
+    await handle({ text: 'jarvis blacklist ping add jarvis', sender: 'boss', chatId: 'c1', level: 'group' }),
+    /cannot add the bot/i,
+  );
+  // by the bot's own account id (carried on the inbound message as `self`)
+  assert.match(
+    await handle({ text: 'jarvis blacklist ping add 5@s.whatsapp.net', sender: 'boss', chatId: 'c1', level: 'group', self: ['5@s.whatsapp.net'] }),
+    /cannot add the bot/i,
+  );
+  // a normal person is still accepted
+  assert.match(
+    await handle({ text: 'jarvis blacklist ping add 6@s.whatsapp.net', sender: 'boss', chatId: 'c1', level: 'group', self: ['5@s.whatsapp.net'] }),
+    /^Added /,
+  );
+});
