@@ -188,6 +188,18 @@ export function createWhatsAppAdapter({
       }
     },
 
+    async participants(chatId) {
+      if (!sock || stopped) return [];
+      if (!String(chatId).endsWith('@g.us')) return [chatId]; // a private chat: the user themself
+      try {
+        const meta = await groupMetadata(chatId);
+        return (meta?.participants ?? []).map((p) => p.id).filter(Boolean);
+      } catch (err) {
+        log.error('wa: failed to list participants', { chatId, error: err?.message ?? String(err) });
+        return [];
+      }
+    },
+
     async logout() {
       stopped = true;
       try {
