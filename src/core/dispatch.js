@@ -26,7 +26,7 @@ import { nullLogger } from './log.js';
  * @property {(id: string) => boolean} isSelf              True if the id is the bot itself (its trigger name or own id forms).
  * @property {import('../store/index.js').ScopedStore} [store] Per-conversation scoped KV (when configured).
  * @property {ReturnType<typeof createAccessPolicy>} [access] Owner-managed access lists (when a store is configured).
- * @property {{ propose: () => string, accept: (code: string) => object, unlink: () => object }} [links] Context-link handshake bound to this chat (when a store is configured).
+ * @property {{ propose: () => string, accept: (code: string) => object, adopt: (code: string) => object, unlink: () => object }} [links] Context-link handshake bound to this chat (when a store is configured).
  * @property {import('./log.js').Logger} log               Structured logger (never posts to chat).
  * @property {{ shutdown?: () => void, restart?: () => void, logout?: () => void }} [lifecycle] Process lifecycle controls (owner commands; injected per platform).
  * @property {() => Promise<{ id: string, name: string }[]>} listGroups  Groups the bot is in (platform capability; empty off a group platform).
@@ -134,6 +134,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
         ? {
             propose: () => links.propose(chatId, ownNs),
             accept: (code) => links.accept(code, chatId, ownNs),
+            adopt: (code) => links.accept(code, chatId, ownNs, 'adopt'),
             unlink: () => links.unlink(chatId, ownNs),
           }
         : undefined,
