@@ -5,6 +5,7 @@ import { createDispatcher } from './core/dispatch.js';
 import { createLogger } from './core/log.js';
 import ping from './commands/ping.js';
 import help from './commands/help.js';
+import man from './commands/man.js';
 import whoami from './commands/whoami.js';
 import note from './commands/note.js';
 import owner from './commands/owner.js';
@@ -17,7 +18,7 @@ import { createStore } from './store/index.js';
 
 // No preset owner (mirrors production): claim it in-session with `jarvis owner claim`,
 // or set OWNER_JID. The CLI sender is `cli-user`.
-const registry = createRegistry([ping, help, whoami, note, owner, whitelist, blacklist, shutdown, restart, logout]);
+const registry = createRegistry([ping, help, man, whoami, note, owner, whitelist, blacklist, shutdown, restart, logout]);
 const store = createStore({ path: process.env.JARVIS_DB ?? 'data/jarvis.db' });
 const log = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
 // On the CLI, shutdown/restart just end the dev process; logout has no session.

@@ -27,6 +27,12 @@ export function makeAccessCommand(list) {
         ? 'Owner: limit a command to specific people (allow-list).'
         : 'Owner: block specific people from a command (deny-list).',
     usage: `jarvis ${list} <command|*> add|remove <@user|number|*> | enable | disable | clear [in <chat|*>]`,
+    man:
+      `Manage the ${list} for a command - or the whole bot (*). Verbs: add/remove <person>, ` +
+      `enable, disable, clear. A person is an @mention, a phone number, or * (everyone). ` +
+      `Context defaults to this chat; add "in *" for everywhere, or "in <chat>" for another ` +
+      `chat. Whitelist and blacklist are exclusive per target; the owner is never affected; ` +
+      `the owner command cannot be restricted.`,
     scope: { owner: true },
     run: (ctx) => run(ctx, list),
   };

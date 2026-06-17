@@ -9,6 +9,7 @@ import { createIdentityStore } from './whatsapp/identity-store.js';
 import { socketLogger } from './whatsapp/socket-logger.js';
 import ping from './commands/ping.js';
 import help from './commands/help.js';
+import man from './commands/man.js';
 import whoami from './commands/whoami.js';
 import note from './commands/note.js';
 import owner from './commands/owner.js';
@@ -24,7 +25,7 @@ import logout from './commands/logout.js';
  * separate sqlite files so credentials stay isolated. Run with `npm start`.
  */
 const log = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
-const registry = createRegistry([ping, help, whoami, note, owner, whitelist, blacklist, shutdown, restart, logout]);
+const registry = createRegistry([ping, help, man, whoami, note, owner, whitelist, blacklist, shutdown, restart, logout]);
 const store = createStore({ path: process.env.JARVIS_DB ?? 'data/jarvis.db' });
 const authDb = createStore({ path: process.env.JARVIS_AUTH_DB ?? 'data/wa-auth.db' });
 const identity = createIdentityStore(store);
