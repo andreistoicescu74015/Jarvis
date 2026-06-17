@@ -53,7 +53,7 @@ function run(ctx, list) {
     args = args.slice(0, at);
   }
 
-  const target = args[0];
+  const target = (args[0] ?? '').toLowerCase(); // command names are lowercase; match case-insensitively
   if (!target) return overview(ctx, list);
 
   const verb = (args[1] ?? '').toLowerCase();
