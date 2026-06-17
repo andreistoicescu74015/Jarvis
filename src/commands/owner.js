@@ -1,3 +1,5 @@
+import { b, mono, esc } from '../core/format.js';
+
 /**
  * Manage the single owner slot. Public on purpose: `claim` must work for a
  * non-owner when the slot is free, so the command gates each action itself
@@ -20,13 +22,15 @@ export default {
 
     if (!sub) {
       return ctx.owner.exists
-        ? `Owner: ${ctx.owner.contact}.`
-        : 'No owner yet. Send "jarvis owner claim" to become the owner.';
+        ? `${b('Owner')}: ${mono(esc(ctx.owner.contact))}`
+        : `No owner yet. Send ${mono('jarvis owner claim')} to become the owner.`;
     }
 
     if (sub === 'claim') {
       if (ctx.owner.exists) {
-        return ctx.owner.isMe ? 'You are already the owner.' : `There is already an owner: ${ctx.owner.contact}.`;
+        return ctx.owner.isMe
+          ? 'You are already the owner.'
+          : `There is already an owner: ${mono(esc(ctx.owner.contact))}.`;
       }
       return ctx.owner.claim()
         ? 'You are now the owner.'
@@ -37,9 +41,9 @@ export default {
       if (!ctx.owner.isMe) return 'Only the current owner can resign.';
       if (ctx.owner.fromEnv) return 'The owner is configured via OWNER_JID and cannot resign here.';
       ctx.owner.resign();
-      return 'You have resigned. Anyone can now claim ownership with "jarvis owner claim".';
+      return `You have resigned. Anyone can now claim ownership with ${mono('jarvis owner claim')}.`;
     }
 
-    return 'Usage: jarvis owner | owner claim | owner resign';
+    return `Usage: ${mono('jarvis owner | owner claim | owner resign')}`;
   },
 };

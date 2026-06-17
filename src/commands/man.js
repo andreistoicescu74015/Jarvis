@@ -1,3 +1,5 @@
+import { b, mono, esc } from '../core/format.js';
+
 /**
  * Detailed help for one command: its summary, usage, who may use it (derived from
  * `scope`), and the long-form `man` text when the command provides one. `help`
@@ -14,15 +16,15 @@ export default {
     'detail. Example: "jarvis man whitelist". Use "jarvis help" for the full list.',
   run: (ctx) => {
     const name = (ctx.args[0] ?? '').toLowerCase();
-    if (!name) return 'Usage: jarvis man <command>. Try "jarvis help" for the list.';
+    if (!name) return `Usage: ${mono('jarvis man <command>')}. Try ${mono('jarvis help')} for the list.`;
 
     const cmd = ctx.commands.find((c) => c.name === name);
-    if (!cmd) return `No such command: ${name}. Try "jarvis help".`;
+    if (!cmd) return `No such command: ${mono(esc(name))}. Try ${mono('jarvis help')}.`;
 
-    const lines = [`${cmd.name} - ${cmd.summary}`];
-    if (cmd.usage) lines.push(`Usage: ${cmd.usage}`);
-    lines.push(`Who: ${audience(cmd.scope)}`);
-    if (cmd.man) lines.push('', cmd.man);
+    const lines = [`${b(cmd.name)} - ${esc(cmd.summary)}`];
+    if (cmd.usage) lines.push(`${b('Usage')}: ${mono(cmd.usage)}`);
+    lines.push(`${b('Who')}: ${audience(cmd.scope)}`);
+    if (cmd.man) lines.push('', esc(cmd.man));
     return lines.join('\n');
   },
 };

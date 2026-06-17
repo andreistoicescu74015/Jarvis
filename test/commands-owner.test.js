@@ -4,6 +4,7 @@ import { createRegistry } from '../src/core/registry.js';
 import { createDispatcher } from '../src/core/dispatch.js';
 import owner from '../src/commands/owner.js';
 import shutdown from '../src/commands/shutdown.js';
+import { toPlain } from '../src/core/format.js';
 
 // --- unit: the command logic, with a stubbed ctx.owner ---
 function stub(state) {
@@ -24,7 +25,7 @@ function stub(state) {
 
 test('owner cmd: show - reports the owner or that there is none', () => {
   assert.match(owner.run(stub({}).ctx), /no owner yet/i);
-  assert.match(owner.run(stub({ exists: true, contact: 'x@s.whatsapp.net' }).ctx), /Owner: x@s\.whatsapp\.net/);
+  assert.match(toPlain(owner.run(stub({ exists: true, contact: 'x@s.whatsapp.net' }).ctx)), /Owner: x@s\.whatsapp\.net/);
 });
 
 test('owner cmd: claim - takes a free slot, otherwise shows the owner', () => {
@@ -33,7 +34,7 @@ test('owner cmd: claim - takes a free slot, otherwise shows the owner', () => {
   assert.equal(free.calls.claim, 1);
 
   const taken = stub({ args: ['claim'], exists: true, contact: 'boss' });
-  assert.match(owner.run(taken.ctx), /already an owner: boss/i);
+  assert.match(toPlain(owner.run(taken.ctx)), /already an owner: boss/i);
   assert.equal(taken.calls.claim, 0);
 
   const mine = stub({ args: ['claim'], exists: true, isMe: true });
@@ -75,7 +76,7 @@ test('owner cmd: claim is private-only, then gates the owner-only commands', asy
 
 test('owner cmd: an env owner is not overridable and cannot resign', async () => {
   const handle = createDispatcher(createRegistry([owner]), { owner: 'boss' });
-  assert.match(await handle({ text: 'jarvis owner claim', sender: 'alice', level: 'private' }), /already an owner: boss/i);
+  assert.match(toPlain(await handle({ text: 'jarvis owner claim', sender: 'alice', level: 'private' })), /already an owner: boss/i);
   assert.match(await handle({ text: 'jarvis owner resign', sender: 'boss', level: 'private' }), /configured via OWNER_JID/i);
 });
 

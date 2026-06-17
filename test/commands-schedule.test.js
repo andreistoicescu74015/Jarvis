@@ -5,11 +5,13 @@ import { createScheduler } from '../src/core/scheduler.js';
 import { createRegistry } from '../src/core/registry.js';
 import { createDispatcher } from '../src/core/dispatch.js';
 import schedule from '../src/commands/schedule.js';
+import { toPlain } from '../src/core/format.js';
 
 const setup = (now = 0) => {
   const store = createStore({ path: ':memory:' });
   const scheduler = createScheduler(store, { now: () => now });
-  const handle = createDispatcher(createRegistry([schedule]), { store, scheduler });
+  const dispatch = createDispatcher(createRegistry([schedule]), { store, scheduler });
+  const handle = async (m) => toPlain(await dispatch(m)); // render like an adapter, for assertions
   return { store, scheduler, handle };
 };
 const msg = (text, over = {}) => ({ text, sender: 'u', chatId: 'A', level: 'private', ...over });

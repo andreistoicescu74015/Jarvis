@@ -1,4 +1,5 @@
 import { createInterface } from 'node:readline';
+import { toPlain } from '../core/format.js';
 
 /**
  * CLI adapter: each stdin line becomes an inbound message; replies go to stdout.
@@ -42,7 +43,7 @@ export function createCliAdapter({ input = process.stdin, output = process.stdou
     },
 
     send(chatId, message) {
-      output.write(`${typeof message === 'string' ? message : message.text}\n`);
+      output.write(`${toPlain(typeof message === 'string' ? message : message.text)}\n`);
     },
 
     stop() {

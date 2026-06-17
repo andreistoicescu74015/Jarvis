@@ -1,3 +1,5 @@
+import { b, mono } from '../core/format.js';
+
 /**
  * Owner-only: send a private message to everyone in this context - every participant of
  * this chat and of every chat it is linked with (deduplicated, the bot skipped). The
@@ -21,11 +23,11 @@ export default {
   run: async (ctx) => {
     if (!ctx.enqueue || !ctx.participants) return 'Broadcast is unavailable here.';
     const message = ctx.rest.trim();
-    if (!message) return 'Usage: jarvis broadcast <message>';
+    if (!message) return `Usage: ${mono('jarvis broadcast <message>')}`;
 
     const people = await ctx.participants();
     if (!people.length) return 'No one to send to.';
     ctx.enqueue('broadcast', people.map((chatId) => ({ chatId, text: message })));
-    return `Queued broadcast to ${people.length} ${people.length === 1 ? 'person' : 'people'} - sending gradually to stay within limits.`;
+    return `Queued broadcast to ${b(people.length)} ${people.length === 1 ? 'person' : 'people'} - sending gradually to stay within limits.`;
   },
 };
