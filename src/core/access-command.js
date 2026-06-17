@@ -32,7 +32,7 @@ export function makeAccessCommand(list) {
       `enable, disable, clear. A person is an @mention, a phone number, or * (everyone). ` +
       `Context defaults to this chat; add "in *" for everywhere, or "in <chat>" for another ` +
       `chat. Whitelist and blacklist are exclusive per target; the owner is never affected; ` +
-      `the owner command cannot be restricted.`,
+      `the owner command cannot be restricted, and the bot cannot be added.`,
     scope: { owner: true },
     run: (ctx) => run(ctx, list),
   };
@@ -94,6 +94,9 @@ function run(ctx, list) {
     case 'remove': {
       const person = resolvePerson(ctx, args.slice(2));
       if (!person) return usage(list);
+      if (verb === 'add' && person !== '*' && ctx.isSelf?.(person)) {
+        return 'You cannot add the bot to a list.';
+      }
       ctx.access[verb](list, target, context, person);
       if (verb === 'remove') {
         return `Removed ${display(person)} from the ${list} for ${label(target)}${at_(context)}.`;

@@ -1,5 +1,5 @@
 import { parse } from './parse.js';
-import { checkScope } from './scope.js';
+import { checkScope, sameUser } from './scope.js';
 import { createOwnerResolver } from './owner.js';
 import { createAccessPolicy } from './access.js';
 import { nullLogger } from './log.js';
@@ -21,6 +21,7 @@ import { nullLogger } from './log.js';
  * @property {import('./registry.js').Command[]} commands  Registered commands (for help/man).
  * @property {(text: string) => void} reply                Queue a line to send back.
  * @property {(token: string) => string} resolveUser       Canonicalize a typed person id (mention/number) for storage/match.
+ * @property {(id: string) => boolean} isSelf              True if the id is the bot itself (its trigger name or own id forms).
  * @property {import('../store/index.js').ScopedStore} [store] Per-conversation scoped KV (when configured).
  * @property {ReturnType<typeof createAccessPolicy>} [access] Owner-managed access lists (when a store is configured).
  * @property {import('./log.js').Logger} log               Structured logger (never posts to chat).
@@ -52,6 +53,14 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     const chatId = msg.chatId ?? 'cli';
     const isAdmin = msg.isAdmin ?? false;
     const isOwner = ownerResolver.isOwner(sender);
+    // The bot itself, by its trigger name or its own id forms - so a command can refuse
+    // to act on it (e.g. adding the bot to an access list would be meaningless).
+    const self = msg.self ?? [];
+    const isSelf = (id) => {
+      if (!id || id === '*') return false;
+      const s = String(id);
+      return s.toLowerCase() === prefix.toLowerCase() || self.some((x) => (match ?? sameUser)(s, x));
+    };
 
     // Owner-managed access lists (ADR-0006). The owner bypasses the whole layer, and
     // the bootstrap `owner` command stays reachable so the bot can never be locked
@@ -115,6 +124,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       store: store ? store.scoped(`${level}:${chatId}`) : undefined,
       access: access ?? undefined,
       resolveUser: resolveUser ?? ((token) => String(token ?? '').trim()),
+      isSelf,
       log,
       lifecycle,
       owner: ownerCap,
