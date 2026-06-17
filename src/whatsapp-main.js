@@ -15,6 +15,7 @@ import note from './commands/note.js';
 import owner from './commands/owner.js';
 import whitelist from './commands/whitelist.js';
 import blacklist from './commands/blacklist.js';
+import groups from './commands/groups.js';
 import shutdown from './commands/shutdown.js';
 import restart from './commands/restart.js';
 import logout from './commands/logout.js';
@@ -25,7 +26,7 @@ import logout from './commands/logout.js';
  * separate sqlite files so credentials stay isolated. Run with `npm start`.
  */
 const log = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
-const registry = createRegistry([ping, help, man, whoami, note, owner, whitelist, blacklist, shutdown, restart, logout]);
+const registry = createRegistry([ping, help, man, whoami, note, owner, whitelist, blacklist, groups, shutdown, restart, logout]);
 const store = createStore({ path: process.env.JARVIS_DB ?? 'data/jarvis.db' });
 const authDb = createStore({ path: process.env.JARVIS_AUTH_DB ?? 'data/wa-auth.db' });
 const identity = createIdentityStore(store);
@@ -60,6 +61,7 @@ const app = createApp(adapter, {
     log,
     match: identity.same,
     lifecycle,
+    listGroups: () => adapter.listGroups(),
     // Canonicalize a named person for the access lists: a JID (e.g. from an @mention)
     // is resolved toward its phone form; a bare number becomes a phone JID. Matching
     // then bridges LID <-> phone, so a person named one way matches a sender on the other.

@@ -132,3 +132,17 @@ test('adapter: 515 restartRequired recreates the socket; 401 loggedOut wipes and
   assert.equal(makeSocket.sockets.length, 2); // no reconnect after logout
   assert.equal(authState.cleared, 1); // creds wiped
 });
+
+test('adapter: listGroups maps participating groups to {id, name} (id when no subject)', async () => {
+  const makeSocket = fakeSocketFactory();
+  const a = createWhatsAppAdapter(opts({ makeSocket }));
+  a.start({ onMessage: async () => {} });
+  makeSocket.sockets[0].groupFetchAllParticipating = async () => ({
+    'g1@g.us': { id: 'g1@g.us', subject: 'Study' },
+    'g2@g.us': { id: 'g2@g.us', subject: '' },
+  });
+  assert.deepEqual(await a.listGroups(), [
+    { id: 'g1@g.us', name: 'Study' },
+    { id: 'g2@g.us', name: 'g2@g.us' },
+  ]);
+});
