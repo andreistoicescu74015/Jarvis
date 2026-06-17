@@ -62,12 +62,15 @@ test('owner cmd: unavailable without the capability', () => {
 // --- integration: through the dispatcher (real owner resolver + ctx.owner) ---
 const lifecycle = { shutdown() {}, restart() {}, logout() {} };
 
-test('owner cmd: claim works from any chat, then gates the owner-only commands', async () => {
+test('owner cmd: claim is private-only, then gates the owner-only commands', async () => {
   const handle = createDispatcher(createRegistry([owner, shutdown]), { owner: '', lifecycle });
-  assert.match(await handle({ text: 'jarvis owner claim', sender: 'alice', level: 'group' }), /you are now the owner/i);
-  assert.match(await handle({ text: 'jarvis owner', sender: 'bob', level: 'group' }), /Owner: alice/);
-  assert.match(await handle({ text: 'jarvis shutdown', sender: 'bob' }), /Not allowed: owner only/);
-  assert.match(await handle({ text: 'jarvis shutdown', sender: 'alice' }), /shutting down/i);
+  // a claim from a group is refused - ownership must be taken in a private chat
+  assert.match(await handle({ text: 'jarvis owner claim', sender: 'alice', level: 'group' }), /private chat/i);
+  assert.match(await handle({ text: 'jarvis owner', sender: 'bob', level: 'group' }), /no owner yet/i); // still unclaimed
+  // in a private chat it works, then gates the owner-only commands everywhere
+  assert.match(await handle({ text: 'jarvis owner claim', sender: 'alice', level: 'private' }), /you are now the owner/i);
+  assert.match(await handle({ text: 'jarvis shutdown', sender: 'bob', level: 'private' }), /Not allowed: owner only/);
+  assert.match(await handle({ text: 'jarvis shutdown', sender: 'alice', level: 'private' }), /shutting down/i);
 });
 
 test('owner cmd: an env owner is not overridable and cannot resign', async () => {

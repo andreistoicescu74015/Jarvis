@@ -1,7 +1,8 @@
 /**
  * Manage the single owner slot. Public on purpose: `claim` must work for a
  * non-owner when the slot is free, so the command gates each action itself
- * (claim only if free; resign only by the owner) rather than declaring a scope.
+ * (claim only if free, and only from a private chat - enforced by the dispatcher;
+ * resign only by the owner) rather than declaring a scope.
  *
  * @type {import('../core/registry.js').Command}
  */
@@ -27,8 +28,9 @@ export default {
       if (ctx.owner.exists) {
         return ctx.owner.isMe ? 'You are already the owner.' : `There is already an owner: ${ctx.owner.contact}.`;
       }
-      ctx.owner.claim();
-      return 'You are now the owner.';
+      return ctx.owner.claim()
+        ? 'You are now the owner.'
+        : 'To claim ownership, message me in a private chat (not from a group).';
     }
 
     if (sub === 'resign') {

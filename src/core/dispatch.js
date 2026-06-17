@@ -106,7 +106,9 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       fromEnv: ownerResolver.fromEnv,
       contact: ownerResolver.current,
       claim: () => {
-        if (ownerResolver.current) return false;
+        // A free slot can only be claimed from a private chat: ownership is a direct,
+        // DM-level act, so a stranger can't seize the bot from inside a group it joined.
+        if (ownerResolver.current || level !== 'private') return false;
         ownerResolver.claim(sender);
         log.warn('owner claimed', { sender });
         return true;
