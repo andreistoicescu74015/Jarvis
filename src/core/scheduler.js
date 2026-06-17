@@ -7,7 +7,8 @@
  * schedules survive restarts and no SQL table is needed. The clock (`now`) is injected
  * and delivery is an injected callback (`deliver(chatId, text)`), so the core never
  * imports an adapter and the whole thing is unit-testable without a live connection.
- * The run-time wiring (`startScheduler`) drives `tick` on a timer.
+ * A background runner (`startProactive`) drives `tick` on a timer; an optional send
+ * budget paces deliveries so proactive output never bursts.
  *
  * A job: `{ chatId, text, fireAt, repeatMs, createdBy, createdAt }` stored under its id.
  */
@@ -97,17 +98,21 @@ export function createScheduler(store, { now = () => Date.now() } = {}) {
    * Fire every job due at `at`: deliver it, then reschedule a repeating job to its next
    * future slot (skipping any intervals missed while down) or drop a one-time job. A
    * delivery failure is swallowed and the job still advances - best-effort, never a
-   * retry storm. Returns how many fired / failed.
+   * retry storm. With a `budget`, each delivery is gated and recorded; when the budget is
+   * spent the remaining due jobs simply wait for the next window. Returns fired / failed.
    *
    * @param {(chatId: string, text: string) => unknown} deliver
    * @param {number} [at]
+   * @param {{ canSend: (cmd: string, at: number) => boolean, record: (cmd: string, at: number) => void } | null} [budget]
    * @returns {Promise<{ fired: number, failed: number }>}
    */
-  async function tick(deliver, at = now()) {
+  async function tick(deliver, at = now(), budget = null) {
     const due = all().filter((j) => j.fireAt <= at).sort((a, b) => a.fireAt - b.fireAt);
     let fired = 0;
     let failed = 0;
     for (const j of due) {
+      if (budget && !budget.canSend('schedule', at)) break; // budget spent; the rest wait
+      if (budget) budget.record('schedule', at);
       try {
         await deliver(j.chatId, j.text);
         fired++;
@@ -131,41 +136,4 @@ export function createScheduler(store, { now = () => Date.now() } = {}) {
   }
 
   return { add, list, cancel, tick };
-}
-
-/**
- * Run-time wiring: drive `scheduler.tick` on a background timer. Kept out of the core
- * loop so delivery (a platform concern) is injected here. The first tick is after one
- * interval - we never deliver before the platform has connected. Returns a `stop()`.
- *
- * @param {{ scheduler: ReturnType<typeof createScheduler>, deliver: (chatId: string, text: string) => unknown, intervalMs?: number, log?: import('./log.js').Logger }} opts
- */
-export function startScheduler({ scheduler, deliver, intervalMs = 30_000, log } = {}) {
-  const period = Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 30_000;
-  let running = false;
-  let current = Promise.resolve(); // the in-flight tick, so stop() can await it
-  const run = () => {
-    if (running) return current; // never overlap: delivery is paced, so a tick can outrun the period
-    running = true;
-    current = (async () => {
-      try {
-        const { fired, failed } = await scheduler.tick(deliver);
-        if (fired || failed) log?.info?.('scheduler fired', { fired, failed });
-      } catch (err) {
-        log?.error?.('scheduler tick failed', { error: err?.message ?? String(err) });
-      } finally {
-        running = false;
-      }
-    })();
-    return current;
-  };
-  const timer = setInterval(run, period);
-  timer.unref?.(); // a pending timer must not keep the process alive on its own
-  // stop() awaits any in-flight tick, so the store is never written after it is closed.
-  return {
-    stop: async () => {
-      clearInterval(timer);
-      await current;
-    },
-  };
 }

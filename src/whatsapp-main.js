@@ -3,7 +3,10 @@ import { createRegistry } from './core/registry.js';
 import { createDispatcher } from './core/dispatch.js';
 import { createLogger } from './core/log.js';
 import { createStore } from './store/index.js';
-import { createScheduler, startScheduler } from './core/scheduler.js';
+import { createScheduler } from './core/scheduler.js';
+import { createSendBudget } from './core/send-budget.js';
+import { createOutbox } from './core/outbox.js';
+import { startProactive } from './core/proactive.js';
 import { createSqliteAuthState } from './whatsapp/auth-store.js';
 import { createWhatsAppAdapter } from './whatsapp/adapter.js';
 import { createIdentityStore } from './whatsapp/identity-store.js';
@@ -35,6 +38,11 @@ const store = createStore({ path: process.env.JARVIS_DB ?? 'data/jarvis.db' });
 const authDb = createStore({ path: process.env.JARVIS_AUTH_DB ?? 'data/wa-auth.db' });
 const identity = createIdentityStore(store);
 const scheduler = createScheduler(store);
+const budget = createSendBudget(store, {
+  perCommand: { perHour: Number(process.env.JARVIS_SEND_PER_HOUR) || 60, perDay: Number(process.env.JARVIS_SEND_PER_DAY) || 300 },
+  global: { perHour: Number(process.env.JARVIS_SEND_GLOBAL_PER_HOUR) || 120, perDay: Number(process.env.JARVIS_SEND_GLOBAL_PER_DAY) || 600 },
+});
+const outbox = createOutbox(store);
 
 const adapter = createWhatsAppAdapter({
   authState: createSqliteAuthState(authDb, { logger: socketLogger(log) }),
@@ -70,6 +78,7 @@ const app = createApp(adapter, {
     participantsOf: (chatId) => adapter.participants(chatId),
     send: (target, message) => adapter.send(target, message),
     scheduler,
+    outbox,
     // Canonicalize a named person for the access lists: a JID (e.g. from an @mention)
     // is resolved toward its phone form; a bare number becomes a phone JID. Matching
     // then bridges LID <-> phone, so a person named one way matches a sender on the other.
@@ -83,22 +92,27 @@ const app = createApp(adapter, {
   }),
 });
 
-// Scheduled messages fire in the background. Started before the (blocking) start() so
-// the timer is live; the first tick is after one interval, so we never deliver before
-// the socket connects. Delivery reuses the adapter's send.
-const schedulerRunner = startScheduler({
-  scheduler,
-  deliver: (chatId, text) => adapter.send(chatId, text),
-  intervalMs: Number(process.env.JARVIS_TICK_MS),
-  log,
-});
+// Proactive output (scheduled messages + queued broadcasts) runs in the background, paced
+// by the send budget so it never bursts. Scheduled messages drain before the broadcast
+// queue, so a due reminder gets the shared budget slot ahead of a bulk broadcast. Started
+// before the (blocking) start() so the timer is live; the first tick is after one interval,
+// so we never deliver before the socket connects. Delivery reuses the adapter's send.
+const deliver = (chatId, text) => adapter.send(chatId, text);
+const proactiveRunner = startProactive(
+  async () => {
+    const at = Date.now();
+    await scheduler.tick(deliver, at, budget);
+    await outbox.drain({ deliver, budget, at });
+  },
+  { intervalMs: Number(process.env.JARVIS_TICK_MS), log },
+);
 
 let closing = false;
 const quit = async (code = 0) => {
   if (closing) return;
   closing = true;
   log.info('Jarvis shutting down...');
-  await schedulerRunner.stop();
+  await proactiveRunner.stop();
   await adapter.stop();
   store.close();
   authDb.close();
