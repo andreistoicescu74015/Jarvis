@@ -1,21 +1,36 @@
+/** Map a link failure reason to a clear message. */
+function linkError(r) {
+  return (
+    {
+      'bad-code': 'Unknown code.',
+      expired: 'That code has expired - ask for a new one.',
+      'already-linked': 'Already linked (unlink first).',
+      'same-chat': 'A chat cannot link to itself.',
+      conflict: `Conflicting data (${(r.conflicts ?? []).join(', ')}); clear one side, "adopt" instead, or try again.`,
+    }[r.reason] ?? 'Could not link.'
+  );
+}
+
 /**
  * Context links: link this chat with another so they share one context (data +
  * membership). Authority-gated by `scope.admin` - a group admin, or the user in a
  * private chat (owner status does not matter). The proposer runs `link new` for a
- * one-time code; the other chat's authority runs `link accept <code>`. Merging
- * refuses on conflicting data; `link remove` leaves, keeping a copy.
+ * one-time code; the other chat's authority runs `link accept <code>` (merge, refuses
+ * on conflict) or `link adopt <code>` (take the other context, set this chat's own data
+ * aside until it unlinks). `link remove` leaves the link.
  *
  * @type {import('../core/registry.js').Command}
  */
 export default {
   name: 'link',
   summary: 'Link this chat with another to share one context.',
-  usage: 'jarvis link | link new | link accept <code> | link remove',
+  usage: 'jarvis link | link new | link accept <code> | link adopt <code> | link remove',
   man:
     'Share one context (data + membership) between chats. In a group only an admin can link; in a ' +
     'private chat the user can. Run "link new" for a one-time code, share it with the other chat, and ' +
-    'there an admin runs "link accept <code>". Linking merges data and refuses if it conflicts; ' +
-    '"link remove" leaves the link (keeping a copy of the shared data); "link" alone shows the status.',
+    'there an admin runs "link accept <code>" (merges the two, refusing if data conflicts) or ' +
+    '"link adopt <code>" (takes the other chat\'s context; this chat\'s own data is set aside and ' +
+    'returns on unlink). "link remove" leaves the link; "link" alone shows the status.',
   scope: { admin: true },
   run: (ctx) => {
     if (!ctx.links) return 'Links are unavailable here.';
@@ -27,26 +42,21 @@ export default {
     }
     if (sub === 'new') {
       const code = ctx.links.propose();
-      return `Linking code: ${code}\nShare it with the other chat; there an admin runs "jarvis link accept ${code}". It expires in 10 minutes.`;
+      return `Linking code: ${code}\nShare it with the other chat; there an admin runs "jarvis link accept ${code}" (or "adopt ${code}"). It expires in 10 minutes.`;
     }
-    if (sub === 'accept') {
+    if (sub === 'accept' || sub === 'adopt') {
       const code = ctx.args[1];
-      if (!code) return 'Usage: jarvis link accept <code>';
-      const r = ctx.links.accept(code);
-      if (r.ok) return 'Linked - this chat now shares one context with the other.';
-      const why = {
-        'bad-code': 'Unknown code.',
-        expired: 'That code has expired - ask for a new one.',
-        'already-linked': 'These chats are already linked.',
-        'same-chat': 'A chat cannot link to itself.',
-        conflict: `Conflicting data (${(r.conflicts ?? []).join(', ')}); clear one side and try again.`,
-      };
-      return why[r.reason] ?? 'Could not link.';
+      if (!code) return `Usage: jarvis link ${sub} <code>`;
+      const r = sub === 'adopt' ? ctx.links.adopt(code) : ctx.links.accept(code);
+      if (!r.ok) return linkError(r);
+      return sub === 'adopt'
+        ? "Adopted - this chat now shares the other's context; its own data is set aside and returns when you unlink."
+        : 'Linked - this chat now shares one context with the other.';
     }
     if (sub === 'remove') {
       const r = ctx.links.unlink();
       return r.ok ? 'Unlinked - this chat keeps a copy of the shared data.' : 'This chat is not linked.';
     }
-    return 'Usage: jarvis link | link new | link accept <code> | link remove';
+    return 'Usage: jarvis link | link new | link accept <code> | link adopt <code> | link remove';
   },
 };

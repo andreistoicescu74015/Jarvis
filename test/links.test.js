@@ -112,3 +112,34 @@ test('links: accept on conflicting data refuses and does not link', () => {
   assert.equal(links.accept('C', 'B', 'own:B').reason, 'conflict');
   assert.equal(links.areLinked('A', 'B'), false);
 });
+
+test('links: adopt joins the proposer context without merging - immune to conflicts', () => {
+  const store = createStore({ path: ':memory:' });
+  const links = createLinks(store, { genCode: () => 'C' });
+  seed(store, 'own:A', { notes: ['from-A'] });
+  seed(store, 'own:B', { notes: ['from-B'] }); // would conflict on a merge
+  links.propose('A', 'own:A');
+  assert.equal(links.accept('C', 'B', 'own:B', 'adopt').ok, true); // adopt succeeds anyway
+  assert.deepEqual(store.kv.get(links.nsFor('B', 'own:B'), 'notes'), ['from-A']); // B sees A's context
+  assert.deepEqual(links.chats('B').sort(), ['A', 'B']);
+});
+
+test('links: unlinking an adopted chat returns its own (set-aside) data', () => {
+  const store = createStore({ path: ':memory:' });
+  const links = createLinks(store, { genCode: () => 'C' });
+  seed(store, 'own:A', { notes: ['from-A'] });
+  seed(store, 'own:B', { notes: ['from-B'] });
+  links.propose('A', 'own:A');
+  links.accept('C', 'B', 'own:B', 'adopt');
+  links.unlink('B', 'own:B');
+  assert.deepEqual(links.chats('B'), ['B']); // alone again
+  assert.deepEqual(store.kv.get('own:B', 'notes'), ['from-B']); // its own data, untouched
+});
+
+test('links: adopt is refused when the adopting chat is already linked', () => {
+  const store = createStore({ path: ':memory:' });
+  const links = createLinks(store, { genCode: () => 'C' });
+  links.link('B', 'own:B', 'X', 'own:X'); // B is already in a cluster
+  links.propose('A', 'own:A');
+  assert.equal(links.accept('C', 'B', 'own:B', 'adopt').reason, 'already-linked');
+});

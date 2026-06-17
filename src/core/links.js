@@ -16,6 +16,7 @@ export function createLinks(store, { namespace = 'links', codesNamespace = 'link
   const map = store.scoped(namespace); // chatId -> clusterId; plus '#seq' -> counter
   const codes = store.scoped(codesNamespace); // one-time link codes: code -> { from, fromNs, at }
   const makeCode = genCode ?? (() => Math.random().toString(36).slice(2, 8).toUpperCase());
+  const adopted = store.scoped('links-adopted'); // chatId -> true for members that joined by adopting
   const SEQ = '#seq';
   const clusterNs = (id) => `ctx:${id}`;
 
@@ -98,7 +99,13 @@ export function createLinks(store, { namespace = 'links', codesNamespace = 'link
   function unlink(chatId, ownNs) {
     const c = clusterId(chatId);
     if (!c) return { ok: false, reason: 'not-linked' };
-    for (const { key, value } of store.kv.list(clusterNs(c))) store.kv.set(ownNs, key, value);
+    // A merge member takes a copy of the shared data; an adopted member's own data was
+    // never merged in, so it simply returns to it (set aside, untouched).
+    if (adopted.get(chatId)) {
+      adopted.delete(chatId);
+    } else {
+      for (const { key, value } of store.kv.list(clusterNs(c))) store.kv.set(ownNs, key, value);
+    }
     map.delete(chatId);
     return { ok: true };
   }
@@ -110,8 +117,23 @@ export function createLinks(store, { namespace = 'links', codesNamespace = 'link
     return code;
   }
 
-  /** Redeem a code from chat `by`, linking it with the proposer (merge; may conflict). */
-  function accept(code, by, byNs) {
+  /** Ensure `from` is in a cluster (creating one from its own data if solo); return its id. */
+  function clusterFor(from, fromNs) {
+    const c = clusterId(from);
+    if (c) return c;
+    const id = nextId();
+    fold(fromNs, clusterNs(id));
+    map.set(from, id);
+    return id;
+  }
+
+  /**
+   * Redeem a code from chat `by`. mode 'merge' (default) combines `by`'s data into the
+   * proposer's context, refusing on conflict. mode 'adopt' takes the proposer's context
+   * as-is and leaves `by`'s own data untouched (it returns on unlink) - so it can never
+   * conflict.
+   */
+  function accept(code, by, byNs, mode = 'merge') {
     const c = String(code ?? '').trim().toUpperCase();
     const rec = codes.get(c);
     if (!rec) return { ok: false, reason: 'bad-code' };
@@ -123,6 +145,14 @@ export function createLinks(store, { namespace = 'links', codesNamespace = 'link
     if (areLinked(rec.from, by)) {
       codes.delete(c);
       return { ok: false, reason: 'already-linked' };
+    }
+    if (mode === 'adopt') {
+      if (clusterId(by)) return { ok: false, reason: 'already-linked' }; // unlink first
+      const cluster = clusterFor(rec.from, rec.fromNs);
+      map.set(by, cluster);
+      adopted.set(by, true);
+      codes.delete(c);
+      return { ok: true };
     }
     const r = link(rec.from, rec.fromNs, by, byNs);
     if (r.ok) codes.delete(c);

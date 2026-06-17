@@ -41,3 +41,14 @@ test('link cmd: a bad code is reported clearly', async () => {
   const handle = setup();
   assert.match(await admin(handle, 'jarvis link accept NOPE', 'B'), /Unknown code/);
 });
+
+test('link cmd: adopt takes the other context even when a merge would conflict', async () => {
+  const handle = setup();
+  await admin(handle, 'jarvis note add fromA', 'A');
+  await admin(handle, 'jarvis note add fromB', 'B'); // conflicting data with A
+  const code = codeFrom(await admin(handle, 'jarvis link new', 'A'));
+  assert.match(await admin(handle, `jarvis link adopt ${code}`, 'B'), /Adopted/);
+  const out = await admin(handle, 'jarvis note list', 'B');
+  assert.match(out, /fromA/); // B now sees A's note
+  assert.doesNotMatch(out, /fromB/); // B's own note is set aside
+});
