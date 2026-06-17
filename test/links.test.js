@@ -82,3 +82,33 @@ test('links: unlinking a non-linked chat is a no-op result', () => {
   const links = createLinks(createStore({ path: ':memory:' }));
   assert.equal(links.unlink('A', 'own:A').reason, 'not-linked');
 });
+
+test('links: propose + accept links the two chats and merges data (code is case-insensitive)', () => {
+  const store = createStore({ path: ':memory:' });
+  const links = createLinks(store, { genCode: () => 'CODE1' });
+  seed(store, 'own:A', { notes: ['a1'] });
+  assert.equal(links.propose('A', 'own:A'), 'CODE1');
+  assert.equal(links.accept('code1', 'B', 'own:B').ok, true); // lower-case accepted
+  assert.equal(links.areLinked('A', 'B'), true);
+  assert.deepEqual(store.kv.get(links.nsFor('B', 'own:B'), 'notes'), ['a1']);
+});
+
+test('links: accept rejects an unknown code and an expired one', () => {
+  let t = 1000;
+  const store = createStore({ path: ':memory:' });
+  const links = createLinks(store, { genCode: () => 'C', now: () => t, ttlMs: 100 });
+  assert.equal(links.accept('nope', 'B', 'own:B').reason, 'bad-code');
+  links.propose('A', 'own:A');
+  t = 1000 + 101; // past the TTL
+  assert.equal(links.accept('C', 'B', 'own:B').reason, 'expired');
+});
+
+test('links: accept on conflicting data refuses and does not link', () => {
+  const store = createStore({ path: ':memory:' });
+  const links = createLinks(store, { genCode: () => 'C' });
+  seed(store, 'own:A', { notes: ['a'] });
+  seed(store, 'own:B', { notes: ['b'] });
+  links.propose('A', 'own:A');
+  assert.equal(links.accept('C', 'B', 'own:B').reason, 'conflict');
+  assert.equal(links.areLinked('A', 'B'), false);
+});

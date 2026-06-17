@@ -12,8 +12,10 @@
  * @param {import('../store/index.js').Store} store
  * @param {{ namespace?: string }} [opts]
  */
-export function createLinks(store, { namespace = 'links' } = {}) {
+export function createLinks(store, { namespace = 'links', codesNamespace = 'link-codes', now = () => Date.now(), ttlMs = 10 * 60 * 1000, genCode } = {}) {
   const map = store.scoped(namespace); // chatId -> clusterId; plus '#seq' -> counter
+  const codes = store.scoped(codesNamespace); // one-time link codes: code -> { from, fromNs, at }
+  const makeCode = genCode ?? (() => Math.random().toString(36).slice(2, 8).toUpperCase());
   const SEQ = '#seq';
   const clusterNs = (id) => `ctx:${id}`;
 
@@ -101,5 +103,31 @@ export function createLinks(store, { namespace = 'links' } = {}) {
     return { ok: true };
   }
 
-  return { nsFor, chats, areLinked, link, unlink };
+  /** Create a one-time code (TTL) this chat shares to invite another chat to link. */
+  function propose(from, fromNs) {
+    const code = makeCode();
+    codes.set(code, { from, fromNs, at: now() });
+    return code;
+  }
+
+  /** Redeem a code from chat `by`, linking it with the proposer (merge; may conflict). */
+  function accept(code, by, byNs) {
+    const c = String(code ?? '').trim().toUpperCase();
+    const rec = codes.get(c);
+    if (!rec) return { ok: false, reason: 'bad-code' };
+    if (now() - rec.at > ttlMs) {
+      codes.delete(c);
+      return { ok: false, reason: 'expired' };
+    }
+    if (rec.from === by) return { ok: false, reason: 'same-chat' };
+    if (areLinked(rec.from, by)) {
+      codes.delete(c);
+      return { ok: false, reason: 'already-linked' };
+    }
+    const r = link(rec.from, rec.fromNs, by, byNs);
+    if (r.ok) codes.delete(c);
+    return r;
+  }
+
+  return { nsFor, chats, areLinked, link, unlink, propose, accept };
 }

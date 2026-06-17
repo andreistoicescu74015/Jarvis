@@ -26,6 +26,7 @@ import { nullLogger } from './log.js';
  * @property {(id: string) => boolean} isSelf              True if the id is the bot itself (its trigger name or own id forms).
  * @property {import('../store/index.js').ScopedStore} [store] Per-conversation scoped KV (when configured).
  * @property {ReturnType<typeof createAccessPolicy>} [access] Owner-managed access lists (when a store is configured).
+ * @property {{ propose: () => string, accept: (code: string) => object, unlink: () => object }} [links] Context-link handshake bound to this chat (when a store is configured).
  * @property {import('./log.js').Logger} log               Structured logger (never posts to chat).
  * @property {{ shutdown?: () => void, restart?: () => void, logout?: () => void }} [lifecycle] Process lifecycle controls (owner commands; injected per platform).
  * @property {() => Promise<{ id: string, name: string }[]>} listGroups  Groups the bot is in (platform capability; empty off a group platform).
@@ -55,6 +56,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     const level = msg.level ?? 'private';
     const sender = msg.sender ?? '';
     const chatId = msg.chatId ?? 'cli';
+    const ownNs = `${level}:${chatId}`;
     const isAdmin = msg.isAdmin ?? false;
     const isOwner = ownerResolver.isOwner(sender);
     // The bot itself, by its trigger name or its own id forms - so a command can refuse
@@ -125,9 +127,16 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       isAdmin,
       commands: registry.all(),
       reply: (text) => replies.push(text),
-      store: store ? store.scoped(links.nsFor(chatId, `${level}:${chatId}`)) : undefined,
+      store: store ? store.scoped(links.nsFor(chatId, ownNs)) : undefined,
       chats: links ? links.chats(chatId) : [chatId],
       access: access ?? undefined,
+      links: links
+        ? {
+            propose: () => links.propose(chatId, ownNs),
+            accept: (code) => links.accept(code, chatId, ownNs),
+            unlink: () => links.unlink(chatId, ownNs),
+          }
+        : undefined,
       resolveUser: resolveUser ?? ((token) => String(token ?? '').trim()),
       isSelf,
       log,
