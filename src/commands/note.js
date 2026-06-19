@@ -1,4 +1,4 @@
-import { b, mono, number, esc } from '../core/format.js';
+import { b, code, number, esc } from '../core/format.js';
 
 /** @type {import('../core/registry.js').Command} */
 export default {
@@ -17,7 +17,7 @@ export default {
     switch (sub) {
       case 'add': {
         const text = rest.join(' ').trim();
-        if (!text) return `Usage: ${mono('jarvis note add <text>')}`;
+        if (!text) return `Usage: ${code('jarvis note add <text>')}`;
         notes.push(text);
         ctx.store.set('notes', notes);
         return `Added note #${notes.length}.`;
@@ -38,7 +38,7 @@ export default {
         return `Deleted note: ${esc(removed)}`;
       }
       default:
-        return `Usage: ${mono('jarvis note add <text> | list | get <n> | del <n>')}`;
+        return `Usage: ${code('jarvis note add <text> | list | get <n> | del <n>')}`;
     }
   },
 };
