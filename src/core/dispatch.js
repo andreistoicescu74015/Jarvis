@@ -43,10 +43,10 @@ import { mono, esc } from './format.js';
  * `handle(msg)` for `createApp`.
  *
  * @param {import('./registry.js').Registry} registry
- * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, send?: (target: string, text: string) => unknown, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object } }} [opts]
+ * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, send?: (target: string, text: string) => unknown, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object }, requireOwner?: boolean }} [opts]
  * @returns {(msg: import('./app.js').InboundMessage) => Promise<string | undefined>}
  */
-export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, scheduler } = {}) {
+export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, scheduler, requireOwner = false } = {}) {
   const ownerResolver = createOwnerResolver({ owner, match });
   const access = store ? createAccessPolicy(store, { match }) : null;
   const links = store ? createLinks(store) : null;
@@ -70,6 +70,16 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       const s = String(id);
       return s.toLowerCase() === prefix.toLowerCase() || self.some((x) => (match ?? sameUser)(s, x));
     };
+
+    // Activation gate: until an owner exists (set via OWNER_JID or claimed with `owner claim`),
+    // Jarvis stays DORMANT when `requireOwner` is on - silent in every group, and in a private chat
+    // only the `owner` command responds (the claim path). So a freshly deployed bot does nothing
+    // until its manager takes ownership. Fully suppressed (no reply at all), like the access layer
+    // below; the `owner` command is what establishes the owner and opens the gate.
+    if (requireOwner && !ownerResolver.current && !(level === 'private' && command === 'owner')) {
+      log.info('dormant: no owner yet', { level, command, sender });
+      return undefined;
+    }
 
     // Owner-managed access lists (ADR-0006). The owner bypasses the whole layer, and
     // the bootstrap `owner` command stays reachable so the bot can never be locked
