@@ -21,6 +21,7 @@ function fakeSocketFactory() {
       sendMessage: async (jid, content) => { sock.sent.push({ jid, content }); },
       sendPresenceUpdate: async (state, jid) => { sock.presence.push({ state, jid }); },
       readMessages: async (keys) => { sock.read.push(...keys); },
+      updateProfileName: async (name) => { sock.named = name; sock.user.name = name; },
       groupMetadata: async () => ({ participants: [] }),
       end: () => { sock.ended = true; },
     };
@@ -188,4 +189,25 @@ test('adapter: marks the client online on connect by default; humanize.markOnlin
   const off = fakeSocketFactory();
   createWhatsAppAdapter(opts({ makeSocket: off, humanize: { markOnline: false } })).start({ onMessage: async () => {} });
   assert.equal(off.sockets[0].config.markOnlineOnConnect, false);
+});
+
+test('adapter: on connect, names an unnamed account then goes online (so receipts activate)', async () => {
+  const makeSocket = fakeSocketFactory();
+  createWhatsAppAdapter(opts({ makeSocket, humanize: { profileName: 'Jarvis' } })).start({ onMessage: async () => {} });
+  const sock = makeSocket.sockets[0];
+  sock.ev.emit('connection.update', { connection: 'open' });
+  await tick();
+  assert.equal(sock.named, 'Jarvis'); // account had no name -> set it (else WhatsApp ignores presence)
+  assert.ok(sock.presence.some((p) => p.state === 'available')); // then broadcast online
+});
+
+test('adapter: leaves an existing profile name untouched, still goes online', async () => {
+  const makeSocket = fakeSocketFactory();
+  createWhatsAppAdapter(opts({ makeSocket, humanize: { profileName: 'Jarvis' } })).start({ onMessage: async () => {} });
+  const sock = makeSocket.sockets[0];
+  sock.user.name = 'Existing';
+  sock.ev.emit('connection.update', { connection: 'open' });
+  await tick();
+  assert.equal(sock.named, undefined); // not renamed
+  assert.ok(sock.presence.some((p) => p.state === 'available'));
 });
