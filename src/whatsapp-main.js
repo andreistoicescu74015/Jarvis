@@ -78,6 +78,9 @@ const app = createApp(adapter, {
   // match is LID-aware so an owner set by phone number matches a LID sender.
   handle: createDispatcher(registry, {
     owner: process.env.OWNER_JID ?? '',
+    // Dormant until an owner exists: silent in groups, private only `owner`, until OWNER_JID is set
+    // or someone runs `owner claim`. Disable with JARVIS_REQUIRE_OWNER=off.
+    requireOwner: (process.env.JARVIS_REQUIRE_OWNER ?? 'on') !== 'off',
     store,
     log,
     match: identity.same,
