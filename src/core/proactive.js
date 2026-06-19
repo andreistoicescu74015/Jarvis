@@ -5,8 +5,8 @@
  * in-flight tick, so the shared store is never written after it closes. The first tick is
  * after one interval - we never act before the platform has connected.
  *
- * `tick` does one unit of proactive work (fire due scheduled messages, drain the broadcast
- * outbox); delivery is injected inside it, so this runner stays platform-agnostic.
+ * `tick` does one unit of proactive work (fire due scheduled messages); delivery is injected
+ * inside it, so this runner stays platform-agnostic.
  *
  * @param {() => Promise<unknown>} tick
  * @param {{ intervalMs?: number, log?: import('./log.js').Logger }} [opts]

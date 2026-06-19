@@ -5,7 +5,7 @@ import { socketLogger } from './socket-logger.js';
 import { toInbound } from './normalize.js';
 import { resolveAddressing } from './trigger.js';
 import { toContent } from './render.js';
-import { createRateLimiter } from './pacing.js';
+import { createRateLimiter, typingDelayMs } from './pacing.js';
 import { disconnectAction, backoffMs } from './connection.js';
 
 /** Read a WAMessage timestamp (seconds, number or Long) as epoch ms, or 0 if absent. */
@@ -42,6 +42,7 @@ function timestampMs(wa) {
  *   now?: () => number,
  *   groupCacheTtlMs?: number,
  *   offlineGraceMs?: number,
+ *   humanize?: { readReceipts?: boolean, readDelayMs?: number, typingPerCharMs?: number, typingMaxMs?: number, sendJitterMs?: number },
  * }} opts
  * @returns {import('../core/app.js').Adapter}
  */
@@ -59,7 +60,18 @@ export function createWhatsAppAdapter({
   now = () => Date.now(),
   groupCacheTtlMs = 5 * 60 * 1000,
   offlineGraceMs = 15 * 1000,
+  humanize = {},
 } = {}) {
+  // Human-timing heuristics (anti-ban). All optional, conservative defaults; tuned via env at
+  // the composition root. `sendJitterMs` randomizes each send; `typing*` shape the "typing..."
+  // duration; `read*` govern the read-before-reply receipt.
+  const {
+    readReceipts = true,
+    readDelayMs = 1000,
+    typingPerCharMs = 50,
+    typingMaxMs = 6000,
+    sendJitterMs = 400,
+  } = humanize;
   const waLog = socketLogger(log);
   /** @type {any} */
   let sock;
@@ -79,6 +91,22 @@ export function createWhatsAppAdapter({
       return meta;
     } catch {
       return cached?.meta; // fall back to stale on a fetch error, else undefined
+    }
+  }
+
+  // Read-before-reply (humanization): mark a message we are about to act on as read, after a
+  // short jittered reaction delay, so the sender sees a "seen" before the reply lands - like a
+  // person. Best-effort: a receipt failure never blocks handling. Skipped when readReceipts is
+  // off. Note: this marks read any ADDRESSED message, even from a blacklisted sender (the access
+  // check is the core's, downstream); the owner-list "silence" is about not replying, and a blue
+  // tick is what a human client shows anyway.
+  async function markRead(key) {
+    if (!readReceipts || !key || !sock || stopped) return;
+    try {
+      if (readDelayMs > 0) await sleep(readDelayMs + Math.floor(random() * readDelayMs));
+      await sock.readMessages?.([key]);
+    } catch (err) {
+      log.debug('wa: read receipt failed', { error: err?.message ?? String(err) });
     }
   }
 
@@ -151,6 +179,7 @@ export function createWhatsAppAdapter({
         if (!inbound) continue;
         const { handle, bare, text } = resolveAddressing(inbound, { selfId: selfIds, prefix });
         if (!handle) continue;
+        await markRead(wa.key); // read-before-reply: a person reads what they answer
         await onMessage({ ...inbound, text, addressed: bare, self: selfIds });
       } catch (err) {
         log.error('wa: failed to handle an inbound message', { error: err?.message ?? String(err) });
@@ -168,9 +197,15 @@ export function createWhatsAppAdapter({
     async send(chatId, message) {
       if (!sock || stopped) return;
       try {
+        const content = toContent(message);
+        // Look like a person composing: show "typing..." then send. The wait is the global
+        // spacing floor (so sends never burst, even across chats) PLUS a "typing time" roughly
+        // proportional to the reply length (capped) and a little jitter. Folding the typing time
+        // into the limiter means the next send is spaced from this one's real send time.
+        const typing = typingDelayMs((content?.text ?? '').length, { perCharMs: typingPerCharMs, maxMs: typingMaxMs });
         await sock.sendPresenceUpdate('composing', chatId);
-        await sleep(rateLimiter.nextWaitMs(Math.floor(random() * 400))); // jittered pacing
-        await sock.sendMessage(chatId, toContent(message));
+        await sleep(rateLimiter.nextWaitMs(typing + Math.floor(random() * sendJitterMs)));
+        await sock.sendMessage(chatId, content);
         await sock.sendPresenceUpdate('paused', chatId);
       } catch (err) {
         log.error('wa: send failed', { chatId, error: err?.message ?? String(err) });
@@ -184,18 +219,6 @@ export function createWhatsAppAdapter({
         return Object.values(all || {}).map((g) => ({ id: g.id, name: g.subject || g.id }));
       } catch (err) {
         log.error('wa: failed to list groups', { error: err?.message ?? String(err) });
-        return [];
-      }
-    },
-
-    async participants(chatId) {
-      if (!sock || stopped) return [];
-      if (!String(chatId).endsWith('@g.us')) return [chatId]; // a private chat: the user themself
-      try {
-        const meta = await groupMetadata(chatId);
-        return (meta?.participants ?? []).map((p) => p.id).filter(Boolean);
-      } catch (err) {
-        log.error('wa: failed to list participants', { chatId, error: err?.message ?? String(err) });
         return [];
       }
     },

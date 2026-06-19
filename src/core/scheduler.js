@@ -7,8 +7,8 @@
  * schedules survive restarts and no SQL table is needed. The clock (`now`) is injected
  * and delivery is an injected callback (`deliver(chatId, text)`), so the core never
  * imports an adapter and the whole thing is unit-testable without a live connection.
- * A background runner (`startProactive`) drives `tick` on a timer; an optional send
- * budget paces deliveries so proactive output never bursts.
+ * A background runner (`startProactive`) drives `tick` on a timer; the platform paces the
+ * actual sends (a single global spacing limiter), so proactive output never bursts.
  *
  * A job: `{ chatId, text, fireAt, repeatMs, createdBy, createdAt }` stored under its id.
  */
@@ -97,22 +97,19 @@ export function createScheduler(store, { now = () => Date.now() } = {}) {
   /**
    * Fire every job due at `at`: deliver it, then reschedule a repeating job to its next
    * future slot (skipping any intervals missed while down) or drop a one-time job. A
-   * delivery failure is swallowed and the job still advances - best-effort, never a
-   * retry storm. With a `budget`, each delivery is gated and recorded; when the budget is
-   * spent the remaining due jobs simply wait for the next window. Returns fired / failed.
+   * delivery failure is swallowed and the job still advances - best-effort, never a retry
+   * storm. The actual sends are paced downstream (the platform's global spacing limiter), so
+   * the scheduler just fires everything due. Returns fired / failed.
    *
    * @param {(chatId: string, text: string) => unknown} deliver
    * @param {number} [at]
-   * @param {{ canSend: (cmd: string, at: number) => boolean, record: (cmd: string, at: number) => void } | null} [budget]
    * @returns {Promise<{ fired: number, failed: number }>}
    */
-  async function tick(deliver, at = now(), budget = null) {
+  async function tick(deliver, at = now()) {
     const due = all().filter((j) => j.fireAt <= at).sort((a, b) => a.fireAt - b.fireAt);
     let fired = 0;
     let failed = 0;
     for (const j of due) {
-      if (budget && !budget.canSend('schedule', at)) break; // budget spent; the rest wait
-      if (budget) budget.record('schedule', at);
       try {
         await deliver(j.chatId, j.text);
         fired++;

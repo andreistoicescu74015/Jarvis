@@ -15,9 +15,11 @@ function fakeSocketFactory() {
       user: { id: '1234:5@s.whatsapp.net' },
       sent: [],
       presence: [],
+      read: [],
       ended: false,
       sendMessage: async (jid, content) => { sock.sent.push({ jid, content }); },
       sendPresenceUpdate: async (state, jid) => { sock.presence.push({ state, jid }); },
+      readMessages: async (keys) => { sock.read.push(...keys); },
       groupMetadata: async () => ({ participants: [] }),
       end: () => { sock.ended = true; },
     };
@@ -145,4 +147,34 @@ test('adapter: listGroups maps participating groups to {id, name} (id when no su
     { id: 'g1@g.us', name: 'Study' },
     { id: 'g2@g.us', name: 'g2@g.us' },
   ]);
+});
+
+test('adapter: read-before-reply marks only addressed, non-self messages seen', async () => {
+  const makeSocket = fakeSocketFactory();
+  const a = createWhatsAppAdapter(opts({ makeSocket }));
+  a.start({ onMessage: async () => {} });
+
+  makeSocket.sockets[0].ev.emit('messages.upsert', {
+    type: 'notify',
+    messages: [
+      { key: { remoteJid: '9@s.whatsapp.net', id: 'm1', fromMe: false }, message: { conversation: 'jarvis ping' } }, // addressed
+      { key: { remoteJid: '9@s.whatsapp.net', id: 'm2', fromMe: true }, message: { conversation: 'jarvis ping' } }, // fromMe -> skip
+      { key: { remoteJid: '9@s.whatsapp.net', id: 'm3' }, message: { conversation: 'hello' } }, // not addressed -> skip
+    ],
+  });
+  await tick();
+
+  assert.deepEqual(makeSocket.sockets[0].read.map((k) => k.id), ['m1']);
+});
+
+test('adapter: read receipts can be turned off via humanize', async () => {
+  const makeSocket = fakeSocketFactory();
+  const a = createWhatsAppAdapter(opts({ makeSocket, humanize: { readReceipts: false } }));
+  a.start({ onMessage: async () => {} });
+  makeSocket.sockets[0].ev.emit('messages.upsert', {
+    type: 'notify',
+    messages: [{ key: { remoteJid: '9@s.whatsapp.net', id: 'm1' }, message: { conversation: 'jarvis ping' } }],
+  });
+  await tick();
+  assert.equal(makeSocket.sockets[0].read.length, 0);
 });

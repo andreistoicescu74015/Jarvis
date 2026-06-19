@@ -4,11 +4,10 @@ import { createDispatcher } from './core/dispatch.js';
 import { createLogger } from './core/log.js';
 import { createStore } from './store/index.js';
 import { createScheduler } from './core/scheduler.js';
-import { createSendBudget } from './core/send-budget.js';
-import { createOutbox } from './core/outbox.js';
 import { startProactive } from './core/proactive.js';
 import { createSqliteAuthState } from './whatsapp/auth-store.js';
 import { createWhatsAppAdapter } from './whatsapp/adapter.js';
+import { createRateLimiter } from './whatsapp/pacing.js';
 import { createIdentityStore } from './whatsapp/identity-store.js';
 import { socketLogger } from './whatsapp/socket-logger.js';
 import ping from './commands/ping.js';
@@ -21,7 +20,6 @@ import whitelist from './commands/whitelist.js';
 import blacklist from './commands/blacklist.js';
 import groups from './commands/groups.js';
 import link from './commands/link.js';
-import broadcast from './commands/broadcast.js';
 import schedule from './commands/schedule.js';
 import shutdown from './commands/shutdown.js';
 import restart from './commands/restart.js';
@@ -33,22 +31,30 @@ import logout from './commands/logout.js';
  * separate sqlite files so credentials stay isolated. Run with `npm start`.
  */
 const log = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
-const registry = createRegistry([ping, help, man, whoami, note, owner, whitelist, blacklist, groups, link, broadcast, schedule, shutdown, restart, logout]);
+const registry = createRegistry([ping, help, man, whoami, note, owner, whitelist, blacklist, groups, link, schedule, shutdown, restart, logout]);
 const store = createStore({ path: process.env.JARVIS_DB ?? 'data/jarvis.db' });
 const authDb = createStore({ path: process.env.JARVIS_AUTH_DB ?? 'data/wa-auth.db' });
 const identity = createIdentityStore(store);
 const scheduler = createScheduler(store);
-const budget = createSendBudget(store, {
-  perCommand: { perHour: Number(process.env.JARVIS_SEND_PER_HOUR) || 60, perDay: Number(process.env.JARVIS_SEND_PER_DAY) || 300 },
-  global: { perHour: Number(process.env.JARVIS_SEND_GLOBAL_PER_HOUR) || 120, perDay: Number(process.env.JARVIS_SEND_GLOBAL_PER_DAY) || 600 },
-});
-const outbox = createOutbox(store);
+// Read a numeric env var, falling back to `d` for unset/empty/NaN - but honoring an explicit 0
+// (so a knob like a 0ms read delay can be turned off, which `Number(x) || d` would clobber).
+const num = (v, d) => (v == null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 
 const adapter = createWhatsAppAdapter({
   authState: createSqliteAuthState(authDb, { logger: socketLogger(log) }),
   log,
   prefix: process.env.JARVIS_PREFIX ?? 'jarvis',
   learn: (key) => identity.learnFromKey(key),
+  // Single global send limiter (min spacing between any two sends) + human-timing knobs
+  // (read-before-reply receipt, length-proportional typing). All optional; conservative defaults.
+  rateLimiter: createRateLimiter({ minIntervalMs: num(process.env.JARVIS_SEND_MIN_INTERVAL_MS, 800) }),
+  humanize: {
+    readReceipts: (process.env.JARVIS_READ_RECEIPTS ?? 'on') !== 'off',
+    readDelayMs: num(process.env.JARVIS_READ_DELAY_MS, 1000),
+    typingPerCharMs: num(process.env.JARVIS_TYPING_PER_CHAR_MS, 50),
+    typingMaxMs: num(process.env.JARVIS_TYPING_MAX_MS, 6000),
+    sendJitterMs: num(process.env.JARVIS_SEND_JITTER_MS, 400),
+  },
   // On logout the creds are wiped; exit non-zero so a supervisor restarts us and
   // shows a fresh QR. In dev (no supervisor) it simply stops - rerun `npm start`.
   onLogout: () => quit(1),
@@ -75,10 +81,8 @@ const app = createApp(adapter, {
     match: identity.same,
     lifecycle,
     listGroups: () => adapter.listGroups(),
-    participantsOf: (chatId) => adapter.participants(chatId),
     send: (target, message) => adapter.send(target, message),
     scheduler,
-    outbox,
     // Canonicalize a named person for the access lists: a JID (e.g. from an @mention)
     // is resolved toward its phone form; a bare number becomes a phone JID. Matching
     // then bridges LID <-> phone, so a person named one way matches a sender on the other.
@@ -92,17 +96,14 @@ const app = createApp(adapter, {
   }),
 });
 
-// Proactive output (scheduled messages + queued broadcasts) runs in the background, paced
-// by the send budget so it never bursts. Scheduled messages drain before the broadcast
-// queue, so a due reminder gets the shared budget slot ahead of a bulk broadcast. Started
-// before the (blocking) start() so the timer is live; the first tick is after one interval,
-// so we never deliver before the socket connects. Delivery reuses the adapter's send.
+// Proactive output (scheduled messages) runs in the background. Delivery reuses the adapter's
+// send, which paces every message through the global spacing limiter, so output never bursts.
+// Started before the (blocking) start() so the timer is live; the first tick is after one
+// interval, so we never deliver before the socket connects.
 const deliver = (chatId, text) => adapter.send(chatId, text);
 const proactiveRunner = startProactive(
   async () => {
-    const at = Date.now();
-    await scheduler.tick(deliver, at, budget);
-    await outbox.drain({ deliver, budget, at });
+    await scheduler.tick(deliver, Date.now());
   },
   { intervalMs: Number(process.env.JARVIS_TICK_MS), log },
 );
