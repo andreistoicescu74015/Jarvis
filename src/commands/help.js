@@ -1,4 +1,4 @@
-import { b, mono, bullet, esc } from '../core/format.js';
+import { b, code, bullet, esc } from '../core/format.js';
 
 /** @type {import('../core/registry.js').Command} */
 export default {
@@ -10,6 +10,6 @@ export default {
       .slice()
       .sort((a, b2) => a.name.localeCompare(b2.name))
       .map((c) => `${b(c.name)}: ${esc(c.summary)}`);
-    return [b('Commands'), bullet(items), `Try ${mono('jarvis man <command>')} for details.`].join('\n');
+    return [b('Commands'), bullet(items), `Try ${code('jarvis man <command>')} for details.`].join('\n');
   },
 };

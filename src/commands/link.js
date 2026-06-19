@@ -1,4 +1,4 @@
-import { b, mono, esc } from '../core/format.js';
+import { b, code, esc } from '../core/format.js';
 
 /** Map a link failure reason to a clear message. */
 function linkError(r) {
@@ -40,16 +40,16 @@ export default {
 
     if (!sub) {
       const others = ctx.chats.filter((c) => c !== ctx.chatId);
-      return others.length ? `${b('Linked with')}: ${others.map((c) => mono(esc(c))).join(', ')}.` : 'Not linked.';
+      return others.length ? `${b('Linked with')}: ${others.map((c) => code(esc(c))).join(', ')}.` : 'Not linked.';
     }
     if (sub === 'new') {
-      const code = ctx.links.propose();
-      return `${b('Linking code')}: ${mono(code)}\nShare it with the other chat; there an admin runs ${mono('jarvis link accept ' + code)} (or ${mono('adopt ' + code)}). It expires in 10 minutes.`;
+      const linkCode = ctx.links.propose();
+      return `${b('Linking code')}: ${code(linkCode)}\nShare it with the other chat; there an admin runs ${code('jarvis link accept ' + linkCode)} (or ${code('adopt ' + linkCode)}). It expires in 10 minutes.`;
     }
     if (sub === 'accept' || sub === 'adopt') {
-      const code = ctx.args[1];
-      if (!code) return `Usage: ${mono('jarvis link ' + sub + ' <code>')}`;
-      const r = sub === 'adopt' ? ctx.links.adopt(code) : ctx.links.accept(code);
+      const linkCode = ctx.args[1];
+      if (!linkCode) return `Usage: ${code('jarvis link ' + sub + ' <code>')}`;
+      const r = sub === 'adopt' ? ctx.links.adopt(linkCode) : ctx.links.accept(linkCode);
       if (!r.ok) return linkError(r);
       return sub === 'adopt'
         ? "Adopted - this chat now shares the other's context; its own data is set aside and returns when you unlink."
@@ -59,6 +59,6 @@ export default {
       const r = ctx.links.unlink();
       return r.ok ? 'Unlinked - this chat keeps a copy of the shared data.' : 'This chat is not linked.';
     }
-    return `Usage: ${mono('jarvis link | link new | link accept <code> | link adopt <code> | link remove')}`;
+    return `Usage: ${code('jarvis link | link new | link accept <code> | link adopt <code> | link remove')}`;
   },
 };

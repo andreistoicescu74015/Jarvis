@@ -1,4 +1,4 @@
-import { b, i, mono, esc } from '../core/format.js';
+import { b, i, code, esc } from '../core/format.js';
 
 /** @type {import('../core/registry.js').Command} */
 export default {
@@ -8,6 +8,6 @@ export default {
   run: (ctx) => {
     const flags = [ctx.isOwner && 'owner', ctx.isAdmin && 'admin'].filter(Boolean);
     const suffix = flags.length ? ` ${i(`(${flags.join(', ')})`)}` : '';
-    return `You are ${mono(esc(ctx.sender || 'unknown'))} in a ${b(ctx.level)} chat${suffix}.`;
+    return `You are ${code(esc(ctx.sender || 'unknown'))} in a ${b(ctx.level)} chat${suffix}.`;
   },
 };

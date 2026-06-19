@@ -1,4 +1,4 @@
-import { b, mono, esc } from '../core/format.js';
+import { b, code, esc } from '../core/format.js';
 
 /**
  * Detailed help for one command: its summary, usage, who may use it (derived from
@@ -16,13 +16,13 @@ export default {
     'detail. Example: "jarvis man whitelist". Use "jarvis help" for the full list.',
   run: (ctx) => {
     const name = (ctx.args[0] ?? '').toLowerCase();
-    if (!name) return `Usage: ${mono('jarvis man <command>')}. Try ${mono('jarvis help')} for the list.`;
+    if (!name) return `Usage: ${code('jarvis man <command>')}. Try ${code('jarvis help')} for the list.`;
 
     const cmd = ctx.commands.find((c) => c.name === name);
-    if (!cmd) return `No such command: ${mono(esc(name))}. Try ${mono('jarvis help')}.`;
+    if (!cmd) return `No such command: ${code(esc(name))}. Try ${code('jarvis help')}.`;
 
     const lines = [`${b(cmd.name)} - ${esc(cmd.summary)}`];
-    if (cmd.usage) lines.push(`${b('Usage')}: ${mono(cmd.usage)}`);
+    if (cmd.usage) lines.push(`${b('Usage')}: ${code(cmd.usage)}`);
     lines.push(`${b('Who')}: ${audience(cmd.scope)}`);
     if (cmd.man) lines.push('', esc(cmd.man));
     return lines.join('\n');

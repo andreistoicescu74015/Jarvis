@@ -1,4 +1,4 @@
-import { b, i, mono, bullet, esc } from '../core/format.js';
+import { b, i, code, bullet, esc } from '../core/format.js';
 
 const UNIT_MS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 
@@ -21,8 +21,8 @@ const describe = (j) =>
 
 const confirm = (r) =>
   r.repeatMs
-    ? `Scheduled ${mono(r.id)}: every ${fmtEvery(r.repeatMs)}, first at ${b(fmtTime(r.fireAt))}.`
-    : `Scheduled ${mono(r.id)} for ${b(fmtTime(r.fireAt))}.`;
+    ? `Scheduled ${code(r.id)}: every ${fmtEvery(r.repeatMs)}, first at ${b(fmtTime(r.fireAt))}.`
+    : `Scheduled ${code(r.id)} for ${b(fmtTime(r.fireAt))}.`;
 
 const whenError = (r) =>
   r.reason === 'past'
@@ -57,19 +57,19 @@ export default {
     if (!sub || sub === 'list') {
       const jobs = ctx.scheduler.list();
       if (!jobs.length) return 'Nothing scheduled here.';
-      return [b('Scheduled'), bullet(jobs.map((j) => `${mono(j.id)}: ${i(describe(j))} -> "${esc(j.text)}"`))].join('\n');
+      return [b('Scheduled'), bullet(jobs.map((j) => `${code(j.id)}: ${i(describe(j))} -> "${esc(j.text)}"`))].join('\n');
     }
 
     if (sub === 'cancel') {
       const id = (ctx.args[1] ?? '').trim();
-      if (!id) return `Usage: ${mono('jarvis schedule cancel <id>')}`;
-      return ctx.scheduler.cancel(id).ok ? `Cancelled ${mono(id)}.` : `No scheduled message "${esc(id)}" here.`;
+      if (!id) return `Usage: ${code('jarvis schedule cancel <id>')}`;
+      return ctx.scheduler.cancel(id).ok ? `Cancelled ${code(id)}.` : `No scheduled message "${esc(id)}" here.`;
     }
 
     if (sub === 'in' || sub === 'every') {
       const spec = ctx.args[1];
       const text = ctx.args.slice(2).join(' ').trim();
-      if (!spec || !text) return `Usage: ${mono(`jarvis schedule ${sub} <${sub === 'every' ? '1d' : '2h'}> <message>`)}`;
+      if (!spec || !text) return `Usage: ${code(`jarvis schedule ${sub} <${sub === 'every' ? '1d' : '2h'}> <message>`)}`;
       const r = ctx.scheduler.add(`${sub} ${spec}`, text);
       return r.ok ? confirm(r) : whenError(r);
     }
@@ -78,11 +78,11 @@ export default {
       const date = ctx.args[1];
       const time = ctx.args[2];
       const text = ctx.args.slice(3).join(' ').trim();
-      if (!date || !time || !text) return `Usage: ${mono('jarvis schedule at <YYYY-MM-DD> <HH:MM> <message>')}`;
+      if (!date || !time || !text) return `Usage: ${code('jarvis schedule at <YYYY-MM-DD> <HH:MM> <message>')}`;
       const r = ctx.scheduler.add(`at ${date} ${time}`, text);
       return r.ok ? confirm(r) : whenError(r);
     }
 
-    return `Usage: ${mono('jarvis schedule in <2h> <msg> | at <YYYY-MM-DD> <HH:MM> <msg> | every <1d> <msg> | list | cancel <id>')}`;
+    return `Usage: ${code('jarvis schedule in <2h> <msg> | at <YYYY-MM-DD> <HH:MM> <msg> | every <1d> <msg> | list | cancel <id>')}`;
   },
 };
