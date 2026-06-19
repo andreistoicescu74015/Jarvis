@@ -1,4 +1,4 @@
-import { b, i, mono, bullet, esc } from '../core/format.js';
+import { b, i, code, bullet, esc } from '../core/format.js';
 
 /**
  * Owner-only: list the groups Jarvis is a member of, each with its id, so the owner
@@ -21,7 +21,7 @@ export default {
     const lines = groups
       .slice()
       .sort((a, b2) => String(a.name).localeCompare(String(b2.name)))
-      .map((g) => `${b(esc(g.name))} ${mono(esc(g.id))}`);
+      .map((g) => `${b(esc(g.name))} ${code(esc(g.id))}`);
     return [`${b('Groups')} ${i(`(${groups.length})`)}`, bullet(lines)].join('\n');
   },
 };

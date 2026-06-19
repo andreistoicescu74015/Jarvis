@@ -21,13 +21,15 @@ const BOLD = String.fromCharCode(1);
 const ITALIC = String.fromCharCode(2);
 const STRIKE = String.fromCharCode(3);
 const MONO = String.fromCharCode(4);
+const CODE = String.fromCharCode(5);
 const ZWSP = String.fromCharCode(0x200b); // zero-width space, used to defang user markers
-const SENTINELS = new RegExp(`[${BOLD}${ITALIC}${STRIKE}${MONO}]`, 'g');
+const SENTINELS = new RegExp(`[${BOLD}${ITALIC}${STRIKE}${MONO}${CODE}]`, 'g');
 
 export const b = (t) => `${BOLD}${t}${BOLD}`;
 export const i = (t) => `${ITALIC}${t}${ITALIC}`;
 export const strike = (t) => `${STRIKE}${t}${STRIKE}`;
-export const mono = (t) => `${MONO}${t}${MONO}`; // monospace (WhatsApp has only the triple-backtick form)
+export const mono = (t) => `${MONO}${t}${MONO}`; // monospace block: triple-backtick (for code that stands out)
+export const code = (t) => `${CODE}${t}${CODE}`; // inline code: single-backtick (commands, ids, short references)
 
 /** A bulleted list from an array of (already-built) lines (`- ` renders as a bullet on WhatsApp too). */
 export const bullet = (items) => items.map((x) => `- ${x}`).join('\n');
@@ -43,13 +45,14 @@ export const quote = (t) => String(t).split('\n').map((l) => `> ${l}`).join('\n'
  */
 export const esc = (text) => String(text ?? '').replace(SENTINELS, '').replace(/[*_~`]/g, `$&${ZWSP}`);
 
-/** Render neutral markup to WhatsApp formatting (`*bold*`, `_italic_`, `~strike~`, ```mono```). */
+/** Render neutral markup to WhatsApp formatting: *bold*, _italic_, ~strike~, ```mono```, `code`. */
 export const toWhatsApp = (text) =>
   String(text ?? '')
     .replaceAll(BOLD, '*')
     .replaceAll(ITALIC, '_')
     .replaceAll(STRIKE, '~')
-    .replaceAll(MONO, '```');
+    .replaceAll(MONO, '```')
+    .replaceAll(CODE, '`');
 
 /** Render neutral markup to clean plain text (all markup removed) for the CLI and tests. */
 export const toPlain = (text) => String(text ?? '').replace(SENTINELS, '').replaceAll(ZWSP, '');
