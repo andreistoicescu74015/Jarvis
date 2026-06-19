@@ -42,7 +42,7 @@ function timestampMs(wa) {
  *   now?: () => number,
  *   groupCacheTtlMs?: number,
  *   offlineGraceMs?: number,
- *   humanize?: { markOnline?: boolean, readReceipts?: boolean, readDelayMs?: number, typingPerCharMs?: number, typingMaxMs?: number, sendJitterMs?: number },
+ *   humanize?: { markOnline?: boolean, profileName?: string, readReceipts?: boolean, readDelayMs?: number, typingPerCharMs?: number, typingMaxMs?: number, sendJitterMs?: number },
  * }} opts
  * @returns {import('../core/app.js').Adapter}
  */
@@ -65,11 +65,13 @@ export function createWhatsAppAdapter({
   // Human-presence heuristics (anti-ban). All optional, conservative defaults; tuned via env at
   // the composition root. `markOnline` presents as online on connect - REQUIRED for WhatsApp to
   // register delivery (two ticks) and read receipts: an offline ("unavailable") client acks
-  // incoming messages as "inactive", so they stay on one tick and "seen" never shows.
-  // `sendJitterMs` randomizes each send; `typing*` shape the "typing..." duration; `read*`
-  // govern the read-before-reply receipt.
+  // incoming messages as "inactive", so they stay on one tick and "seen" never shows. WhatsApp
+  // only broadcasts that presence if the account HAS A PROFILE NAME, so `profileName` sets one
+  // when the account has none (empty string = never touch the name). `sendJitterMs` randomizes
+  // each send; `typing*` shape the "typing..." duration; `read*` govern the read-before-reply receipt.
   const {
     markOnline = true,
+    profileName = 'Jarvis',
     readReceipts = true,
     readDelayMs = 1000,
     typingPerCharMs = 50,
@@ -114,6 +116,24 @@ export function createWhatsAppAdapter({
     }
   }
 
+  // Go online so WhatsApp activates receipts. Crucial detail: WhatsApp ignores an online presence
+  // from an account with no profile name (Baileys logs "no name present, ignoring presence update"),
+  // which silently leaves every incoming message on one tick. So if the account is unnamed, give it
+  // `profileName` first, then broadcast 'available' (which flips delivery + read receipts to active).
+  // Best-effort and runs on every (re)connect; skipped entirely when markOnline is off.
+  async function ensurePresence() {
+    if (!markOnline || !sock || stopped) return;
+    try {
+      if (!sock.user?.name && profileName) {
+        await sock.updateProfileName(profileName);
+        log.info('wa: set profile name (account had none)', { name: profileName });
+      }
+      await sock.sendPresenceUpdate('available');
+    } catch (err) {
+      log.warn('wa: could not set presence/name', { error: err?.message ?? String(err) });
+    }
+  }
+
   function connect() {
     sock = makeSocket({
       auth: authState.state,
@@ -142,6 +162,7 @@ export function createWhatsAppAdapter({
       attempts = 0;
       connectedAt = now();
       log.info('wa: connected', { user: sock?.user?.id });
+      await ensurePresence(); // name the account if needed, then go online so receipts register
       return;
     }
     if (connection !== 'close' || stopped) return;
