@@ -2,7 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from '../src/store/index.js';
 import { createScheduler, parseWhen } from '../src/core/scheduler.js';
-import { createSendBudget } from '../src/core/send-budget.js';
 
 const M = 60_000;
 const H = 3_600_000;
@@ -114,21 +113,14 @@ test('scheduler: a job cancelled during its own delivery is not resurrected', as
   assert.equal(s.list('A').length, 0); // stays cancelled - not rescheduled back to life
 });
 
-test('scheduler: tick respects the send budget, deferring jobs when it is spent', async () => {
+test('scheduler: every due job fires in one tick (pacing is downstream, not here)', async () => {
   let now = 0;
-  const store = createStore({ path: ':memory:' });
-  const s = createScheduler(store, { now: () => now });
-  const budget = createSendBudget(store, {
-    now: () => now,
-    perCommand: { perHour: 60, perDay: 300 }, // one every 60s
-    global: { perHour: 60, perDay: 300 },
-  });
+  const s = createScheduler(createStore({ path: ':memory:' }), { now: () => now });
   s.add({ chatId: 'A', when: 'in 1h', text: '1' });
   s.add({ chatId: 'A', when: 'in 1h', text: '2' }); // both due at 1h
   const sent = [];
-  const deliver = (_c, t) => sent.push(t);
-  // Both are due, but the budget allows only one per window -> the second waits.
-  assert.deepEqual(await s.tick(deliver, H, budget), { fired: 1, failed: 0 });
-  assert.deepEqual(sent, ['1']);
-  assert.equal(s.list('A').length, 1); // the second is still pending, not delivered or dropped
+  // No budget gating anymore: both due jobs go out; the platform's send limiter spaces them.
+  assert.deepEqual(await s.tick((_c, t) => sent.push(t), H), { fired: 2, failed: 0 });
+  assert.deepEqual(sent, ['1', '2']); // both delivered, none deferred
+  assert.equal(s.list('A').length, 0);
 });
