@@ -42,8 +42,8 @@ export function checkScope(scope, ctx) {
   if (scope.owner && !ctx.isOwner) {
     return { ok: false, reason: 'owner only' };
   }
-  // admin is meaningful only in groups; in private the user is the authority.
-  if (scope.admin && ctx.level === 'group' && !ctx.isAdmin) {
+  // admin applies in any multi-user chat (group or community); in private the user is the authority.
+  if (scope.admin && ctx.level !== 'private' && !ctx.isAdmin) {
     return { ok: false, reason: 'admins only' };
   }
   return { ok: true };
