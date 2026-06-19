@@ -42,7 +42,7 @@ function timestampMs(wa) {
  *   now?: () => number,
  *   groupCacheTtlMs?: number,
  *   offlineGraceMs?: number,
- *   humanize?: { readReceipts?: boolean, readDelayMs?: number, typingPerCharMs?: number, typingMaxMs?: number, sendJitterMs?: number },
+ *   humanize?: { markOnline?: boolean, readReceipts?: boolean, readDelayMs?: number, typingPerCharMs?: number, typingMaxMs?: number, sendJitterMs?: number },
  * }} opts
  * @returns {import('../core/app.js').Adapter}
  */
@@ -62,10 +62,14 @@ export function createWhatsAppAdapter({
   offlineGraceMs = 15 * 1000,
   humanize = {},
 } = {}) {
-  // Human-timing heuristics (anti-ban). All optional, conservative defaults; tuned via env at
-  // the composition root. `sendJitterMs` randomizes each send; `typing*` shape the "typing..."
-  // duration; `read*` govern the read-before-reply receipt.
+  // Human-presence heuristics (anti-ban). All optional, conservative defaults; tuned via env at
+  // the composition root. `markOnline` presents as online on connect - REQUIRED for WhatsApp to
+  // register delivery (two ticks) and read receipts: an offline ("unavailable") client acks
+  // incoming messages as "inactive", so they stay on one tick and "seen" never shows.
+  // `sendJitterMs` randomizes each send; `typing*` shape the "typing..." duration; `read*`
+  // govern the read-before-reply receipt.
   const {
+    markOnline = true,
     readReceipts = true,
     readDelayMs = 1000,
     typingPerCharMs = 50,
@@ -114,7 +118,7 @@ export function createWhatsAppAdapter({
     sock = makeSocket({
       auth: authState.state,
       logger: waLog,
-      markOnlineOnConnect: false,
+      markOnlineOnConnect: markOnline,
       syncFullHistory: false,
       browser: Browsers.ubuntu('Jarvis'),
     });

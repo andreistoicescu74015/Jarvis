@@ -9,8 +9,9 @@ function fakeAuthState() {
 
 /** A makeSocket stub that records every socket it builds. */
 function fakeSocketFactory() {
-  const make = () => {
+  const make = (config) => {
     const sock = {
+      config,
       ev: new EventEmitter(),
       user: { id: '1234:5@s.whatsapp.net' },
       sent: [],
@@ -177,4 +178,14 @@ test('adapter: read receipts can be turned off via humanize', async () => {
   });
   await tick();
   assert.equal(makeSocket.sockets[0].read.length, 0);
+});
+
+test('adapter: marks the client online on connect by default; humanize.markOnline can turn it off', () => {
+  const on = fakeSocketFactory();
+  createWhatsAppAdapter(opts({ makeSocket: on })).start({ onMessage: async () => {} });
+  assert.equal(on.sockets[0].config.markOnlineOnConnect, true); // online -> WhatsApp registers delivery/read
+
+  const off = fakeSocketFactory();
+  createWhatsAppAdapter(opts({ makeSocket: off, humanize: { markOnline: false } })).start({ onMessage: async () => {} });
+  assert.equal(off.sockets[0].config.markOnlineOnConnect, false);
 });
