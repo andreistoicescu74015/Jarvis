@@ -262,6 +262,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
             propose: () => links.propose(chatId),
             accept: (code) => links.accept(code, chatId),
             unlink: () => links.unlink(chatId),
+            clusters: () => links.clusters(),
           }
         : undefined,
       resolveUser: resolveUser ?? ((token) => String(token ?? '').trim()),
@@ -276,6 +277,8 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
             list: () => scheduler.list(chatId),
             cancel: (id) => scheduler.cancel(id, chatId),
             clear: () => scheduler.clearChat(chatId),
+            setEnabled: (id, on) => scheduler.setEnabled(id, chatId, on),
+            setEnabledAll: (on) => scheduler.setEnabledAll(chatId, on),
           }
         : undefined,
       // Owner reset: wipe THIS context's DATA - its notes and schedules. NOT its access lists: those

@@ -90,3 +90,12 @@ test('schedule: clear (and "cancel all") cancels every scheduled message here', 
   await handle(msg('jarvis schedule in 1h c'));
   assert.match(await handle(msg('jarvis schedule cancel all')), /Cancelled all 1/i); // alias
 });
+
+test('schedule: disable pauses without deleting; list tags it; enable resumes', async () => {
+  const { handle } = setup();
+  await handle(msg('jarvis schedule every 1d standup'));
+  assert.match(await handle(msg('jarvis schedule disable s1')), /Paused s1/i);
+  assert.match(await handle(msg('jarvis schedule list')), /\(paused\)/i); // kept, tagged
+  assert.match(await handle(msg('jarvis schedule enable s1')), /Resumed s1/i);
+  assert.match(await handle(msg('jarvis schedule disable all')), /Paused all 1/i);
+});

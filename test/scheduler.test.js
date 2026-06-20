@@ -160,3 +160,26 @@ test('scheduler: add reports empty text distinctly from a bad time', () => {
   assert.deepEqual(s.add({ chatId: 'A', when: 'in 1h', text: '   ' }), { ok: false, reason: 'empty-text' });
   assert.equal(s.add({ chatId: 'A', when: 'nonsense', text: 'hi' }).reason, 'bad-when');
 });
+
+test('scheduler: a disabled job is kept but skipped by tick; enabling resumes it', async () => {
+  const s = createScheduler(createStore({ path: ':memory:' }), { now: () => 0 });
+  const a = s.add({ chatId: 'A', when: 'in 1h', text: 'x' });
+  assert.equal(s.setEnabled(a.id, 'A', false).ok, true); // pause
+  const sent = [];
+  assert.deepEqual(await s.tick((_c, t) => sent.push(t), H), { fired: 0, failed: 0 }); // skipped while paused
+  assert.equal(s.list('A')[0].disabled, true); // still there, marked paused
+  s.setEnabled(a.id, 'A', true); // resume
+  assert.deepEqual(await s.tick((_c, t) => sent.push(t), H), { fired: 1, failed: 0 });
+  assert.deepEqual(sent, ['x']);
+});
+
+test('scheduler: setEnabledAll pauses/resumes a whole chat; another chat is untouched', () => {
+  const s = createScheduler(createStore({ path: ':memory:' }), { now: () => 0 });
+  s.add({ chatId: 'A', when: 'in 1h', text: '1' });
+  s.add({ chatId: 'A', when: 'in 2h', text: '2' });
+  s.add({ chatId: 'B', when: 'in 1h', text: 'b' });
+  assert.equal(s.setEnabledAll('A', false), 2);
+  assert.ok(s.list('A').every((j) => j.disabled));
+  assert.ok(s.list('B').every((j) => !j.disabled)); // B untouched
+  assert.equal(s.setEnabled('nope', 'A', true).ok, false); // unknown id
+});

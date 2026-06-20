@@ -64,6 +64,13 @@ export function createLinks(store, {
     return o ? membersOf(o) : [chatId];
   }
 
+  /** Every overlay as a list of its member groups (for display). Solo groups are not listed. */
+  function clusters() {
+    const byOverlay = {};
+    for (const { key, value } of member.list()) (byOverlay[value] ??= []).push(key);
+    return Object.values(byOverlay);
+  }
+
   /** Create a one-time code (TTL) this group shares to invite another group to link. */
   function propose(from) {
     const code = makeCode();
@@ -142,5 +149,5 @@ export function createLinks(store, {
     clearNamespace(overlayNs(overlay));
   }
 
-  return { nsFor, chats, propose, accept, unlink };
+  return { nsFor, chats, clusters, propose, accept, unlink };
 }
