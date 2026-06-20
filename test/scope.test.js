@@ -60,6 +60,15 @@ test('checkScope: level must match', () => {
   assert.equal(checkScope({ level: 'group' }, { level: 'group', isAdmin: false, isOwner: false }).ok, true);
 });
 
+test('checkScope: the owner bypasses every scope, anywhere', () => {
+  const owner = { isAdmin: false, isOwner: true };
+  assert.equal(checkScope({ owner: true }, { level: 'group', ...owner }).ok, true);
+  assert.equal(checkScope({ admin: true }, { level: 'group', ...owner }).ok, true); // need not be a group admin
+  assert.equal(checkScope({ ownerOrAdmin: true }, { level: 'group', ...owner }).ok, true);
+  assert.equal(checkScope({ proactive: true }, { level: 'private', ...owner }).ok, true);
+  assert.equal(checkScope({ level: 'group' }, { level: 'private', ...owner }).ok, true); // even a level mismatch
+});
+
 // --- integration: dispatcher enforces scope + builds ctx identity ---
 async function run(text, { commands, owner = '', match, msg = {} }) {
   const adapter = createTestAdapter();
@@ -79,6 +88,16 @@ test('dispatch: owner-only command is denied for a non-owner', async () => {
 test('dispatch: owner-only command runs for the owner', async () => {
   const sent = await run('jarvis secret', { commands: [ownerCmd], owner: 'boss', msg: { sender: 'boss' } });
   assert.deepEqual(sent.map((s) => s.text), ['top secret']);
+});
+
+test('dispatch: the owner runs an admin-only command without being a group admin', async () => {
+  const adminCmd = { name: 'adm', summary: 'a', scope: { admin: true }, run: () => 'done' };
+  const sent = await run('jarvis adm', {
+    commands: [adminCmd],
+    owner: 'boss',
+    msg: { level: 'group', sender: 'boss', isAdmin: false },
+  });
+  assert.deepEqual(sent.map((s) => s.text), ['done']);
 });
 
 test('dispatch: ctx carries identity (level/sender/isOwner/isAdmin)', async () => {

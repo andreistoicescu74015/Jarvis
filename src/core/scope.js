@@ -38,6 +38,7 @@ export function sameUser(a, b) {
  */
 export function checkScope(scope, ctx) {
   if (!scope) return { ok: true };
+  if (ctx.isOwner) return { ok: true }; // the owner may run any command, anywhere - no scope restricts them
   if (scope.level && scope.level !== ctx.level) {
     return { ok: false, reason: `only in ${scope.level} chats` };
   }

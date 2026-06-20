@@ -106,7 +106,10 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     // out of ownership. The GLOBAL gate is checked before the empty / unknown-command
     // replies, so a blocked sender is fully silent (even to a bare prefix or junk).
     // A denial is logged for audit, never surfaced in chat.
-    const exemptFromLists = isOwner || command === 'owner';
+    // The owner bypasses the lists everywhere; a group/community admin bypasses them in their own
+    // (already-active) chat - admins always have access where Jarvis runs. The bootstrap `owner`
+    // command stays exempt so the bot can never be locked out of ownership.
+    const exemptFromLists = isOwner || isAdmin || command === 'owner';
     if (access && !exemptFromLists && !access.passes('*', chatId, sender)) {
       log.info('access deny (global)', { sender, chatId });
       return undefined;
