@@ -6,6 +6,7 @@
  * @property {boolean} [admin]                        Require a group admin (ignored in private).
  * @property {boolean} [ownerOrAdmin]                 Management command: the owner anywhere, or a group/community admin in their own chat (owner-only in private).
  * @property {boolean} [owner]                        Require the bot owner.
+ * @property {boolean} [proactive]                    Unattended-posting command: group-only (refused in a private chat unless the owner).
  *
  * @typedef {Object} ScopeResult
  * @property {boolean} ok
@@ -52,6 +53,11 @@ export function checkScope(scope, ctx) {
   // admin applies in any multi-user chat (group or community); in private the user is the authority.
   if (scope.admin && ctx.level !== 'private' && !ctx.isAdmin) {
     return { ok: false, reason: 'admins only' };
+  }
+  // proactive (unattended-posting) commands are group-only: refused in a private chat for everyone
+  // but the owner, so unattended output stays in authorized groups (ADR-0008).
+  if (scope.proactive && ctx.level === 'private' && !ctx.isOwner) {
+    return { ok: false, reason: 'only in groups' };
   }
   return { ok: true };
 }
