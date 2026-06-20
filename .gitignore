@@ -9,6 +9,9 @@ node_modules/
 # Local runtime data (the WhatsApp session). Never commit it.
 data/
 
+# Local backup archives (made by scripts/backup.sh). Keep these OFF the repo and off the machine.
+backups/
+
 # Logs
 *.log
 

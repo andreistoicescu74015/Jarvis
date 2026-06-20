@@ -69,7 +69,7 @@ and survives `docker compose down`.
 
 ```bash
 docker compose down -v                       # forced reset: wipe everything, new QR next start
-docker volume inspect jarvis_jarvis-data     # find where the volume lives on disk (to back it up)
+docker volume inspect jarvis_jarvis-data     # find where the volume lives on disk
 ```
 
 To re-pair while keeping your notes/data, stop the bot and remove just the auth database:
@@ -79,3 +79,18 @@ docker compose down
 docker run --rm -v jarvis_jarvis-data:/data busybox rm -f /data/wa-auth.db
 docker compose up -d
 ```
+
+### Backup & restore
+
+The volume lives on one disk, so it is **not a backup** by itself - losing the disk loses the pairing
+(a manual re-scan) and all notes, schedules, access lists, and links. Back it up to a timestamped
+archive and copy it **off this machine** (ideally on a schedule - cron or Windows Task Scheduler):
+
+```bash
+scripts/backup.sh                  # writes ./backups/jarvis-<timestamp>.tar.gz (then copy it off-machine)
+scripts/restore.sh backups/jarvis-20260620-153000.tar.gz   # stop the bot first: docker compose down
+```
+
+Both run a throwaway `busybox` container against the volume, so they need only Docker. If your compose
+project name is not `jarvis`, set `JARVIS_VOLUME` (see `docker volume ls`). Container logs are capped
+(`max-size` / `max-file` in `docker-compose.yml`) so they cannot fill the disk.
