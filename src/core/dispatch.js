@@ -127,6 +127,14 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     const scoped = checkScope(cmd.scope, { level, isAdmin, isOwner });
     if (!scoped.ok) return `Not allowed: ${scoped.reason}.`;
 
+    // Declarative capability requirements: a command lists the ctx capabilities it needs
+    // (e.g. `requires: ['scheduler']`). When one isn't wired on this platform/config, the
+    // command is uniformly reported unavailable, instead of each command hand-rolling a guard.
+    const capable = { store, access, links, activation, scheduler, lifecycle, send };
+    if (cmd.requires?.some((cap) => !capable[cap])) {
+      return 'That command is unavailable here.';
+    }
+
     // Owner-slot management for the `owner` command (claim only if free; resign only
     // by the owner). Ownership is established here explicitly, never as a side effect.
     const ownerCap = {

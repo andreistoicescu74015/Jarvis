@@ -33,8 +33,10 @@ export default {
 function audience(scope) {
   if (!scope) return 'anyone';
   if (scope.owner) return 'the owner only';
+  if (scope.ownerOrAdmin) return 'the owner, or a group admin in their own chat';
   const parts = [];
   if (scope.admin) parts.push('group admins');
   if (scope.level) parts.push(`${scope.level} chats only`);
-  return parts.length ? parts.join(', ') : 'anyone';
+  if (scope.proactive) parts.push('groups only (the owner excepted)');
+  return parts.length ? parts.join('; ') : 'anyone';
 }

@@ -9,8 +9,9 @@ const commandsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', '
 // Architecture guard: commands are leaves. A command must never import another
 // command (or any sibling in commands/). Shared behavior belongs in the core,
 // reached via ctx - so commands stay independent, testable, and removable.
+// `index.js` is exempt: it is the manifest that aggregates the leaves for the roots.
 test('no command imports a sibling command', async () => {
-  const files = (await readdir(commandsDir)).filter((f) => f.endsWith('.js'));
+  const files = (await readdir(commandsDir)).filter((f) => f.endsWith('.js') && f !== 'index.js');
   assert.ok(files.length > 0, 'expected at least one command');
   for (const file of files) {
     const src = await readFile(join(commandsDir, file), 'utf8');

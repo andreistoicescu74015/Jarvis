@@ -118,3 +118,11 @@ test('dispatch: a command can reply via ctx.reply (lines collected and joined)',
   const sent = await run('jarvis chatty', [chatty]);
   assert.deepEqual(sent, [{ chatId: 'test-chat', text: 'line 1\nline 2' }]);
 });
+
+test('dispatch: a command requiring an absent capability is reported unavailable', async () => {
+  const needs = { name: 'needs', summary: 'needs lifecycle', requires: ['lifecycle'], run: () => 'ran' };
+  const without = createDispatcher(createRegistry([needs]));
+  assert.match(await without({ text: 'jarvis needs', sender: 'x' }), /unavailable here/i);
+  const withCap = createDispatcher(createRegistry([needs]), { lifecycle: {} });
+  assert.equal(await withCap({ text: 'jarvis needs', sender: 'x' }), 'ran');
+});
