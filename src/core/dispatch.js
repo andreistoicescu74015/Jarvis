@@ -5,7 +5,7 @@ import { createAccessPolicy, accessContextFor } from './access.js';
 import { createLinks } from './links.js';
 import { createActivation } from './activation.js';
 import { nullLogger } from './log.js';
-import { code, esc } from './format.js';
+import { b, code, esc } from './format.js';
 
 /**
  * The capabilities a command receives. Grows over later issues (ai, scheduler, ...).
@@ -54,6 +54,47 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
   const links = store ? createLinks(store) : null;
   const activation = store ? createActivation(store) : null;
 
+  // First-owner lockdown: the moment an owner is established (OWNER_JID at startup, or `owner claim`),
+  // lock Jarvis's DMs to them by enabling the private whitelist - a stranger can no longer DM the bot.
+  // Done once (a flag in the store), so a later `whitelist * disable` by the owner survives restarts.
+  const lockPrivateOnce = () => {
+    if (!store || !access) return;
+    const meta = store.scoped('owner-meta');
+    if (meta.get('privateLocked')) return;
+    access.enable('whitelist', '*', 'private');
+    meta.set('privateLocked', true);
+  };
+  if (ownerResolver.current) lockPrivateOnce(); // env owner: lock at startup
+
+  // Activating a group authorizes it AND resets it to a clean, admins-only baseline: each activation
+  // wipes the group's prior lists, then enables an empty whitelist on the whole bot (so only admins,
+  // who bypass, can use it until an admin whitelists others or opens it up), and announces in the
+  // group. Idempotent - re-activating an already-active group does nothing. Shared by the `groups`
+  // command and the owner's auto-activation in the gate below.
+  const activationNotice = () =>
+    [
+      b('Jarvis is active here.'),
+      `Admins can use me right away. By default only admins can - to let others in an admin runs ` +
+        `${code(`${prefix} whitelist * add @person`)}, or opens me to everyone with ${code(`${prefix} whitelist * disable`)}. ` +
+        `Type ${code(`${prefix} help`)} to see what I can do.`,
+    ].join('\n');
+
+  async function activateGroup(id, by) {
+    if (!activation || !activation.activate(id, by)) return false; // no activation, or already active
+    if (access) {
+      access.clearContext(id); // a fresh activation starts from clean lists...
+      access.enable('whitelist', '*', id); // ...locked to admins (who bypass) until an admin opens it
+    }
+    if (send) await send(id, activationNotice());
+    return true;
+  }
+  function deactivateGroup(id) {
+    if (!activation) return false;
+    const was = activation.deactivate(id);
+    if (was && access) access.clearContext(id); // tear down the group's lists with it
+    return was;
+  }
+
   return async function handle(msg) {
     const parsed = parse(msg.text, prefix, { addressed: msg.addressed });
     if (!parsed) return undefined; // not addressed to the bot
@@ -95,11 +136,20 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       requireActivation &&
       activation &&
       (level === 'group' || level === 'community') &&
-      !activation.isActive(chatId) &&
-      !(isOwner && command === 'groups')
+      !activation.isActive(chatId)
     ) {
-      log.info('inactive group: not activated', { chatId, command, sender });
-      return undefined;
+      if (!isOwner) {
+        log.info('inactive group: not activated', { chatId, command, sender });
+        return undefined; // a non-owner stays silent until the owner activates the group
+      }
+      // The owner's mere address authorizes the group: any message (even a bare "jarvis") activates
+      // it, then proceeds. `groups` is the exception - it activates explicitly, so its own
+      // confirmation reads cleanly and is not pre-empted here.
+      if (command !== 'groups') {
+        await activateGroup(chatId, sender);
+        if (!command) return undefined; // bare prefix: the activation notice is the reply (no "Try help")
+        // else fall through and run the command in the now-active group
+      }
     }
 
     // Owner-managed access lists (ADR-0006). The owner bypasses the whole layer, and
@@ -152,11 +202,18 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
         if (ownerResolver.current || level !== 'private') return false;
         ownerResolver.claim(sender);
         log.warn('owner claimed', { sender });
+        lockPrivateOnce(); // the first owner -> lock the bot's DMs to them by default
         return true;
       },
       resign: () => {
         log.warn('owner resigned', { sender });
         ownerResolver.resign();
+        // Symmetric with the claim-time lock: clear the private lockdown so the next owner re-locks
+        // cleanly, and DMs are not left with an owner-less empty whitelist only `owner` can see past.
+        if (store && access) {
+          access.disable('*', 'private');
+          store.scoped('owner-meta').delete('privateLocked');
+        }
       },
     };
 
@@ -183,8 +240,8 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       activation: activation
         ? {
             isActive: (id) => activation.isActive(id),
-            activate: (id, by = sender) => activation.activate(id, by),
-            deactivate: (id) => activation.deactivate(id),
+            activate: (id, by = sender) => activateGroup(id, by),
+            deactivate: (id) => deactivateGroup(id),
             list: () => activation.list(),
           }
         : undefined,

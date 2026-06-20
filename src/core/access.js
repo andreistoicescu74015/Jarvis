@@ -102,6 +102,13 @@ export function createAccessPolicy(store, { match = sameUser, namespace = 'acces
     write(target, context, rec);
   }
 
+  /** Remove every rule for a context at once (a group being (re)activated or torn down). */
+  function clearContext(context) {
+    for (const { key } of kv.list()) {
+      if (key.slice(key.indexOf(SEP) + 1) === context) kv.delete(key);
+    }
+  }
+
   /** The stored record for one target/context (for `show`). */
   function get(target, context) {
     return read(target, context);
@@ -115,5 +122,5 @@ export function createAccessPolicy(store, { match = sameUser, namespace = 'acces
     });
   }
 
-  return { passes, add, remove, enable, disable, clear, get, all };
+  return { passes, add, remove, enable, disable, clear, clearContext, get, all };
 }

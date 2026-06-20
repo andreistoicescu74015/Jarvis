@@ -27,10 +27,19 @@ test('activation gate: a non-owner command is silent in an inactive group', asyn
   store.close();
 });
 
-test('activation gate: in an inactive group even the owner only gets the groups command through', async () => {
+test('activation gate: the owner auto-activates an inactive group just by addressing it', async () => {
   const { store, handle } = setup();
-  assert.equal(await handle({ text: 'jarvis ping', sender: 'boss', level: 'group', chatId: 'g@g.us' }), undefined);
-  // the owner's `groups` command passes, and activates the group from inside
+  // the owner's command in an inactive group activates it, then runs
+  assert.equal(toPlain(await handle({ text: 'jarvis ping', sender: 'boss', level: 'group', chatId: 'g@g.us' })), 'pong');
+  assert.equal(createActivation(store).isActive('g@g.us'), true);
+  // the fresh activation is admin-only: a non-admin is blocked, an admin passes
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'u', level: 'group', chatId: 'g@g.us' }), undefined);
+  assert.equal(toPlain(await handle({ text: 'jarvis ping', sender: 'u', level: 'group', chatId: 'g@g.us', isAdmin: true })), 'pong');
+  store.close();
+});
+
+test('activation gate: the owner can also activate explicitly with `groups activate`', async () => {
+  const { store, handle } = setup();
   const act = toPlain(await handle({ text: 'jarvis groups activate', sender: 'boss', level: 'group', chatId: 'g@g.us' }));
   assert.match(act, /Activated Jarvis in/);
   assert.equal(createActivation(store).isActive('g@g.us'), true);
@@ -55,7 +64,8 @@ test('activation gate: a community is gated like a group', async () => {
 
 test('activation gate: private chats are never gated by activation', async () => {
   const { store, handle } = setup();
-  const out = toPlain(await handle({ text: 'jarvis ping', sender: 'u', level: 'private', chatId: 'dm' }));
+  // the owner (not blocked by the private lockdown) gets a reply in a DM - no activation involved
+  const out = toPlain(await handle({ text: 'jarvis ping', sender: 'boss', level: 'private', chatId: 'dm' }));
   assert.equal(out, 'pong');
   store.close();
 });
@@ -65,5 +75,24 @@ test('activation gate: off by default (requireActivation unset) - groups respond
   const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store }); // no requireActivation
   const out = toPlain(await handle({ text: 'jarvis ping', sender: 'u', level: 'group', chatId: 'g@g.us' }));
   assert.equal(out, 'pong');
+  store.close();
+});
+
+test('activation: a fresh activation announces in the group', async () => {
+  const store = createStore({ path: ':memory:' });
+  const sent = [];
+  const handle = createDispatcher(createRegistry([ping, groups]), {
+    owner: 'boss',
+    store,
+    requireActivation: true,
+    send: (target, text) => sent.push({ target, text }),
+  });
+  await handle({ text: 'jarvis groups activate', sender: 'boss', level: 'group', chatId: 'g@g.us' });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].target, 'g@g.us');
+  assert.match(toPlain(sent[0].text), /Jarvis is active here/);
+  // re-activating an already-active group does not re-announce
+  await handle({ text: 'jarvis groups activate', sender: 'boss', level: 'group', chatId: 'g@g.us' });
+  assert.equal(sent.length, 1);
   store.close();
 });

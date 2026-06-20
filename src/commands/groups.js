@@ -42,11 +42,11 @@ async function manage(ctx, sub) {
   const name = match ? b(esc(match.name)) : code(esc(id));
 
   if (sub === 'activate') {
-    return ctx.activation.activate(id, ctx.sender)
+    return (await ctx.activation.activate(id, ctx.sender))
       ? `Activated Jarvis in ${name}.`
       : `${name} is already active.`;
   }
-  return ctx.activation.deactivate(id) ? `Deactivated Jarvis in ${name}.` : `${name} was not active.`;
+  return (await ctx.activation.deactivate(id)) ? `Deactivated Jarvis in ${name}.` : `${name} was not active.`;
 }
 
 /** List the groups, tagging each active/inactive when an activation registry is configured. */
