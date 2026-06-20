@@ -231,3 +231,14 @@ test('access cmd: addressing the bot by @mention does not target the bot itself'
   assert.equal(await handle({ text: 'jarvis ping', sender: '99@s.whatsapp.net', chatId: 'c1', level: 'group' }), undefined);
   assert.equal(await handle({ text: 'jarvis ping', sender: 'other', chatId: 'c1', level: 'group' }), 'pong');
 });
+
+test('access cmd: a group admin bypasses the access lists (always has access where Jarvis runs)', async () => {
+  const { boss, handle } = setup();
+  await boss('jarvis blacklist ping add adm');
+  await boss('jarvis blacklist ping add bob');
+  await boss('jarvis blacklist ping enable');
+  // a non-admin on the blacklist is blocked here...
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'bob', chatId: 'c1', level: 'group' }), undefined);
+  // ...but an admin passes regardless of the list (their group, their access)
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'adm', chatId: 'c1', level: 'group', isAdmin: true }), 'pong');
+});
