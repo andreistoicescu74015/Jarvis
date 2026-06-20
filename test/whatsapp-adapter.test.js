@@ -137,6 +137,65 @@ test('adapter: 515 restartRequired recreates the socket; 401 loggedOut wipes and
   assert.equal(authState.cleared, 1); // creds wiped
 });
 
+test('adapter: a transient close reconnects with backoff up to a cap, then gives up (onFatal)', async () => {
+  const makeSocket = fakeSocketFactory();
+  const fatals = [];
+  const a = createWhatsAppAdapter(opts({ makeSocket, onFatal: (r) => fatals.push(r), maxReconnects: 3 }));
+  a.start({ onMessage: async () => {} });
+
+  // each transient close (status 428, no 'open' in between) recreates the socket, up to the cap
+  for (let i = 0; i < 3; i++) {
+    makeSocket.sockets.at(-1).ev.emit('connection.update', {
+      connection: 'close',
+      lastDisconnect: { error: { output: { statusCode: 428 } } },
+    });
+    await tick();
+  }
+  assert.equal(makeSocket.sockets.length, 4); // 1 initial + 3 reconnects
+  assert.deepEqual(fatals, []); // not given up yet
+
+  // the next consecutive failure exceeds the cap -> stop, no new socket, onFatal('exhausted')
+  makeSocket.sockets.at(-1).ev.emit('connection.update', {
+    connection: 'close',
+    lastDisconnect: { error: { output: { statusCode: 428 } } },
+  });
+  await tick();
+  assert.equal(makeSocket.sockets.length, 4); // no further reconnect
+  assert.deepEqual(fatals, ['exhausted']);
+});
+
+test('adapter: a successful open resets the reconnect counter', async () => {
+  const makeSocket = fakeSocketFactory();
+  const fatals = [];
+  const a = createWhatsAppAdapter(opts({ makeSocket, onFatal: (r) => fatals.push(r), maxReconnects: 2 }));
+  a.start({ onMessage: async () => {} });
+
+  makeSocket.sockets.at(-1).ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 428 } } } });
+  await tick();
+  makeSocket.sockets.at(-1).ev.emit('connection.update', { connection: 'open' }); // reconnected -> reset
+  await tick();
+  // after a reset we can fail twice more before the cap, proving the counter cleared
+  makeSocket.sockets.at(-1).ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 428 } } } });
+  await tick();
+  assert.deepEqual(fatals, []); // would have been 'exhausted' if the counter had not reset
+});
+
+test('adapter: a fatal close (replaced/forbidden/badSession) stops without reconnecting', async () => {
+  for (const [code, reason] of [[440, 'replaced'], [403, 'forbidden'], [500, 'badSession']]) {
+    const makeSocket = fakeSocketFactory();
+    const fatals = [];
+    const a = createWhatsAppAdapter(opts({ makeSocket, onFatal: (r) => fatals.push(r) }));
+    a.start({ onMessage: async () => {} });
+    makeSocket.sockets[0].ev.emit('connection.update', {
+      connection: 'close',
+      lastDisconnect: { error: { output: { statusCode: code } } },
+    });
+    await tick();
+    assert.equal(makeSocket.sockets.length, 1, `code ${code}: no reconnect`);
+    assert.deepEqual(fatals, [reason], `code ${code}: onFatal(${reason})`);
+  }
+});
+
 test('adapter: listGroups maps participating groups to {id, name} (id when no subject)', async () => {
   const makeSocket = fakeSocketFactory();
   const a = createWhatsAppAdapter(opts({ makeSocket }));
