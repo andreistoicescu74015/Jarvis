@@ -45,6 +45,16 @@ test('checkScope: ownerOrAdmin - owner anywhere, an admin in a group, nobody els
   assert.equal(checkScope(S, { level: 'private', isAdmin: false, isOwner: false }).ok, false); // non-owner in private
 });
 
+test('checkScope: proactive commands are group-only except for the owner', () => {
+  // a private chat: refused for everyone but the owner (even an "admin" in private)
+  assert.equal(checkScope({ proactive: true }, { level: 'private', isAdmin: false, isOwner: false }).ok, false);
+  assert.equal(checkScope({ proactive: true }, { level: 'private', isAdmin: true, isOwner: false }).ok, false);
+  assert.equal(checkScope({ proactive: true }, { level: 'private', isAdmin: false, isOwner: true }).ok, true);
+  // groups and communities are fine regardless of owner/admin (admin is a separate flag)
+  assert.equal(checkScope({ proactive: true }, { level: 'group', isAdmin: false, isOwner: false }).ok, true);
+  assert.equal(checkScope({ proactive: true }, { level: 'community', isAdmin: false, isOwner: false }).ok, true);
+});
+
 test('checkScope: level must match', () => {
   assert.equal(checkScope({ level: 'group' }, { level: 'private', isAdmin: false, isOwner: false }).ok, false);
   assert.equal(checkScope({ level: 'group' }, { level: 'group', isAdmin: false, isOwner: false }).ok, true);

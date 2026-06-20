@@ -31,10 +31,11 @@ const whenError = (r) =>
 
 /**
  * Schedule a message for the bot to post later - once or repeating - without an inbound
- * trigger (the opt-in proactive posting the design allows). Authority-gated by
- * `scope.admin`: a group admin, or the user in a private chat. Bound to this chat: a job
- * fires here, and `list`/`cancel` only see this chat's jobs. Parsing and persistence live
- * in `core/scheduler.js`; this command is a thin front for it.
+ * trigger (the opt-in proactive posting the design allows). A proactive command, so it is
+ * group-only: usable in a group by an admin, and in a private chat only by the owner
+ * (`scope.admin` + `scope.proactive`). Bound to this chat: a job fires here, and
+ * `list`/`cancel` only see this chat's jobs. Parsing and persistence live in
+ * `core/scheduler.js`; this command is a thin front for it.
  *
  * @type {import('../core/registry.js').Command}
  */
@@ -47,9 +48,9 @@ export default {
     '"schedule in 2h <msg>" posts once in two hours; "schedule at 2026-06-18 09:00 <msg>" posts once at ' +
     'an absolute (server-local) time; "schedule every 1d <msg>" repeats. Durations are <number><unit> ' +
     'with unit m (minutes), h (hours) or d (days). "schedule list" shows this chat\'s scheduled messages ' +
-    'with ids; "schedule cancel <id>" removes one. In a group only an admin can schedule; in a private ' +
-    'chat the user can. Schedules survive restarts.',
-  scope: { admin: true },
+    'with ids; "schedule cancel <id>" removes one. Scheduling works only in groups (where an admin can ' +
+    'do it), not in private chats - the owner excepted. Schedules survive restarts.',
+  scope: { admin: true, proactive: true },
   run: (ctx) => {
     if (!ctx.scheduler) return 'Scheduling is unavailable here.';
     const sub = (ctx.args[0] ?? '').toLowerCase();

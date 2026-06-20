@@ -7,14 +7,15 @@ import { createDispatcher } from '../src/core/dispatch.js';
 import schedule from '../src/commands/schedule.js';
 import { toPlain } from '../src/core/format.js';
 
-const setup = (now = 0) => {
+const setup = (now = 0, opts = {}) => {
   const store = createStore({ path: ':memory:' });
   const scheduler = createScheduler(store, { now: () => now });
-  const dispatch = createDispatcher(createRegistry([schedule]), { store, scheduler });
+  const dispatch = createDispatcher(createRegistry([schedule]), { store, scheduler, ...opts });
   const handle = async (m) => toPlain(await dispatch(m)); // render like an adapter, for assertions
   return { store, scheduler, handle };
 };
-const msg = (text, over = {}) => ({ text, sender: 'u', chatId: 'A', level: 'private', ...over });
+// schedule is proactive (group-only), so the mechanic tests run it where it is allowed: a group, by an admin.
+const msg = (text, over = {}) => ({ text, sender: 'u', chatId: 'A', level: 'group', isAdmin: true, ...over });
 
 test('schedule: "in" creates a one-time job and list shows it', async () => {
   const { handle } = setup();
@@ -54,13 +55,25 @@ test('schedule: cancel removes the job and only by its own chat', async () => {
 test('schedule: in a group only an admin can schedule', async () => {
   const { handle } = setup();
   assert.match(
-    await handle(msg('jarvis schedule in 1h x', { level: 'group', isAdmin: false })),
+    await handle(msg('jarvis schedule in 1h x', { level: 'group', isAdmin: false, sender: 'member' })),
     /Not allowed: admins only/,
   );
   assert.match(
-    await handle(msg('jarvis schedule in 1h x', { level: 'group', isAdmin: true })),
+    await handle(msg('jarvis schedule in 1h x', { level: 'group', isAdmin: true, sender: 'member' })),
     /Scheduled s1/,
   );
+});
+
+test('schedule: a non-owner cannot schedule in a private chat (proactive is group-only)', async () => {
+  const { handle } = setup();
+  const out = await handle(msg('jarvis schedule in 1h x', { level: 'private', isAdmin: false, sender: 'rando' }));
+  assert.match(out, /Not allowed: only in groups/);
+});
+
+test('schedule: the owner may schedule in a private chat (proactive owner-exempt)', async () => {
+  const { handle } = setup(0, { owner: 'boss' });
+  const out = await handle(msg('jarvis schedule in 1h x', { level: 'private', isAdmin: false, sender: 'boss' }));
+  assert.match(out, /Scheduled s1/);
 });
 
 test('schedule: unavailable when no scheduler is configured (e.g. without a store)', async () => {
