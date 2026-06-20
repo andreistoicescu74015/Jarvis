@@ -60,6 +60,14 @@ const adapter = createWhatsAppAdapter({
   // On logout the creds are wiped; exit non-zero so a supervisor restarts us and
   // shows a fresh QR. In dev (no supervisor) it simply stops - rerun `npm start`.
   onLogout: () => quit(1),
+  maxReconnects: num(process.env.JARVIS_MAX_RECONNECTS, 10),
+  // Fatal disconnect: a session takeover (440), a ban (403), or an unrecoverable session (500) stays
+  // DOWN (exit 0) - restarting would re-fight or re-hammer. Reconnect exhaustion gets a clean restart
+  // (exit non-zero) so a fresh process can retry from scratch.
+  onFatal: (reason) => {
+    log.error('wa: fatal disconnect', { reason });
+    quit(reason === 'exhausted' ? 1 : 0);
+  },
 });
 
 // Owner lifecycle controls (the shutdown / restart / logout commands). Each defers
@@ -130,6 +138,10 @@ const quit = async (code = 0) => {
 };
 process.on('SIGINT', () => quit(0));
 process.on('SIGTERM', () => quit(0));
+// Never let an unexpected throw/rejection leave a half-dead process: log it and exit non-zero so the
+// supervisor restarts a clean one (better than limping on in an unknown state).
+process.on('uncaughtException', (err) => { log.error('uncaught exception', { error: err?.message ?? String(err) }); quit(1); });
+process.on('unhandledRejection', (reason) => { log.error('unhandled rejection', { error: reason?.message ?? String(reason) }); quit(1); });
 
 log.info('Jarvis starting on WhatsApp - scan the QR on first run to pair.');
 await app.start();
