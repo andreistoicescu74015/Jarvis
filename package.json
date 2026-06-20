@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/whatsapp-main.js",
     "cli": "node --disable-warning=ExperimentalWarning src/cli.js",
-    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
+    "test:coverage": "node --disable-warning=ExperimentalWarning --test --experimental-test-coverage --test-coverage-lines=85 test/*.test.js"
   },
   "dependencies": {
     "baileys": "7.0.0-rc13",

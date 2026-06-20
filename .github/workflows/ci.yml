@@ -16,6 +16,10 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: '24'
+          node-version-file: .nvmrc # single source of truth for the Node version
+          cache: npm
       - run: npm ci
-      - run: npm test
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+      - name: Test with coverage
+        run: npm run test:coverage
