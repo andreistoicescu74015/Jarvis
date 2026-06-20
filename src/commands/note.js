@@ -1,5 +1,10 @@
 import { b, code, number, esc } from '../core/format.js';
 
+// Bounds so a conversation cannot grow the store without limit (the note list is one KV
+// value, rewritten whole on each add): a per-note length cap and a per-conversation count.
+const MAX_NOTE_LEN = 1000; // characters in a single note
+const MAX_NOTES = 500; // notes kept per conversation
+
 /** @type {import('../core/registry.js').Command} */
 export default {
   name: 'note',
@@ -18,6 +23,8 @@ export default {
       case 'add': {
         const text = rest.join(' ').trim();
         if (!text) return `Usage: ${code('jarvis note add <text>')}`;
+        if (text.length > MAX_NOTE_LEN) return `Note too long (max ${MAX_NOTE_LEN} characters).`;
+        if (notes.length >= MAX_NOTES) return `Too many notes here (max ${MAX_NOTES}); delete some first.`;
         notes.push(text);
         ctx.store.set('notes', notes);
         return `Added note #${notes.length}.`;

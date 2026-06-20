@@ -73,3 +73,20 @@ test('note: the subcommand is case-insensitive', async () => {
   assert.equal(out[1], 'Notes\n1. milk'); // the note text keeps its original case
   store.close();
 });
+
+test('note: rejects an over-long note and does not store it', async () => {
+  const store = createStore({ path: ':memory:' });
+  const out = await run(store, [`jarvis note add ${'x'.repeat(1001)}`, 'jarvis note list']);
+  assert.match(out[0], /too long/i);
+  assert.equal(out[1], 'No notes yet.'); // nothing was stored
+  store.close();
+});
+
+test('note: caps the number of notes per conversation', async () => {
+  const store = createStore({ path: ':memory:' });
+  const adds = Array.from({ length: 500 }, (_, i) => `jarvis note add n${i}`);
+  const out = await run(store, [...adds, 'jarvis note add overflow']);
+  assert.match(out[499], /Added note #500\./);
+  assert.match(out[500], /Too many notes/i);
+  store.close();
+});
