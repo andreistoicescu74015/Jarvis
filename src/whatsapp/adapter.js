@@ -134,15 +134,26 @@ export function createWhatsAppAdapter({
   async function ensurePresence() {
     const s = sock; // capture: don't touch a socket swapped out by a reconnect mid-await
     if (!markOnline || !s || stopped) return;
-    try {
-      if (!s.user?.name && profileName) {
+    // Name an unnamed account - best-effort and ISOLATED in its own try, so a failure (e.g. the
+    // app-state keys are not synced yet right after pairing - "App state key not present!") can
+    // NEVER skip the presence broadcast below. WhatsApp ignores an online presence from a nameless
+    // account, so a name still matters: if the bot cannot set it here, set one on the account
+    // directly (its WhatsApp profile) and receipts will activate.
+    if (!s.user?.name && profileName) {
+      try {
         await s.updateProfileName(profileName);
         log.info('wa: set profile name (account had none)', { name: profileName });
+      } catch (err) {
+        log.warn('wa: could not set the profile name - set one on the account if receipts stay one-tick', {
+          error: err?.message ?? String(err),
+        });
       }
-      if (stopped || sock !== s) return;
-      await s.sendPresenceUpdate('available');
+    }
+    if (stopped || sock !== s) return;
+    try {
+      await s.sendPresenceUpdate('available'); // go online so delivery + read receipts activate
     } catch (err) {
-      log.warn('wa: could not set presence/name', { error: err?.message ?? String(err) });
+      log.debug('wa: presence update failed', { error: err?.message ?? String(err) });
     }
   }
 
