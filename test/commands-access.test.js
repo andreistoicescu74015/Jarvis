@@ -55,19 +55,15 @@ test('access cmd: the list commands need the owner or a group admin', async () =
   assert.match(await as('rando', 'jarvis blacklist ping add bob'), /Not allowed: owner or a group admin only/);
 });
 
-test('access cmd: a group admin manages their own chat, but cannot reach another context', async () => {
+test('access cmd: a group admin manages only their own chat (no cross-context)', async () => {
   const { handle } = setup(); // env owner 'boss'
   const admin = (text, over = {}) => handle({ text, sender: 'adm', chatId: 'c1', level: 'group', isAdmin: true, ...over });
 
-  // the admin blocks bob from ping here, and it applies in this chat
+  // the admin blocks bob from ping here, and it applies in this chat only
   assert.match(await admin('jarvis blacklist ping add bob'), /Added bob/i);
   assert.match(await admin('jarvis blacklist ping enable'), /Turned on the blacklist/i);
   assert.equal(await handle({ text: 'jarvis ping', sender: 'bob', chatId: 'c1', level: 'group' }), undefined);
-  assert.equal(await handle({ text: 'jarvis ping', sender: 'bob', chatId: 'c2', level: 'group' }), 'pong'); // only here
-
-  // but the admin cannot target another chat or everywhere
-  assert.match(await admin('jarvis blacklist ping add bob in cX'), /only manage this chat/i);
-  assert.match(await admin('jarvis blacklist ping enable in *'), /only manage this chat/i);
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'bob', chatId: 'c2', level: 'group' }), 'pong'); // not in another group
 });
 
 test('access cmd: an admin can gate the whole bot, but only in their own chat', async () => {
@@ -95,19 +91,20 @@ test('access cmd: overview and show report state', async () => {
   assert.match(await boss('jarvis whitelist'), /No whitelist rules/);
 });
 
-test('access cmd: "*" target gates the whole bot everywhere; owner bypasses', async () => {
+test('access cmd: "*" target gates the whole bot in this context; owner bypasses', async () => {
   const { boss, as } = setup();
-  assert.match(await boss('jarvis whitelist * enable in *'), /Turned on the whitelist for the whole bot everywhere/i);
-  assert.equal(await as('rando', 'jarvis ping', 'cZ'), undefined); // blocked in any chat
-  assert.equal(await as('boss', 'jarvis ping', 'cZ'), 'pong'); // owner bypass
+  assert.match(await boss('jarvis whitelist * enable'), /Turned on the whitelist for the whole bot/i);
+  assert.equal(await as('rando', 'jarvis ping', 'c1'), undefined); // blocked here (empty whitelist)
+  assert.equal(await as('boss', 'jarvis ping', 'c1'), 'pong'); // owner bypass
+  assert.equal(await as('rando', 'jarvis ping', 'cZ'), 'pong'); // another context is unaffected
 });
 
-test('access cmd: "*" person blocks everyone, owner still works', async () => {
+test('access cmd: a "*" person blocks everyone here; the owner still works', async () => {
   const { boss, as } = setup();
-  await boss('jarvis blacklist note add * in *');
-  await boss('jarvis blacklist note enable in *');
-  assert.equal(await as('rando', 'jarvis note list', 'cZ'), undefined);
-  assert.match(await as('boss', 'jarvis note list', 'cZ'), /No notes yet/i);
+  await boss('jarvis blacklist note add *');
+  await boss('jarvis blacklist note enable');
+  assert.equal(await as('rando', 'jarvis note list', 'c1'), undefined); // everyone blocked here
+  assert.match(await as('boss', 'jarvis note list', 'c1'), /No notes yet/i); // owner bypasses
 });
 
 test('access cmd: clear empties a list and reopens the command', async () => {
@@ -130,12 +127,12 @@ test('access cmd: remove drops one person while others stay blocked', async () =
   assert.equal(await as('alice', 'jarvis ping'), undefined); // still blocked
 });
 
-test('access cmd: "in <chat>" targets another chat only', async () => {
+test('access cmd: a rule set in one group does not apply in another', async () => {
   const { boss, as } = setup();
-  await boss('jarvis blacklist ping add bob in cX');
-  await boss('jarvis blacklist ping enable in cX');
-  assert.equal(await as('bob', 'jarvis ping', 'cX'), undefined); // blocked there
-  assert.equal(await as('bob', 'jarvis ping', 'c1'), 'pong'); // fine here
+  await boss('jarvis blacklist ping add bob', 'gA');
+  await boss('jarvis blacklist ping enable', 'gA');
+  assert.equal(await as('bob', 'jarvis ping', 'gA'), undefined); // blocked in gA
+  assert.equal(await as('bob', 'jarvis ping', 'gB'), 'pong'); // not in gB (set it where it applies)
 });
 
 test('access cmd: a person can be named by @mention', async () => {

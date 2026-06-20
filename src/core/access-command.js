@@ -1,18 +1,20 @@
+import { accessContextFor } from './access.js';
+
 /**
  * Shared implementation of the `whitelist` / `blacklist` commands. Both are the same UI
  * over the access policy (`ctx.access`), differing only in which list they edit - so the
  * two commands stay thin leaves that import this from the core (never each other).
  *
- * Authority (ADR-0008): the owner manages any context (here / everywhere / another chat);
- * a group or community admin manages only their own chat. The scope (`ownerOrAdmin`) lets
- * an admin in, and this command then locks a non-owner to their own context. Denials and
- * gating live in the dispatcher.
+ * Authority (ADR-0008): the owner manages Jarvis's private context (from a DM) or the current
+ * group's context (from that group); a group/community admin manages their own group's context.
+ * A rule ALWAYS applies to the current context - there is no "manage another chat" specifier (it
+ * was a footgun: easy to edit the wrong context from the wrong place, and a data-leak risk). The
+ * scope (`ownerOrAdmin`) lets an admin in; denials and gating live in the dispatcher.
  *
- * Grammar: jarvis <list> [<target>] [<verb> [<person>]] [in <context>]
- *   <target>   a command name, or `*` (the whole bot). Omitted -> overview.
+ * Grammar: jarvis <list> [<target>] [<verb> [<person>]]
+ *   <target>   a command name, or `*` (the whole bot). Omitted -> overview (this context).
  *   <verb>     add | remove | enable | disable | clear. Omitted (with a target) -> show.
  *   <person>   an @mention, a phone/id, or `*` (everyone). For add / remove.
- *   in <ctx>   `here` (default) | `*` (everywhere) | a chat id. Owner only; an admin is locked to here.
  */
 
 const VERBS = new Set(['add', 'remove', 'enable', 'disable', 'clear']);
@@ -28,16 +30,14 @@ export function makeAccessCommand(list) {
     name: list,
     summary:
       list === 'whitelist'
-        ? 'Allow-list a command for specific people (owner, or a group admin here).'
-        : 'Block specific people from a command (owner, or a group admin here).',
-    usage: `jarvis ${list} <command|*> add|remove <@user|number|*> | enable | disable | clear [in <chat|*>]`,
+        ? 'Allow-list a command for specific people (this chat).'
+        : 'Block specific people from a command (this chat).',
+    usage: `jarvis ${list} <command|*> add|remove <@user|number|*> | enable | disable | clear`,
     man:
-      `Manage the ${list} for a command - or the whole bot (*). Verbs: add/remove <person>, ` +
-      `enable, disable, clear. A person is an @mention, a phone number, or * (everyone). ` +
-      `Context defaults to this chat. The owner can also target everywhere ("in *") or another ` +
-      `chat ("in <chat>"); a group admin manages only this chat. Whitelist and blacklist are ` +
-      `exclusive per target; the owner is never affected; the owner command cannot be restricted, ` +
-      `and the bot cannot be added.`,
+      `Manage the ${list} for a command - or the whole bot (*) - in THIS chat (your DM with Jarvis, ` +
+      `or this group). Verbs: add/remove <person>, enable, disable, clear. A person is an @mention, ` +
+      `a phone number, or * (everyone). Whitelist and blacklist are exclusive per target; the owner ` +
+      `is never affected; the owner command cannot be restricted, and the bot cannot be added.`,
     scope: { ownerOrAdmin: true },
     requires: ['access'],
     run: (ctx) => run(ctx, list),
@@ -46,34 +46,17 @@ export function makeAccessCommand(list) {
 
 function run(ctx, list) {
   const other = list === 'whitelist' ? 'blacklist' : 'whitelist';
+  const context = accessContextFor(ctx.level, ctx.chatId); // always the current context
 
-  // Peel a trailing "in <context>" off the arguments.
-  let args = ctx.args.slice();
-  let context = ctx.chatId;
-  const at = args.findIndex((a) => a.toLowerCase() === 'in');
-  if (at !== -1) {
-    const c = args[at + 1];
-    if (!c) return usage(list);
-    context = c === '*' ? '*' : c.toLowerCase() === 'here' ? ctx.chatId : c;
-    args = args.slice(0, at);
-  }
+  const target = (ctx.args[0] ?? '').toLowerCase(); // command names are lowercase; match case-insensitively
+  if (!target) return overview(ctx, list, context);
 
-  // A group admin (non-owner) manages only their own chat; only the owner may reach another
-  // context or everywhere ("in *"). This is the context-lock behind the ownerOrAdmin scope.
-  if (!ctx.isOwner && context !== ctx.chatId) {
-    return 'As a group admin you can only manage this chat (drop the "in ..." part).';
-  }
-
-  const target = (args[0] ?? '').toLowerCase(); // command names are lowercase; match case-insensitively
-  if (!target) return overview(ctx, list);
-
-  const verb = (args[1] ?? '').toLowerCase();
+  const verb = (ctx.args[1] ?? '').toLowerCase();
   if (!verb) return show(ctx, list, target, context);
   if (!VERBS.has(verb)) return usage(list);
 
-  // Validate a command target. `*` (whole bot) is always valid; owner-only commands
-  // and the bootstrap `owner` command can never be restricted (they would be moot or
-  // could lock the bot out).
+  // Validate a command target. `*` (whole bot) is always valid; owner-only commands and the
+  // bootstrap `owner` command can never be restricted (they would be moot or could lock the bot out).
   if (target !== '*') {
     const cmd = ctx.commands.find((c) => c.name === target);
     if (!cmd) return `No such command: ${target}.`;
@@ -81,42 +64,40 @@ function run(ctx, list) {
     if (cmd.scope?.owner) return `${target} is owner-only; access lists do not apply to it.`;
   }
 
-  const at_ = (c) => where(c, ctx);
-
   switch (verb) {
     case 'enable': {
       const prior = ctx.access.get(target, context).active;
       ctx.access.enable(list, target, context);
       const switched = prior === other ? ` (replaces the ${other})` : '';
-      return `Turned on the ${list} for ${label(target)}${at_(context)}${switched}.`;
+      return `Turned on the ${list} for ${label(target)}${switched}.`;
     }
     case 'disable': {
       if (ctx.access.get(target, context).active !== list) {
-        return `The ${list} for ${label(target)}${at_(context)} is not on.`;
+        return `The ${list} for ${label(target)} is not on.`;
       }
       ctx.access.disable(target, context);
-      return `Turned off the ${list} for ${label(target)}${at_(context)} (members kept).`;
+      return `Turned off the ${list} for ${label(target)} (members kept).`;
     }
     case 'clear': {
       ctx.access.clear(list, target, context);
-      return `Cleared the ${list} for ${label(target)}${at_(context)}.`;
+      return `Cleared the ${list} for ${label(target)}.`;
     }
     case 'add':
     case 'remove': {
-      const person = resolvePerson(ctx, args.slice(2));
+      const person = resolvePerson(ctx, ctx.args.slice(2));
       if (!person) return usage(list);
       if (verb === 'add' && person !== '*' && ctx.isSelf?.(person)) {
         return 'You cannot add the bot to a list.';
       }
       ctx.access[verb](list, target, context, person);
       if (verb === 'remove') {
-        return `Removed ${display(person)} from the ${list} for ${label(target)}${at_(context)}.`;
+        return `Removed ${display(person)} from the ${list} for ${label(target)}.`;
       }
       const note =
         ctx.access.get(target, context).active === list
           ? ''
           : ` (run "jarvis ${list} ${target} enable" to apply)`;
-      return `Added ${display(person)} to the ${list} for ${label(target)}${at_(context)}${note}.`;
+      return `Added ${display(person)} to the ${list} for ${label(target)}${note}.`;
     }
     default:
       return usage(list);
@@ -131,26 +112,25 @@ function resolvePerson(ctx, tokens) {
   return ctx.resolveUser ? ctx.resolveUser(raw) : String(raw);
 }
 
-function overview(ctx, list) {
-  const rules = ctx.access.all().filter((r) => r[list].length || r.active === list);
-  if (!rules.length) return `No ${list} rules.`;
+/** Every rule in THIS context (cross-context rules are not shown - they cannot be set from here). */
+function overview(ctx, list, context) {
+  const rules = ctx.access.all().filter((r) => r.context === context && (r[list].length || r.active === list));
+  if (!rules.length) return `No ${list} rules here.`;
   const lines = rules.map((r) => {
     const on = r.active === list ? 'on' : 'off';
     const who = r[list].length ? r[list].map(display).join(', ') : '(empty)';
-    return `- ${label(r.target)}${where(r.context, ctx)} [${on}]: ${who}`;
+    return `- ${label(r.target)} [${on}]: ${who}`;
   });
-  return [`${list} rules:`, ...lines].join('\n');
+  return [`${list} rules here:`, ...lines].join('\n');
 }
 
 function show(ctx, list, target, context) {
   const rec = ctx.access.get(target, context);
   const on = rec.active === list ? 'on' : 'off';
   const who = rec[list].length ? rec[list].map(display).join(', ') : '(empty)';
-  return `${list} for ${label(target)}${where(context, ctx)}: ${on}; ${who}.`;
+  return `${list} for ${label(target)}: ${on}; ${who}.`;
 }
 
 const usage = (list) => `Usage: ${makeAccessCommand(list).usage}`;
 const label = (target) => (target === '*' ? 'the whole bot' : `"${target}"`);
 const display = (person) => (person === '*' ? 'everyone' : String(person).split('@')[0]);
-const where = (context, ctx) =>
-  context === '*' ? ' everywhere' : context === ctx.chatId ? '' : ` in ${context}`;
