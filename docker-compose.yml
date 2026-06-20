@@ -10,6 +10,11 @@ services:
       - path: .env
         required: false # all variables are optional (see .env.example)
     mem_limit: 512m # cap memory so the v7 leak triggers a restart instead of growing
+    logging: # bound log growth so an unattended box can't fill its disk with container logs
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       - jarvis-data:/app/data # auth session + sqlite persist across restarts
 
