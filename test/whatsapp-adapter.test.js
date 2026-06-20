@@ -216,6 +216,20 @@ test('adapter: being removed from a group signals deactivation (only when it is 
   assert.deepEqual(removed, ['G@g.us']); // an add is not a removal
 });
 
+test('adapter: reports connection state for the liveness heartbeat (true on open, false on close)', async () => {
+  const makeSocket = fakeSocketFactory();
+  const states = [];
+  const a = createWhatsAppAdapter(opts({ makeSocket, onConnectionState: (c) => states.push(c) }));
+  a.start({ onMessage: async () => {} });
+  const sock = makeSocket.sockets[0];
+
+  sock.ev.emit('connection.update', { connection: 'open' });
+  await tick();
+  sock.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 428 } } } });
+  await tick();
+  assert.deepEqual(states, [true, false]);
+});
+
 test('adapter: a close from a socket a reconnect already replaced is ignored (no double-connect)', async () => {
   const makeSocket = fakeSocketFactory();
   const a = createWhatsAppAdapter(opts({ makeSocket }));

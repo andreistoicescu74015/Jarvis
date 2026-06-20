@@ -39,6 +39,7 @@ function timestampMs(wa) {
  *   onLogout?: () => void,
  *   onFatal?: (reason: string) => void,
  *   onRemoved?: (chatId: string) => void,
+ *   onConnectionState?: (connected: boolean) => void,
  *   learn?: (key: object) => void,
  *   random?: () => number,
  *   now?: () => number,
@@ -60,6 +61,7 @@ export function createWhatsAppAdapter({
   onLogout = () => {},
   onFatal = () => {},
   onRemoved = () => {},
+  onConnectionState = () => {},
   learn = () => {},
   random = Math.random,
   now = () => Date.now(),
@@ -191,11 +193,13 @@ export function createWhatsAppAdapter({
     if (connection === 'open') {
       attempts = 0;
       connectedAt = now();
+      onConnectionState(true); // liveness: we are connected (the heartbeat tracks this)
       log.info('wa: connected', { user: sock?.user?.id });
       await ensurePresence(); // name the account if needed, then go online so receipts register
       return;
     }
     if (connection !== 'close' || stopped) return;
+    onConnectionState(false); // disconnected (until the next 'open'); a long gap makes the bot unhealthy
 
     const statusCode = lastDisconnect?.error?.output?.statusCode;
     const action = disconnectAction(statusCode);
@@ -315,6 +319,7 @@ export function createWhatsAppAdapter({
 
     async stop() {
       stopped = true;
+      onConnectionState(false); // no longer connected (teardown)
       try {
         sock?.ev?.removeAllListeners?.(); // don't react to teardown events while closing
         sock?.end?.(undefined);

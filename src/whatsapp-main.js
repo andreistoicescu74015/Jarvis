@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 import { isJidGroup } from 'baileys';
 import { createApp } from './core/app.js';
 import { createRegistry } from './core/registry.js';
@@ -46,6 +47,19 @@ const requireActivation = (process.env.JARVIS_REQUIRE_ACTIVATION ?? 'on') !== 'o
 // (so a knob like a 0ms read delay can be turned off, which `Number(x) || d` would clobber).
 const num = (v, d) => (v == null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 
+// Liveness heartbeat for the container HEALTHCHECK (src/health-check.js reads this file): while
+// connected to WhatsApp we stamp the current time here on a short interval, so a stale heartbeat
+// (process wedged, or disconnected too long) reports the container unhealthy. See README.
+const healthFile = process.env.JARVIS_HEALTH_FILE ?? 'data/health';
+let connected = false;
+const writeHeartbeat = () => {
+  try {
+    writeFileSync(healthFile, String(Date.now()));
+  } catch (err) {
+    log.debug('heartbeat write failed', { error: err?.message ?? String(err) });
+  }
+};
+
 const adapter = createWhatsAppAdapter({
   authState: createSqliteAuthState(authDb, { logger: socketLogger(log) }),
   log,
@@ -77,6 +91,12 @@ const adapter = createWhatsAppAdapter({
   // The bot was removed from a group: deactivate it so Jarvis goes silent there - including stopping
   // its scheduled proactive sends (which deliver outside the inbound activation gate).
   onRemoved: (chatId) => activation.deactivate(chatId),
+  // Track connection liveness for the heartbeat: stamp it immediately on connect, and the interval
+  // below keeps it fresh while connected (so a disconnect lets it go stale -> unhealthy).
+  onConnectionState: (isConnected) => {
+    connected = isConnected;
+    if (isConnected) writeHeartbeat();
+  },
 });
 
 // Owner lifecycle controls (the shutdown / restart / logout commands). Each defers
@@ -143,11 +163,16 @@ const proactiveRunner = startProactive(
   { intervalMs: num(process.env.JARVIS_TICK_MS, 30_000), log },
 );
 
+// Keep the liveness heartbeat fresh while connected (unref'd so it never holds the process open).
+const heartbeat = setInterval(() => { if (connected) writeHeartbeat(); }, num(process.env.JARVIS_HEALTH_INTERVAL_MS, 20_000));
+heartbeat.unref();
+
 let closing = false;
 const quit = async (code = 0) => {
   if (closing) return;
   closing = true;
   log.info('Jarvis shutting down...');
+  clearInterval(heartbeat);
   // process.exit() is in `finally` so it ALWAYS runs: a throw from stop()/close() (e.g. a double
   // close) must not escape as a rejection - that would re-enter quit(), hit the `closing` guard, and
   // leave the process wedged (no exit, no restart). Each close is guarded so a late write can't abort it.

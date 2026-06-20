@@ -62,6 +62,29 @@ Sent by the owner as `jarvis <cmd>`; they rely on the `restart: on-failure` poli
 - `jarvis restart` - bounce the bot (exits non-zero, the container comes back).
 - `jarvis logout` - forget the session and re-pair (wipes creds, the container comes back with a new QR).
 
+### Survive a reboot
+
+`restart: on-failure` keeps `jarvis shutdown` working (a clean exit stays down), but it does **not**
+bring the container back after a host reboot (e.g. a Windows update). To restore it on boot while
+keeping that policy, register `scripts/start.ps1` (it waits for Docker, then `docker compose up -d`)
+as a startup task - once, in an elevated PowerShell, adjusting the path:
+
+```powershell
+schtasks /Create /SC ONLOGON /TN Jarvis /TR "powershell -NoProfile -ExecutionPolicy Bypass -File \"D:\GitHub\Jarvis\scripts\start.ps1\""
+```
+
+(Also enable Docker Desktop's "start when you log in".) If you would rather not run a task, set the
+service's `restart` to `unless-stopped` in `docker-compose.yml` - it survives reboots natively, but then
+`jarvis shutdown` no longer stays down; stop the bot with `docker compose stop` instead.
+
+### Health
+
+The container reports a **healthcheck**: while connected, the bot stamps a heartbeat that the check
+reads, so `docker ps` shows `healthy` / `unhealthy` (unhealthy means the bot is wedged or has been
+disconnected too long). Plain Compose does not auto-restart on unhealthy - the connection layer already
+exits on unrecoverable states (so `on-failure` recovers those) - but you can pair an autohealer or an
+orchestrator that acts on health.
+
 ### Storage & reset
 
 All state - the WhatsApp creds plus the SQLite databases - lives in the `jarvis-data` Docker volume
