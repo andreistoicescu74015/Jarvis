@@ -71,43 +71,50 @@ export function createLinks(store, { namespace = 'links', codesNamespace = 'link
    * @returns {{ ok: true, cluster: string } | { ok: false, reason: string, conflicts?: string[] }}
    */
   function link(a, ownNsA, b, ownNsB) {
-    if (!a || !b || a === b) return { ok: false, reason: 'same-chat' };
-    const ca = clusterId(a);
-    const cb = clusterId(b);
-    if (ca && ca === cb) return { ok: false, reason: 'already-linked' };
+    // Atomic: the fold + the per-member reassignment is one unit, so a crash mid-merge can never
+    // leave a cluster where some chats point at the new id but the data was only partly copied.
+    return store.transaction(() => {
+      if (!a || !b || a === b) return { ok: false, reason: 'same-chat' };
+      const ca = clusterId(a);
+      const cb = clusterId(b);
+      if (ca && ca === cb) return { ok: false, reason: 'already-linked' };
 
-    const nsA = ca ? clusterNs(ca) : ownNsA;
-    const nsB = cb ? clusterNs(cb) : ownNsB;
-    const clash = conflicts(nsA, nsB);
-    if (clash.length) return { ok: false, reason: 'conflict', conflicts: clash };
+      const nsA = ca ? clusterNs(ca) : ownNsA;
+      const nsB = cb ? clusterNs(cb) : ownNsB;
+      const clash = conflicts(nsA, nsB);
+      if (clash.length) return { ok: false, reason: 'conflict', conflicts: clash };
 
-    const target = ca || cb || nextId();
-    const targetNs = clusterNs(target);
-    // Members of each side are read up front (before any reassignment).
-    const sides = [
-      { members: ca ? membersOf(ca) : [a], ns: nsA, isTarget: target === ca },
-      { members: cb ? membersOf(cb) : [b], ns: nsB, isTarget: target === cb },
-    ];
-    for (const side of sides) {
-      if (!side.isTarget) fold(side.ns, targetNs); // bring this side's data into the shared ns
-      for (const chat of side.members) map.set(chat, target);
-    }
-    return { ok: true, cluster: target };
+      const target = ca || cb || nextId();
+      const targetNs = clusterNs(target);
+      // Members of each side are read up front (before any reassignment).
+      const sides = [
+        { members: ca ? membersOf(ca) : [a], ns: nsA, isTarget: target === ca },
+        { members: cb ? membersOf(cb) : [b], ns: nsB, isTarget: target === cb },
+      ];
+      for (const side of sides) {
+        if (!side.isTarget) fold(side.ns, targetNs); // bring this side's data into the shared ns
+        for (const chat of side.members) map.set(chat, target);
+      }
+      return { ok: true, cluster: target };
+    });
   }
 
   /** Remove a chat from its cluster, copying the shared data out so nothing is lost. */
   function unlink(chatId, ownNs) {
-    const c = clusterId(chatId);
-    if (!c) return { ok: false, reason: 'not-linked' };
-    // A merge member takes a copy of the shared data; an adopted member's own data was
-    // never merged in, so it simply returns to it (set aside, untouched).
-    if (adopted.get(chatId)) {
-      adopted.delete(chatId);
-    } else {
-      for (const { key, value } of store.kv.list(clusterNs(c))) store.kv.set(ownNs, key, value);
-    }
-    map.delete(chatId);
-    return { ok: true };
+    // Atomic: the copy-out + the membership removal commit together (or not at all).
+    return store.transaction(() => {
+      const c = clusterId(chatId);
+      if (!c) return { ok: false, reason: 'not-linked' };
+      // A merge member takes a copy of the shared data; an adopted member's own data was
+      // never merged in, so it simply returns to it (set aside, untouched).
+      if (adopted.get(chatId)) {
+        adopted.delete(chatId);
+      } else {
+        for (const { key, value } of store.kv.list(clusterNs(c))) store.kv.set(ownNs, key, value);
+      }
+      map.delete(chatId);
+      return { ok: true };
+    });
   }
 
   /** Create a one-time code (TTL) this chat shares to invite another chat to link. */
@@ -119,12 +126,14 @@ export function createLinks(store, { namespace = 'links', codesNamespace = 'link
 
   /** Ensure `from` is in a cluster (creating one from its own data if solo); return its id. */
   function clusterFor(from, fromNs) {
-    const c = clusterId(from);
-    if (c) return c;
-    const id = nextId();
-    fold(fromNs, clusterNs(id));
-    map.set(from, id);
-    return id;
+    return store.transaction(() => {
+      const c = clusterId(from);
+      if (c) return c;
+      const id = nextId();
+      fold(fromNs, clusterNs(id));
+      map.set(from, id);
+      return id;
+    });
   }
 
   /**
@@ -134,29 +143,34 @@ export function createLinks(store, { namespace = 'links', codesNamespace = 'link
    * conflict.
    */
   function accept(code, by, byNs, mode = 'merge') {
-    const c = String(code ?? '').trim().toUpperCase();
-    const rec = codes.get(c);
-    if (!rec) return { ok: false, reason: 'bad-code' };
-    if (now() - rec.at > ttlMs) {
-      codes.delete(c);
-      return { ok: false, reason: 'expired' };
-    }
-    if (rec.from === by) return { ok: false, reason: 'same-chat' };
-    if (areLinked(rec.from, by)) {
-      codes.delete(c);
-      return { ok: false, reason: 'already-linked' };
-    }
-    if (mode === 'adopt') {
-      if (clusterId(by)) return { ok: false, reason: 'already-linked' }; // unlink first
-      const cluster = clusterFor(rec.from, rec.fromNs);
-      map.set(by, cluster);
-      adopted.set(by, true);
-      codes.delete(c);
-      return { ok: true };
-    }
-    const r = link(rec.from, rec.fromNs, by, byNs);
-    if (r.ok) codes.delete(c);
-    return r;
+    // Atomic over the whole redemption: code consumption + the merge/adopt commit together, so a
+    // crash can't burn the code without linking, or link without consuming the code. The nested
+    // link()/clusterFor() calls join this transaction (re-entrant), staying one unit.
+    return store.transaction(() => {
+      const c = String(code ?? '').trim().toUpperCase();
+      const rec = codes.get(c);
+      if (!rec) return { ok: false, reason: 'bad-code' };
+      if (now() - rec.at > ttlMs) {
+        codes.delete(c);
+        return { ok: false, reason: 'expired' };
+      }
+      if (rec.from === by) return { ok: false, reason: 'same-chat' };
+      if (areLinked(rec.from, by)) {
+        codes.delete(c);
+        return { ok: false, reason: 'already-linked' };
+      }
+      if (mode === 'adopt') {
+        if (clusterId(by)) return { ok: false, reason: 'already-linked' }; // unlink first
+        const cluster = clusterFor(rec.from, rec.fromNs);
+        map.set(by, cluster);
+        adopted.set(by, true);
+        codes.delete(c);
+        return { ok: true };
+      }
+      const r = link(rec.from, rec.fromNs, by, byNs);
+      if (r.ok) codes.delete(c);
+      return r;
+    });
   }
 
   return { nsFor, chats, areLinked, link, unlink, propose, accept };
