@@ -3,6 +3,7 @@ import { checkScope, sameUser } from './scope.js';
 import { createOwnerResolver } from './owner.js';
 import { createAccessPolicy } from './access.js';
 import { createLinks } from './links.js';
+import { createActivation } from './activation.js';
 import { nullLogger } from './log.js';
 import { code, esc } from './format.js';
 
@@ -27,6 +28,7 @@ import { code, esc } from './format.js';
  * @property {(id: string) => boolean} isSelf              True if the id is the bot itself (its trigger name or own id forms).
  * @property {import('../store/index.js').ScopedStore} [store] Per-conversation scoped KV (when configured).
  * @property {ReturnType<typeof createAccessPolicy>} [access] Owner-managed access lists (when a store is configured).
+ * @property {{ isActive: (id: string) => boolean, activate: (id: string, by?: string) => boolean, deactivate: (id: string) => boolean, list: () => string[] }} [activation] Per-group activation registry (ADR-0008; when a store is configured).
  * @property {{ propose: () => string, accept: (code: string) => object, adopt: (code: string) => object, unlink: () => object }} [links] Context-link handshake bound to this chat (when a store is configured).
  * @property {import('./log.js').Logger} log               Structured logger (never posts to chat).
  * @property {{ shutdown?: () => void, restart?: () => void, logout?: () => void }} [lifecycle] Process lifecycle controls (owner commands; injected per platform).
@@ -43,13 +45,14 @@ import { code, esc } from './format.js';
  * `handle(msg)` for `createApp`.
  *
  * @param {import('./registry.js').Registry} registry
- * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, send?: (target: string, text: string) => unknown, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object }, requireOwner?: boolean }} [opts]
+ * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, send?: (target: string, text: string) => unknown, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object }, requireOwner?: boolean, requireActivation?: boolean }} [opts]
  * @returns {(msg: import('./app.js').InboundMessage) => Promise<string | undefined>}
  */
-export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, scheduler, requireOwner = false } = {}) {
+export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, scheduler, requireOwner = false, requireActivation = false } = {}) {
   const ownerResolver = createOwnerResolver({ owner, match });
   const access = store ? createAccessPolicy(store, { match }) : null;
   const links = store ? createLinks(store) : null;
+  const activation = store ? createActivation(store) : null;
 
   return async function handle(msg) {
     const parsed = parse(msg.text, prefix, { addressed: msg.addressed });
@@ -78,6 +81,23 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     // below; the `owner` command is what establishes the owner and opens the gate.
     if (requireOwner && !ownerResolver.current && !(level === 'private' && command === 'owner')) {
       log.info('dormant: no owner yet', { level, command, sender });
+      return undefined;
+    }
+
+    // Per-group activation gate (ADR-0008): a group or community is inactive until the owner
+    // activates it (`jarvis groups activate`), so Jarvis acts in a group only where the owner
+    // authorized it - even if someone else added the bot there. The owner's `groups` command
+    // passes even in an inactive group, so activation can be done from inside. Private chats are
+    // never gated here. Opt-in via requireActivation (off for the dev CLI and unit tests); fully
+    // suppressed (no reply), like the gates around it.
+    if (
+      requireActivation &&
+      activation &&
+      (level === 'group' || level === 'community') &&
+      !activation.isActive(chatId) &&
+      !(isOwner && command === 'groups')
+    ) {
+      log.info('inactive group: not activated', { chatId, command, sender });
       return undefined;
     }
 
@@ -145,6 +165,14 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       store: store ? store.scoped(links.nsFor(chatId, ownNs)) : undefined,
       chats: links ? links.chats(chatId) : [chatId],
       access: access ?? undefined,
+      activation: activation
+        ? {
+            isActive: (id) => activation.isActive(id),
+            activate: (id, by = sender) => activation.activate(id, by),
+            deactivate: (id) => activation.deactivate(id),
+            list: () => activation.list(),
+          }
+        : undefined,
       links: links
         ? {
             propose: () => links.propose(chatId, ownNs),
