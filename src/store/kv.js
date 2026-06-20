@@ -12,6 +12,7 @@ export function createKv(db) {
       'ON CONFLICT(ns, key) DO UPDATE SET value = excluded.value',
   );
   const delStmt = db.prepare('DELETE FROM kv WHERE ns = ? AND key = ?');
+  const clearStmt = db.prepare('DELETE FROM kv WHERE ns = ?');
   const listStmt = db.prepare('SELECT key, value FROM kv WHERE ns = ? ORDER BY key');
 
   return {
@@ -29,6 +30,10 @@ export function createKv(db) {
     /** @returns {boolean} true if a row was removed. */
     delete(ns, key) {
       return delStmt.run(ns, key).changes > 0;
+    },
+    /** Delete every entry in a namespace. @returns {number} rows removed. */
+    clear(ns) {
+      return clearStmt.run(ns).changes;
     },
     /** @returns {{ key: string, value: unknown }[]} all entries in the namespace. */
     list(ns) {

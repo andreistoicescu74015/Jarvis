@@ -3,143 +3,140 @@ import assert from 'node:assert/strict';
 import { createStore } from '../src/store/index.js';
 import { createLinks } from '../src/core/links.js';
 
-const seed = (store, ns, obj) => {
-  for (const [k, v] of Object.entries(obj)) store.kv.set(ns, k, v);
-};
+/** A links engine over a fresh store; every group is active unless listed in `inactive`. */
+function setup(inactive = []) {
+  const store = createStore({ path: ':memory:' });
+  let n = 0;
+  const links = createLinks(store, {
+    isActivated: (id) => !inactive.includes(id),
+    clearNamespace: (ns) => store.clearNamespace(ns),
+    genCode: () => `C${++n}`, // deterministic, uppercase (like the real generator)
+  });
+  return { store, links };
+}
 
-test('links: an unlinked chat resolves to its own ns and is alone', () => {
-  const links = createLinks(createStore({ path: ':memory:' }));
+/** Link a and b by running propose(a) then accept(code, b). */
+const link = (links, a, b) => links.accept(links.propose(a), b);
+
+test('links: a solo group resolves to its own ns and lists only itself', () => {
+  const { links } = setup();
   assert.equal(links.nsFor('A', 'own:A'), 'own:A');
   assert.deepEqual(links.chats('A'), ['A']);
-  assert.equal(links.areLinked('A', 'B'), false);
 });
 
-test('links: linking two chats merges data into one shared context', () => {
-  const store = createStore({ path: ':memory:' });
-  const links = createLinks(store);
-  seed(store, 'own:A', { notes: ['a1'] });
-  seed(store, 'own:B', { reminders: ['b1'] }); // different keys -> no conflict
-  assert.equal(links.link('A', 'own:A', 'B', 'own:B').ok, true);
-  assert.equal(links.areLinked('A', 'B'), true);
-  const ns = links.nsFor('A', 'own:A');
-  assert.equal(ns, links.nsFor('B', 'own:B')); // same shared ns
-  assert.deepEqual(store.kv.get(ns, 'notes'), ['a1']); // A's data
-  assert.deepEqual(store.kv.get(ns, 'reminders'), ['b1']); // and B's data
+test('links: accept joins two groups into one shared overlay (covering, not merging)', () => {
+  const { store, links } = setup();
+  store.scoped('own:A').set('note', 'a-secret'); // each group has its own data up front
+  store.scoped('own:B').set('note', 'b-secret');
+  assert.equal(link(links, 'A', 'B').ok, true);
+  const nsA = links.nsFor('A', 'own:A');
+  const nsB = links.nsFor('B', 'own:B');
+  assert.equal(nsA, nsB); // one shared overlay...
+  assert.notEqual(nsA, 'own:A'); // ...distinct from either own ns
+  assert.equal(store.scoped(nsA).get('note'), undefined); // overlay starts EMPTY - own data is covered, not merged
   assert.deepEqual(links.chats('A').sort(), ['A', 'B']);
 });
 
-test('links: conflicting data refuses the link (no overwrite)', () => {
-  const store = createStore({ path: ':memory:' });
-  const links = createLinks(store);
-  seed(store, 'own:A', { notes: ['a'] });
-  seed(store, 'own:B', { notes: ['b'] }); // same key, different value
-  const r = links.link('A', 'own:A', 'B', 'own:B');
-  assert.equal(r.ok, false);
-  assert.equal(r.reason, 'conflict');
-  assert.deepEqual(r.conflicts, ['notes']);
-  assert.equal(links.areLinked('A', 'B'), false);
+test('links: unlinking returns a group to its own (untouched) data', () => {
+  const { store, links } = setup();
+  store.scoped('own:A').set('note', 'a-secret');
+  link(links, 'A', 'B');
+  store.scoped(links.nsFor('A', 'own:A')).set('shared', 'hello'); // write to the overlay while linked
+  assert.equal(links.unlink('A').ok, true);
+  assert.equal(links.nsFor('A', 'own:A'), 'own:A'); // back to its own ns
+  assert.equal(store.scoped('own:A').get('note'), 'a-secret'); // own data was never touched
 });
 
-test('links: a third chat joins transitively - one shared context', () => {
-  const store = createStore({ path: ':memory:' });
-  const links = createLinks(store);
-  links.link('A', 'own:A', 'B', 'own:B');
-  assert.equal(links.link('C', 'own:C', 'A', 'own:A').ok, true); // C joins A's cluster
-  assert.deepEqual(links.chats('C').sort(), ['A', 'B', 'C']);
-  assert.equal(links.nsFor('C', 'own:C'), links.nsFor('B', 'own:B'));
+test('links: a third group joins transitively - one overlay for all', () => {
+  const { links } = setup();
+  link(links, 'A', 'B');
+  link(links, 'B', 'C'); // C joins via B
+  const ns = links.nsFor('A', 'own:A');
+  assert.equal(links.nsFor('C', 'own:C'), ns);
+  assert.deepEqual(links.chats('A').sort(), ['A', 'B', 'C']);
 });
 
-test('links: merging two existing clusters keeps everyone in one context', () => {
-  const store = createStore({ path: ':memory:' });
-  const links = createLinks(store);
-  links.link('A', 'own:A', 'B', 'own:B'); // cluster 1
-  links.link('C', 'own:C', 'D', 'own:D'); // cluster 2
-  assert.equal(links.link('A', 'own:A', 'C', 'own:C').ok, true); // merge the clusters
-  assert.deepEqual(links.chats('D').sort(), ['A', 'B', 'C', 'D']);
+test('links: a redundant link inside one overlay is accepted (connectivity insurance)', () => {
+  const { links } = setup();
+  link(links, 'A', 'B');
+  link(links, 'B', 'C'); // chain A-B-C
+  const r = link(links, 'A', 'C'); // already one overlay -> a redundant edge, not a refusal
+  assert.equal(r.ok, true);
+  assert.equal(r.redundant, true);
 });
 
-test('links: re-linking chats already in the same cluster is refused', () => {
-  const store = createStore({ path: ':memory:' });
-  const links = createLinks(store);
-  links.link('A', 'own:A', 'B', 'own:B');
-  assert.equal(links.link('A', 'own:A', 'B', 'own:B').reason, 'already-linked');
+test('links: leaving a still-connected overlay keeps it for the rest', () => {
+  const { links } = setup();
+  link(links, 'A', 'B');
+  link(links, 'B', 'C'); // chain A-B-C
+  links.unlink('A'); // A is a leaf - B and C stay linked
+  assert.deepEqual(links.chats('B').sort(), ['B', 'C']);
+  assert.equal(links.nsFor('B', 'own:B'), links.nsFor('C', 'own:C'));
+  assert.deepEqual(links.chats('A'), ['A']); // A is solo again
 });
 
-test('links: unlink copies the shared data out and keeps nothing lost', () => {
-  const store = createStore({ path: ':memory:' });
-  const links = createLinks(store);
-  seed(store, 'own:A', { notes: ['a1'] });
-  links.link('A', 'own:A', 'B', 'own:B');
-  const shared = links.nsFor('A', 'own:A');
-  store.kv.set(shared, 'extra', ['added-while-linked']);
-  assert.equal(links.unlink('A', 'own:A').ok, true);
-  assert.deepEqual(links.chats('A'), ['A']); // alone again
-  assert.deepEqual(store.kv.get('own:A', 'notes'), ['a1']); // own data kept
-  assert.deepEqual(store.kv.get('own:A', 'extra'), ['added-while-linked']); // plus shared additions
+test('links: removing a cut-vertex dissolves the whole overlay (everyone reverts to own)', () => {
+  const { store, links } = setup();
+  link(links, 'A', 'B');
+  link(links, 'B', 'C'); // chain A-B-C; B connects A and C
+  const overlayNs = links.nsFor('A', 'own:A');
+  store.scoped(overlayNs).set('shared', 'data');
+  links.unlink('B'); // removing B disconnects A from C -> dissolve
+  assert.deepEqual(links.chats('A'), ['A']);
+  assert.deepEqual(links.chats('B'), ['B']);
+  assert.deepEqual(links.chats('C'), ['C']);
+  assert.equal(store.scoped(overlayNs).get('shared'), undefined); // shared data discarded on dissolve
 });
 
-test('links: unlinking a non-linked chat is a no-op result', () => {
-  const links = createLinks(createStore({ path: ':memory:' }));
-  assert.equal(links.unlink('A', 'own:A').reason, 'not-linked');
+test('links: a redundant edge keeps the rest connected when a cut-vertex leaves', () => {
+  const { links } = setup();
+  link(links, 'A', 'B');
+  link(links, 'B', 'C');
+  link(links, 'A', 'C'); // triangle - B is no longer a cut-vertex
+  links.unlink('B'); // A and C stay connected via the A-C edge
+  assert.deepEqual(links.chats('A').sort(), ['A', 'C']);
 });
 
-test('links: propose + accept links the two chats and merges data (code is case-insensitive)', () => {
-  const store = createStore({ path: ':memory:' });
-  const links = createLinks(store, { genCode: () => 'CODE1' });
-  seed(store, 'own:A', { notes: ['a1'] });
-  assert.equal(links.propose('A', 'own:A'), 'CODE1');
-  assert.equal(links.accept('code1', 'B', 'own:B').ok, true); // lower-case accepted
-  assert.equal(links.areLinked('A', 'B'), true);
-  assert.deepEqual(store.kv.get(links.nsFor('B', 'own:B'), 'notes'), ['a1']);
+test('links: two groups already in different overlays cannot be linked', () => {
+  const { links } = setup();
+  link(links, 'A', 'B'); // overlay 1
+  link(links, 'C', 'D'); // overlay 2
+  assert.deepEqual(link(links, 'A', 'C'), { ok: false, reason: 'both-linked' });
 });
 
-test('links: accept rejects an unknown code and an expired one', () => {
-  let t = 1000;
-  const store = createStore({ path: ':memory:' });
-  const links = createLinks(store, { genCode: () => 'C', now: () => t, ttlMs: 100 });
-  assert.equal(links.accept('nope', 'B', 'own:B').reason, 'bad-code');
-  links.propose('A', 'own:A');
-  t = 1000 + 101; // past the TTL
-  assert.equal(links.accept('C', 'B', 'own:B').reason, 'expired');
+test('links: both groups must be active to link', () => {
+  const { links } = setup(['B']); // B is inactive
+  assert.deepEqual(link(links, 'A', 'B'), { ok: false, reason: 'inactive' });
 });
 
-test('links: accept on conflicting data refuses and does not link', () => {
+test('links: bad code, self-link, and an expired code are refused', () => {
   const store = createStore({ path: ':memory:' });
-  const links = createLinks(store, { genCode: () => 'C' });
-  seed(store, 'own:A', { notes: ['a'] });
-  seed(store, 'own:B', { notes: ['b'] });
-  links.propose('A', 'own:A');
-  assert.equal(links.accept('C', 'B', 'own:B').reason, 'conflict');
-  assert.equal(links.areLinked('A', 'B'), false);
+  let t = 0;
+  const links = createLinks(store, { now: () => t, genCode: () => 'CODE' });
+  assert.deepEqual(links.accept('nope', 'B'), { ok: false, reason: 'bad-code' });
+  assert.equal(links.accept(links.propose('A'), 'A').reason, 'same-chat');
+  const code = links.propose('A');
+  t = 11 * 60 * 1000; // past the 10-minute TTL
+  assert.deepEqual(links.accept(code, 'B'), { ok: false, reason: 'expired' });
 });
 
-test('links: adopt joins the proposer context without merging - immune to conflicts', () => {
+test('links: codes are matched case-insensitively', () => {
   const store = createStore({ path: ':memory:' });
-  const links = createLinks(store, { genCode: () => 'C' });
-  seed(store, 'own:A', { notes: ['from-A'] });
-  seed(store, 'own:B', { notes: ['from-B'] }); // would conflict on a merge
-  links.propose('A', 'own:A');
-  assert.equal(links.accept('C', 'B', 'own:B', 'adopt').ok, true); // adopt succeeds anyway
-  assert.deepEqual(store.kv.get(links.nsFor('B', 'own:B'), 'notes'), ['from-A']); // B sees A's context
-  assert.deepEqual(links.chats('B').sort(), ['A', 'B']);
+  const links = createLinks(store, { genCode: () => 'ABC123' });
+  assert.equal(links.accept(links.propose('A').toLowerCase(), 'B').ok, true);
 });
 
-test('links: unlinking an adopted chat returns its own (set-aside) data', () => {
-  const store = createStore({ path: ':memory:' });
-  const links = createLinks(store, { genCode: () => 'C' });
-  seed(store, 'own:A', { notes: ['from-A'] });
-  seed(store, 'own:B', { notes: ['from-B'] });
-  links.propose('A', 'own:A');
-  links.accept('C', 'B', 'own:B', 'adopt');
-  links.unlink('B', 'own:B');
-  assert.deepEqual(links.chats('B'), ['B']); // alone again
-  assert.deepEqual(store.kv.get('own:B', 'notes'), ['from-B']); // its own data, untouched
+test('links: unlinking a solo group is a no-op', () => {
+  const { links } = setup();
+  assert.deepEqual(links.unlink('A'), { ok: false, reason: 'not-linked' });
 });
 
-test('links: adopt is refused when the adopting chat is already linked', () => {
-  const store = createStore({ path: ':memory:' });
-  const links = createLinks(store, { genCode: () => 'C' });
-  links.link('B', 'own:B', 'X', 'own:X'); // B is already in a cluster
-  links.propose('A', 'own:A');
-  assert.equal(links.accept('C', 'B', 'own:B', 'adopt').reason, 'already-linked');
+test('links: a code is one-time - spent even by a refused attempt (no replay)', () => {
+  const { links } = setup();
+  link(links, 'A', 'B'); // overlay 1
+  link(links, 'C', 'D'); // overlay 2
+  const code = links.propose('A');
+  assert.equal(links.accept(code, 'C').reason, 'both-linked'); // refused (two overlays), but the code is spent
+  links.unlink('C'); // C is solo again
+  assert.equal(links.accept(code, 'C').reason, 'bad-code'); // the spent code cannot be replayed
 });

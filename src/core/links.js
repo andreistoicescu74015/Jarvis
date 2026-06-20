@@ -1,151 +1,86 @@
 /**
- * Context links ("crossover"). Chats can be joined into a cluster that shares ONE
- * context: the same scoped store and the same membership. Any number of chats, any
- * mix of private/group, transitive (a cluster is one shared context).
+ * Context links ("crossover") - an OVERLAY model. Linking two active groups joins them into a shared
+ * OVERLAY context that COVERS each group's own data without merging it: while linked, a group reads
+ * and writes the shared overlay and its own data is set aside, untouched, returning the instant it
+ * unlinks. Links form a graph (any number of groups, transitive); the shared context is the connected
+ * component. A redundant link inside one component just adds an edge - insurance, so one group leaving
+ * cannot split the rest. Two groups that are each already in a (different) component cannot be linked;
+ * unlink one side first.
  *
- * Linking MERGES the two sides' data and REFUSES on conflict (a key present on both
- * sides with a different value) - it never overwrites. Unlinking copies the shared
- * data out to the leaver, so nothing is lost. Pure over the KV store (ADR-0002); the
- * caller passes each chat's own namespace, so this module needs no knowledge of the
- * level/namespace format.
+ * Splitting is deliberately simple: if removing a group would disconnect the component, the WHOLE
+ * overlay dissolves and every member reverts to its own data (the shared data is discarded). Because
+ * the overlay never holds a group's own data (it only covers it), no merge or copy-out is ever needed.
+ *
+ * Pure over the KV store (ADR-0002). `isActivated` (both groups must be active to link), the clock,
+ * the code generator, and `clearNamespace` (to drop a dissolved overlay's data) are injected.
  *
  * @param {import('../store/index.js').Store} store
- * @param {{ namespace?: string }} [opts]
  */
-export function createLinks(store, { namespace = 'links', codesNamespace = 'link-codes', now = () => Date.now(), ttlMs = 10 * 60 * 1000, genCode } = {}) {
-  const map = store.scoped(namespace); // chatId -> clusterId; plus '#seq' -> counter
-  const codes = store.scoped(codesNamespace); // one-time link codes: code -> { from, fromNs, at }
+export function createLinks(store, {
+  isActivated = () => true,
+  now = () => Date.now(),
+  ttlMs = 10 * 60 * 1000,
+  genCode,
+  clearNamespace = () => {},
+} = {}) {
+  const edges = store.scoped('link-edges'); // edgeId "a|b" (sorted) -> { a, b }; a group JID never contains '|'
+  const member = store.scoped('link-member'); // chatId -> overlayId
+  const seq = store.scoped('link-seq'); // 'n' -> the overlay-id counter (its own ns: cannot collide with a chatId)
+  const codes = store.scoped('link-codes'); // one-time link codes: code -> { from, at }
   const makeCode = genCode ?? (() => Math.random().toString(36).slice(2, 8).toUpperCase());
-  const adopted = store.scoped('links-adopted'); // chatId -> true for members that joined by adopting
-  const SEQ = '#seq';
-  const clusterNs = (id) => `ctx:${id}`;
+  const overlayNs = (id) => `ctx:${id}`;
+  const edgeId = (a, b) => (a <= b ? `${a}|${b}` : `${b}|${a}`);
 
-  const clusterId = (chatId) => (chatId === SEQ ? undefined : map.get(chatId));
-
-  function nextId() {
-    const n = Number(map.get(SEQ) ?? 0) + 1;
-    map.set(SEQ, n);
+  function nextOverlay() {
+    const n = Number(seq.get('n') ?? 0) + 1;
+    seq.set('n', n);
     return `k${n}`;
   }
 
-  const membersOf = (cluster) =>
-    map.list().filter((e) => e.key !== SEQ && e.value === cluster).map((e) => e.key);
+  const overlayOf = (g) => member.get(g);
+  const membersOf = (overlay) => member.list().filter((e) => e.value === overlay).map((e) => e.key);
+  const allEdges = () => edges.list().map((e) => e.value);
+  const neighbours = (g) => allEdges().filter((e) => e.a === g || e.b === g).map((e) => (e.a === g ? e.b : e.a));
 
-  /** Chats sharing this chat's cluster (including itself); just itself when unlinked. */
-  function chats(chatId) {
-    const c = clusterId(chatId);
-    return c ? membersOf(c) : [chatId];
-  }
-
-  /** The store namespace a chat resolves to: the shared cluster ns if linked, else its own. */
-  function nsFor(chatId, ownNs) {
-    const c = clusterId(chatId);
-    return c ? clusterNs(c) : ownNs;
-  }
-
-  const areLinked = (a, b) => {
-    const ca = clusterId(a);
-    return !!ca && ca === clusterId(b);
-  };
-
-  /** Keys present in both namespaces with a different value - a merge conflict. */
-  function conflicts(nsA, nsB) {
-    const a = new Map(store.kv.list(nsA).map((e) => [e.key, JSON.stringify(e.value)]));
-    return store.kv
-      .list(nsB)
-      .filter((e) => a.has(e.key) && a.get(e.key) !== JSON.stringify(e.value))
-      .map((e) => e.key);
-  }
-
-  /** Copy entries from one namespace into another without overwriting existing keys. */
-  function fold(from, to) {
-    for (const { key, value } of store.kv.list(from)) {
-      if (!store.kv.has(to, key)) store.kv.set(to, key, value);
+  /** Every group reachable from `start` via the current edges (its connected component, incl. itself). */
+  function reachable(start) {
+    const seen = new Set([start]);
+    const stack = [start];
+    while (stack.length) {
+      for (const n of neighbours(stack.pop())) if (!seen.has(n)) { seen.add(n); stack.push(n); }
     }
+    return seen;
   }
 
-  /**
-   * Join chat A (own ns `ownNsA`) and chat B (own ns `ownNsB`) into one cluster,
-   * merging their data. Refuses on conflict; never overwrites.
-   *
-   * @returns {{ ok: true, cluster: string } | { ok: false, reason: string, conflicts?: string[] }}
-   */
-  function link(a, ownNsA, b, ownNsB) {
-    // Atomic: the fold + the per-member reassignment is one unit, so a crash mid-merge can never
-    // leave a cluster where some chats point at the new id but the data was only partly copied.
-    return store.transaction(() => {
-      if (!a || !b || a === b) return { ok: false, reason: 'same-chat' };
-      const ca = clusterId(a);
-      const cb = clusterId(b);
-      if (ca && ca === cb) return { ok: false, reason: 'already-linked' };
-
-      const nsA = ca ? clusterNs(ca) : ownNsA;
-      const nsB = cb ? clusterNs(cb) : ownNsB;
-      const clash = conflicts(nsA, nsB);
-      if (clash.length) return { ok: false, reason: 'conflict', conflicts: clash };
-
-      const target = ca || cb || nextId();
-      const targetNs = clusterNs(target);
-      // Members of each side are read up front (before any reassignment).
-      const sides = [
-        { members: ca ? membersOf(ca) : [a], ns: nsA, isTarget: target === ca },
-        { members: cb ? membersOf(cb) : [b], ns: nsB, isTarget: target === cb },
-      ];
-      for (const side of sides) {
-        if (!side.isTarget) fold(side.ns, targetNs); // bring this side's data into the shared ns
-        for (const chat of side.members) map.set(chat, target);
-      }
-      return { ok: true, cluster: target };
-    });
+  /** The store namespace a chat resolves to: the shared overlay if linked, else its own. */
+  function nsFor(chatId, ownNs) {
+    const o = overlayOf(chatId);
+    return o ? overlayNs(o) : ownNs;
   }
 
-  /** Remove a chat from its cluster, copying the shared data out so nothing is lost. */
-  function unlink(chatId, ownNs) {
-    // Atomic: the copy-out + the membership removal commit together (or not at all).
-    return store.transaction(() => {
-      const c = clusterId(chatId);
-      if (!c) return { ok: false, reason: 'not-linked' };
-      // A merge member takes a copy of the shared data; an adopted member's own data was
-      // never merged in, so it simply returns to it (set aside, untouched).
-      if (adopted.get(chatId)) {
-        adopted.delete(chatId);
-      } else {
-        for (const { key, value } of store.kv.list(clusterNs(c))) store.kv.set(ownNs, key, value);
-      }
-      map.delete(chatId);
-      return { ok: true };
-    });
+  /** Chats sharing this chat's overlay (including itself); just itself when unlinked. */
+  function chats(chatId) {
+    const o = overlayOf(chatId);
+    return o ? membersOf(o) : [chatId];
   }
 
-  /** Create a one-time code (TTL) this chat shares to invite another chat to link. */
-  function propose(from, fromNs) {
+  /** Create a one-time code (TTL) this group shares to invite another group to link. */
+  function propose(from) {
     const code = makeCode();
-    codes.set(code, { from, fromNs, at: now() });
+    codes.set(code, { from, at: now() });
     return code;
   }
 
-  /** Ensure `from` is in a cluster (creating one from its own data if solo); return its id. */
-  function clusterFor(from, fromNs) {
-    return store.transaction(() => {
-      const c = clusterId(from);
-      if (c) return c;
-      const id = nextId();
-      fold(fromNs, clusterNs(id));
-      map.set(from, id);
-      return id;
-    });
-  }
-
   /**
-   * Redeem a code from chat `by`. mode 'merge' (default) combines `by`'s data into the
-   * proposer's context, refusing on conflict. mode 'adopt' takes the proposer's context
-   * as-is and leaves `by`'s own data untouched (it returns on unlink) - so it can never
-   * conflict.
+   * Redeem a code from group `by`. Both groups must be ACTIVE and not already in different overlays.
+   * Joining a solo group to an overlay just covers it; two solo groups create a fresh overlay; a
+   * redundant edge inside one overlay is allowed (connectivity insurance).
+   *
+   * @returns {{ ok: true } | { ok: false, reason: string }}
    */
-  function accept(code, by, byNs, mode = 'merge') {
-    // Atomic over the whole redemption: code consumption + the merge/adopt commit together, so a
-    // crash can't burn the code without linking, or link without consuming the code. The nested
-    // link()/clusterFor() calls join this transaction (re-entrant), staying one unit.
+  function accept(code, by) {
+    // Atomic: code consumption + the membership/edge writes commit together (re-entrant), so a crash
+    // can't burn the code without linking, or link without consuming the code.
     return store.transaction(() => {
       const c = String(code ?? '').trim().toUpperCase();
       const rec = codes.get(c);
@@ -154,24 +89,58 @@ export function createLinks(store, { namespace = 'links', codesNamespace = 'link
         codes.delete(c);
         return { ok: false, reason: 'expired' };
       }
-      if (rec.from === by) return { ok: false, reason: 'same-chat' };
-      if (areLinked(rec.from, by)) {
-        codes.delete(c);
-        return { ok: false, reason: 'already-linked' };
+      codes.delete(c); // one-time: a valid code is spent by this attempt, whatever the outcome
+      const from = rec.from;
+      if (from === by) return { ok: false, reason: 'same-chat' };
+      if (!isActivated(by) || !isActivated(from)) return { ok: false, reason: 'inactive' };
+      const oBy = overlayOf(by);
+      const oFrom = overlayOf(from);
+      if (oBy && oFrom && oBy === oFrom) {
+        edges.set(edgeId(by, from), { a: by, b: from }); // already one overlay: a redundant edge is insurance
+        return { ok: true, redundant: true };
       }
-      if (mode === 'adopt') {
-        if (clusterId(by)) return { ok: false, reason: 'already-linked' }; // unlink first
-        const cluster = clusterFor(rec.from, rec.fromNs);
-        map.set(by, cluster);
-        adopted.set(by, true);
-        codes.delete(c);
-        return { ok: true };
-      }
-      const r = link(rec.from, rec.fromNs, by, byNs);
-      if (r.ok) codes.delete(c);
-      return r;
+      if (oBy && oFrom) return { ok: false, reason: 'both-linked' }; // two different overlays - unlink one first
+      const overlay = oBy || oFrom || nextOverlay();
+      if (!oBy) member.set(by, overlay);
+      if (!oFrom) member.set(from, overlay);
+      edges.set(edgeId(by, from), { a: by, b: from });
+      return { ok: true };
     });
   }
 
-  return { nsFor, chats, areLinked, link, unlink, propose, accept };
+  /** Remove a group from its overlay; if that disconnects the rest, the whole overlay dissolves. */
+  function unlink(chatId) {
+    // Atomic: the edge/membership removal and any dissolve commit together.
+    return store.transaction(() => {
+      const o = overlayOf(chatId);
+      if (!o) return { ok: false, reason: 'not-linked' };
+      dropEdgesOf(chatId);
+      member.delete(chatId); // the leaver reverts to its own data (which the overlay only covered)
+      const rest = membersOf(o);
+      if (rest.length <= 1 || !connected(rest)) dissolve(o, rest);
+      return { ok: true };
+    });
+  }
+
+  function dropEdgesOf(g) {
+    for (const e of allEdges()) if (e.a === g || e.b === g) edges.delete(edgeId(e.a, e.b));
+  }
+
+  /** Whether every group in `members` is one connected component under the current edges. */
+  function connected(members) {
+    if (members.length <= 1) return true;
+    const comp = reachable(members[0]);
+    return members.every((m) => comp.has(m));
+  }
+
+  /** Dissolve an overlay: every member reverts to its own data and the shared data is discarded. */
+  function dissolve(overlay, members) {
+    for (const m of members) {
+      dropEdgesOf(m);
+      member.delete(m);
+    }
+    clearNamespace(overlayNs(overlay));
+  }
+
+  return { nsFor, chats, propose, accept, unlink };
 }

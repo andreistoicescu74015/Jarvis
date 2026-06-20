@@ -4,6 +4,7 @@ import { createRegistry } from '../src/core/registry.js';
 import { createDispatcher } from '../src/core/dispatch.js';
 import { createStore } from '../src/store/index.js';
 import { createActivation } from '../src/core/activation.js';
+import { createLinks } from '../src/core/links.js';
 import { toPlain } from '../src/core/format.js';
 import groups from '../src/commands/groups.js';
 
@@ -94,5 +95,27 @@ test('activation: a fresh activation announces in the group', async () => {
   // re-activating an already-active group does not re-announce
   await handle({ text: 'jarvis groups activate', sender: 'boss', level: 'group', chatId: 'g@g.us' });
   assert.equal(sent.length, 1);
+  store.close();
+});
+
+test('activation: deactivating a group unlinks it and wipes its own data', async () => {
+  const store = createStore({ path: ':memory:' });
+  const activation = createActivation(store);
+  activation.activate('gA@g.us', 'boss');
+  activation.activate('gB@g.us', 'boss');
+  // link gA and gB (over the same store the dispatcher uses), and give gA some own data
+  const links = createLinks(store, {
+    isActivated: (id) => activation.isActive(id),
+    clearNamespace: (ns) => store.clearNamespace(ns),
+  });
+  links.accept(links.propose('gA@g.us'), 'gB@g.us');
+  store.scoped('group:gA@g.us').set('note', 'a-data');
+  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, requireActivation: true });
+  // the owner deactivates gA from a DM
+  await handle({ text: 'jarvis groups deactivate gA@g.us', sender: 'boss', level: 'private', chatId: 'dm' });
+  assert.equal(activation.isActive('gA@g.us'), false); // deactivated
+  assert.equal(store.scoped('group:gA@g.us').get('note'), undefined); // its own data wiped
+  // the 2-group overlay dissolved: gB is solo again
+  assert.deepEqual(createLinks(store).chats('gB@g.us'), ['gB@g.us']);
   store.close();
 });
