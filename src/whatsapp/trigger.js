@@ -33,7 +33,7 @@ export function mentionsBot(mentionedJid, selfId) {
 export function startsWithPrefix(text, prefix) {
   const t = (text ?? '').trim().toLowerCase();
   const p = prefix.toLowerCase();
-  return t === p || t.startsWith(`${p} `);
+  return t === p || (t.startsWith(p) && /\s/.test(t.charAt(p.length)));
 }
 
 /**

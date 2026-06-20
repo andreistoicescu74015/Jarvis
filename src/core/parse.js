@@ -13,7 +13,9 @@ export function parse(text, prefix = 'jarvis', { addressed = false } = {}) {
   const trimmed = (text ?? '').trim();
   const lower = trimmed.toLowerCase();
   const p = prefix.toLowerCase();
-  const hasPrefix = lower === p || lower.startsWith(`${p} `);
+  // Addressed when the text is exactly the prefix, or the prefix followed by any whitespace
+  // (space, tab, NBSP) - so the boundary check agrees with `.trim()`/`split(/\s+/)` below.
+  const hasPrefix = lower === p || (lower.startsWith(p) && /\s/.test(lower.charAt(p.length)));
   if (!hasPrefix && !addressed) return null;
 
   const after = hasPrefix ? trimmed.slice(prefix.length).trim() : trimmed;

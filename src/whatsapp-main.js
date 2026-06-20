@@ -90,7 +90,11 @@ const adapter = createWhatsAppAdapter({
   },
   // The bot was removed from a group: deactivate it so Jarvis goes silent there - including stopping
   // its scheduled proactive sends (which deliver outside the inbound activation gate).
-  onRemoved: (chatId) => activation.deactivate(chatId),
+  onRemoved: (chatId) => {
+    activation.deactivate(chatId);
+    const cleared = scheduler.clearChat(chatId);
+    if (cleared) log.info('cleared scheduled jobs for a removed group', { chatId, cleared });
+  },
   // Track connection liveness for the heartbeat: stamp it immediately on connect, and the interval
   // below keeps it fresh while connected (so a disconnect lets it go stale -> unhealthy).
   onConnectionState: (isConnected) => {
@@ -152,7 +156,7 @@ const deliver = (chatId, text) => {
   // have no activation entry and are never gated. Off when activation is not required (e.g. dev).
   if (requireActivation && isJidGroup(chatId) && !activation.isActive(chatId)) {
     log.info('skip scheduled send to an inactive group', { chatId });
-    return;
+    return false; // DECLINE: signal the scheduler this was not delivered, so it leaves the job pending
   }
   return adapter.send(chatId, text);
 };

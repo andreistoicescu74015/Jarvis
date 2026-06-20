@@ -77,7 +77,7 @@ export function createScheduler(store, { now = () => Date.now() } = {}) {
   function add({ chatId, createdBy = '', when, text }) {
     const w = parseWhen(when, now());
     if (!w.ok) return w;
-    if (!String(text ?? '').trim()) return { ok: false, reason: 'bad-when' };
+    if (!String(text ?? '').trim()) return { ok: false, reason: 'empty-text' };
     const id = nextId();
     jobs.set(id, { chatId, text, fireAt: w.fireAt, repeatMs: w.repeatMs, createdBy, createdAt: now() });
     return { ok: true, id, fireAt: w.fireAt, repeatMs: w.repeatMs };
@@ -92,6 +92,13 @@ export function createScheduler(store, { now = () => Date.now() } = {}) {
     if (!j || j.chatId !== chatId) return { ok: false, reason: 'not-found' };
     jobs.delete(id);
     return { ok: true };
+  }
+
+  /** Remove every job belonging to a chat (e.g. the bot was removed from that group). Returns the count. */
+  function clearChat(chatId) {
+    const mine = all().filter((j) => j.chatId === chatId);
+    for (const j of mine) jobs.delete(j.id);
+    return mine.length;
   }
 
   /**
@@ -110,12 +117,20 @@ export function createScheduler(store, { now = () => Date.now() } = {}) {
     let fired = 0;
     let failed = 0;
     for (const j of due) {
+      let declined = false;
       try {
-        await deliver(j.chatId, j.text);
-        fired++;
+        // `deliver` may DECLINE by returning false when the destination is currently
+        // ineligible (e.g. an inactive group, or one the bot was removed from): neither a
+        // success nor a failure. The job is left pending and untouched - never counted as
+        // fired, never advanced or dropped (which would silently lose or zombie it) - so it
+        // delivers later if the destination becomes eligible again.
+        const r = await deliver(j.chatId, j.text);
+        if (r === false) declined = true;
+        else fired++;
       } catch {
         failed++;
       }
+      if (declined) continue;
       // Re-read after delivery: the store is shared with the message handler, so an
       // inbound `schedule cancel` can land during the await. Respect it - never write
       // a stale snapshot back (which would resurrect a job the user just cancelled).
@@ -132,5 +147,5 @@ export function createScheduler(store, { now = () => Date.now() } = {}) {
     return { fired, failed };
   }
 
-  return { add, list, cancel, tick };
+  return { add, list, cancel, clearChat, tick };
 }
