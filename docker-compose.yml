@@ -6,6 +6,11 @@ services:
     restart: on-failure # clean shutdown stays down; restart/logout and OOM come back
     stdin_open: true # first-run QR pairing needs an attached terminal
     tty: true
+    environment:
+      # Server-local time zone - sets what `jarvis schedule at <date> <time>` means (the bot uses
+      # local wall-clock). Default Europe/Bucharest; override by setting TZ in .env. Node resolves
+      # the zone from its bundled ICU data, so the slim image needs no tzdata package.
+      - TZ=${TZ:-Europe/Bucharest}
     env_file:
       - path: .env
         required: false # all variables are optional (see .env.example)
