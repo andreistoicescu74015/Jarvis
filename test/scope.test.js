@@ -26,9 +26,12 @@ test('checkScope: owner requirement', () => {
   assert.equal(checkScope({ owner: true }, { level: 'private', isAdmin: false, isOwner: true }).ok, true);
 });
 
-test('checkScope: admin enforced only in groups (private user is the authority)', () => {
+test('checkScope: admin enforced in groups and communities (private user is the authority)', () => {
   assert.equal(checkScope({ admin: true }, { level: 'group', isAdmin: false, isOwner: false }).ok, false);
   assert.equal(checkScope({ admin: true }, { level: 'group', isAdmin: true, isOwner: false }).ok, true);
+  // a community is a multi-user space too: a non-admin must not pass an admin-gated command there.
+  assert.equal(checkScope({ admin: true }, { level: 'community', isAdmin: false, isOwner: false }).ok, false);
+  assert.equal(checkScope({ admin: true }, { level: 'community', isAdmin: true, isOwner: false }).ok, true);
   assert.equal(checkScope({ admin: true }, { level: 'private', isAdmin: false, isOwner: false }).ok, true);
 });
 
