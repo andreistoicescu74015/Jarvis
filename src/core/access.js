@@ -1,6 +1,17 @@
 import { sameUser } from './scope.js';
 
 /**
+ * The access context for a chat: a single shared `private` context for every DM with Jarvis
+ * (so the owner manages one private policy, not one per contact), else the chat's own id. There
+ * is no cross-context targeting - a rule always applies where it is set.
+ *
+ * @param {'private'|'group'|'community'} level
+ * @param {string} chatId
+ * @returns {string}
+ */
+export const accessContextFor = (level, chatId) => (level === 'private' ? 'private' : chatId);
+
+/**
  * The owner-managed manual access layer (ADR-0006), on top of a command's built-in
  * `scope`. The owner can put a target - a command, or the whole bot (target `*`) -
  * into one of three modes per context: `public` (default), `whitelist` (only listed
@@ -41,19 +52,15 @@ export function createAccessPolicy(store, { match = sameUser, namespace = 'acces
   const samePerson = (a, b) => a === b || (a !== '*' && b !== '*' && match(a, b));
 
   /**
-   * Whether `user` satisfies the active rule for `target`, checked against the given
-   * context AND the global `*` context (both must pass). The owner bypass happens in
-   * the dispatcher; this assumes a non-owner.
+   * Whether `user` satisfies the active rule for `target` in `context`. The owner (and a group
+   * admin in their own chat) bypass this layer in the dispatcher; this assumes neither.
    */
   function passes(target, context, user) {
-    const contexts = context === '*' ? ['*'] : [context, '*'];
-    for (const cid of contexts) {
-      const rec = read(target, cid);
-      if (rec.active === 'public') continue;
-      const hit = hits(user, rec[rec.active]);
-      if (rec.active === 'whitelist' && !hit) return false;
-      if (rec.active === 'blacklist' && hit) return false;
-    }
+    const rec = read(target, context);
+    if (rec.active === 'public') return true;
+    const hit = hits(user, rec[rec.active]);
+    if (rec.active === 'whitelist') return hit; // only listed people pass
+    if (rec.active === 'blacklist') return !hit; // everyone but the listed pass
     return true;
   }
 

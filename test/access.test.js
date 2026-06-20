@@ -79,20 +79,20 @@ test('access: clear empties a list and reopens the target if it was active', () 
   assert.deepEqual(a.get('note', 'g1').whitelist, []);
 });
 
-test('access: a per-context rule and the global "*" context both apply', () => {
+test('access: a rule applies only in its own context (no cross-context)', () => {
   const a = policy();
-  a.add('blacklist', 'note', '*', 'spammer'); // banned everywhere
-  a.enable('blacklist', 'note', '*');
-  assert.equal(a.passes('note', 'g1', 'spammer'), false);
-  assert.equal(a.passes('note', 'g2', 'spammer'), false);
+  a.add('blacklist', 'note', 'g1', 'spammer');
+  a.enable('blacklist', 'note', 'g1');
+  assert.equal(a.passes('note', 'g1', 'spammer'), false); // blocked where the rule is set
+  assert.equal(a.passes('note', 'g2', 'spammer'), true); // another context is unaffected
   assert.equal(a.passes('note', 'g1', 'alice'), true);
 });
 
-test('access: whole-bot gate ("*") gates a chat or everywhere', () => {
+test('access: the whole-bot target ("*") gates every command in its context', () => {
   const a = policy();
-  a.enable('whitelist', '*', '*'); // private bot, everywhere (only the owner, who bypasses)
+  a.enable('whitelist', '*', 'g1'); // private bot in g1 (only the owner, who bypasses)
   assert.equal(a.passes('*', 'g1', 'alice'), false);
-  assert.equal(a.passes('*', 'g2', 'bob'), false);
+  assert.equal(a.passes('*', 'g2', 'bob'), true); // a different context is unaffected
 });
 
 test('access: matching is identity-aware via the injected matcher (LID <-> PN)', () => {

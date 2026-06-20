@@ -37,7 +37,7 @@ test('dispatch+access: a whitelist restricts the command to listed people', asyn
 
 test('dispatch+access: the global gate silences a blocked sender even for a bare prefix or junk', async () => {
   const { handle, access } = setup();
-  access.enable('whitelist', '*', '*'); // private bot (only the owner, who bypasses)
+  access.enable('whitelist', '*', 'private'); // lock the bot in DMs (only the owner, who bypasses)
   assert.equal(await handle({ text: 'jarvis', sender: 'x', chatId: 'c1' }), undefined); // no "Try help"
   assert.equal(await handle({ text: 'jarvis frobnicate', sender: 'x', chatId: 'c1' }), undefined); // no "Unknown command"
   assert.equal(await handle({ text: 'jarvis ping', sender: 'x', chatId: 'c1' }), undefined);
@@ -45,15 +45,15 @@ test('dispatch+access: the global gate silences a blocked sender even for a bare
 
 test('dispatch+access: the owner bypasses every list', async () => {
   const { handle, access } = setup({ owner: 'boss' });
-  access.add('blacklist', 'ping', '*', '*'); // ping blocked for everyone, everywhere
-  access.enable('blacklist', 'ping', '*');
+  access.add('blacklist', 'ping', 'private', '*'); // ping blocked for everyone in DMs
+  access.enable('blacklist', 'ping', 'private');
   assert.equal(await handle({ text: 'jarvis ping', sender: 'boss', chatId: 'c1' }), 'pong'); // owner still passes
   assert.equal(await handle({ text: 'jarvis ping', sender: 'x', chatId: 'c1' }), undefined); // everyone else silent
 });
 
 test('dispatch+access: the owner command stays reachable despite a private-bot gate (anti-lockout)', async () => {
   const { handle, access } = setup({ commands: [owner, ping] }); // no env owner; nobody owns it yet
-  access.enable('whitelist', '*', '*'); // bot private
+  access.enable('whitelist', '*', 'private'); // bot locked in DMs
   assert.match(
     await handle({ text: 'jarvis owner claim', sender: 'alice', level: 'private', chatId: 'c1' }),
     /you are now the owner/i,
@@ -73,10 +73,10 @@ test('dispatch+access: with no store the access layer is inactive (everything pu
 
 test('dispatch+access: the global gate and a per-command list both apply (two tiers)', async () => {
   const { handle, access } = setup({ commands: [ping, note, owner] });
-  access.add('whitelist', '*', '*', 'alice'); // bot answers only alice...
-  access.enable('whitelist', '*', '*');
-  access.add('blacklist', 'note', '*', 'alice'); // ...but alice is barred from note
-  access.enable('blacklist', 'note', '*');
+  access.add('whitelist', '*', 'c1', 'alice'); // in c1 the bot answers only alice...
+  access.enable('whitelist', '*', 'c1');
+  access.add('blacklist', 'note', 'c1', 'alice'); // ...but alice is barred from note there
+  access.enable('blacklist', 'note', 'c1');
   assert.equal(await handle({ text: 'jarvis ping', sender: 'alice', chatId: 'c1', level: 'group' }), 'pong');
   assert.equal(await handle({ text: 'jarvis note list', sender: 'alice', chatId: 'c1', level: 'group' }), undefined);
   assert.equal(await handle({ text: 'jarvis ping', sender: 'bob', chatId: 'c1', level: 'group' }), undefined); // fails the global gate
@@ -92,4 +92,15 @@ test('dispatch+access: a denial is logged for audit (never chatted)', async () =
   const handle = createDispatcher(createRegistry([ping]), { store, log });
   assert.equal(await handle({ text: 'jarvis ping', sender: 'bob', chatId: 'c1', level: 'group' }), undefined);
   assert.ok(logs.some((l) => /access deny/.test(l.m)), 'expected the denial to be logged');
+});
+
+test('dispatch+access: every DM shares one "private" context (not one per contact)', async () => {
+  const { handle, access } = setup();
+  access.enable('whitelist', '*', 'private'); // lock Jarvis's DMs to listed people
+  access.add('whitelist', '*', 'private', 'alice');
+  // two different DMs (different chatIds) are governed by the single private policy
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'alice', chatId: 'dmA', level: 'private' }), 'pong');
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'bob', chatId: 'dmB', level: 'private' }), undefined);
+  // a group is its own context, unaffected by the private policy
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'bob', chatId: 'gX', level: 'group' }), 'pong');
 });

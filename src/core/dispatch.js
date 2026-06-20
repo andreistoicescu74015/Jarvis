@@ -1,7 +1,7 @@
 import { parse } from './parse.js';
 import { checkScope, sameUser } from './scope.js';
 import { createOwnerResolver } from './owner.js';
-import { createAccessPolicy } from './access.js';
+import { createAccessPolicy, accessContextFor } from './access.js';
 import { createLinks } from './links.js';
 import { createActivation } from './activation.js';
 import { nullLogger } from './log.js';
@@ -63,6 +63,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     const sender = msg.sender ?? '';
     const chatId = msg.chatId ?? 'cli';
     const ownNs = `${level}:${chatId}`;
+    const accessContext = accessContextFor(level, chatId); // 'private' for any DM, else the chat id
     const isAdmin = msg.isAdmin ?? false;
     const isOwner = ownerResolver.isOwner(sender);
     // The bot itself, by its trigger name or its own id forms - so a command can refuse
@@ -110,7 +111,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     // (already-active) chat - admins always have access where Jarvis runs. The bootstrap `owner`
     // command stays exempt so the bot can never be locked out of ownership.
     const exemptFromLists = isOwner || isAdmin || command === 'owner';
-    if (access && !exemptFromLists && !access.passes('*', chatId, sender)) {
+    if (access && !exemptFromLists && !access.passes('*', accessContext, sender)) {
       log.info('access deny (global)', { sender, chatId });
       return undefined;
     }
@@ -122,7 +123,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
 
     // Per-command gate: only a non-owner on a non-owner command is subject to it
     // (owner-only commands are governed by `scope`; `owner` is exempt above).
-    if (access && !exemptFromLists && !cmd.scope?.owner && !access.passes(command, chatId, sender)) {
+    if (access && !exemptFromLists && !cmd.scope?.owner && !access.passes(command, accessContext, sender)) {
       log.info('access deny (command)', { sender, chatId, command });
       return undefined;
     }
