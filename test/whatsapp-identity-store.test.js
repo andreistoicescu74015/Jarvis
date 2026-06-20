@@ -35,6 +35,27 @@ test('identity: learned pairs persist across instances', () => {
   store.close();
 });
 
+test('identity: refuses a conflicting pairing (keeps the first-learned, never silently remaps)', () => {
+  const store = createStore({ path: ':memory:' });
+  const id = createIdentityStore(store);
+  id.learn(LID, PN); // LID <-> 40712
+  id.learn(LID, '40799@s.whatsapp.net'); // same LID, different PN -> conflict, refused
+  assert.equal(id.pnForLid(LID), PN); // unchanged
+  id.learn('222@lid', PN); // same PN, different LID -> conflict, refused
+  assert.equal(id.lidForPn(PN), LID); // unchanged
+  store.close();
+});
+
+test('identity: re-learning the same pair is a harmless no-op (not a conflict)', () => {
+  const store = createStore({ path: ':memory:' });
+  const id = createIdentityStore(store);
+  id.learn(LID, PN);
+  id.learn(PN, LID); // same pair, reversed order
+  assert.equal(id.pnForLid(LID), PN);
+  assert.equal(id.lidForPn(PN), LID);
+  store.close();
+});
+
 test('identity: learnFromKey ignores keys without both id forms', () => {
   const store = createStore({ path: ':memory:' });
   const id = createIdentityStore(store);
