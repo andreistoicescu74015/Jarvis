@@ -28,9 +28,19 @@ export const MIGRATIONS = [
 export function migrate(db) {
   let version = db.prepare('PRAGMA user_version').get().user_version;
   for (let i = version; i < MIGRATIONS.length; i++) {
-    MIGRATIONS[i](db);
+    // Each step and its version bump run as one transaction, so a multi-statement migration that
+    // fails (or a crash) part-way rolls back cleanly instead of leaving a half-applied schema that
+    // would fail every boot. user_version is part of the db header, so it commits with the step.
+    db.exec('BEGIN');
+    try {
+      MIGRATIONS[i](db);
+      db.exec(`PRAGMA user_version = ${i + 1}`); // version is a controlled integer
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
     version = i + 1;
-    db.exec(`PRAGMA user_version = ${version}`); // version is a controlled integer
   }
   return version;
 }

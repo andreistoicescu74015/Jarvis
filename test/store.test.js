@@ -61,6 +61,56 @@ test('store: creates the database parent directory if it is missing', () => {
   }
 });
 
+test('store: transaction commits on success and rolls back the whole thing on throw', () => {
+  const s = createStore({ path: ':memory:' });
+  s.transaction(() => {
+    s.kv.set('n', 'a', 1);
+    s.kv.set('n', 'b', 2);
+  });
+  assert.equal(s.kv.get('n', 'a'), 1);
+  assert.equal(s.kv.get('n', 'b'), 2);
+
+  assert.throws(
+    () =>
+      s.transaction(() => {
+        s.kv.set('n', 'c', 3); // written...
+        throw new Error('boom'); // ...then rolled back
+      }),
+    /boom/,
+  );
+  assert.equal(s.kv.get('n', 'c'), undefined); // nothing partial survives
+  s.close();
+});
+
+test('store: transactions are re-entrant (a nested call joins the outer; one rollback undoes all)', () => {
+  const s = createStore({ path: ':memory:' });
+  assert.throws(
+    () =>
+      s.transaction(() => {
+        s.kv.set('n', 'x', 1);
+        s.transaction(() => s.kv.set('n', 'y', 2)); // nested - no separate commit
+        throw new Error('rollback all');
+      }),
+    /rollback all/,
+  );
+  assert.equal(s.kv.get('n', 'x'), undefined); // the outer rollback undoes the nested write too
+  assert.equal(s.kv.get('n', 'y'), undefined);
+  s.close();
+});
+
+test('store: a file-backed db uses WAL (a -wal sidecar appears on write)', () => {
+  const base = mkdtempSync(join(tmpdir(), 'jarvis-store-'));
+  try {
+    const dbPath = join(base, 'j.db');
+    const s = createStore({ path: dbPath });
+    s.kv.set('n', 'k', 'v'); // a write populates the write-ahead log
+    assert.ok(existsSync(`${dbPath}-wal`), 'expected a -wal sidecar (WAL journal mode is on)');
+    s.close();
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test('store: migrations are idempotent (reopening the same db re-applies nothing)', () => {
   const s1 = createStore({ path: ':memory:' });
   s1.close();
