@@ -319,3 +319,14 @@ test('adapter: leaves an existing profile name untouched, still goes online', as
   assert.equal(sock.named, undefined); // not renamed
   assert.ok(sock.presence.some((p) => p.state === 'available'));
 });
+
+test('adapter: a failing profile-name update still goes online (app-state not synced after pairing)', async () => {
+  const makeSocket = fakeSocketFactory();
+  createWhatsAppAdapter(opts({ makeSocket, humanize: { profileName: 'Jarvis' } })).start({ onMessage: async () => {} });
+  const sock = makeSocket.sockets[0];
+  sock.updateProfileName = async () => { throw new Error('App state key not present!'); };
+  sock.ev.emit('connection.update', { connection: 'open' });
+  await tick();
+  // The name failure is isolated: the bot must still broadcast 'available' so receipts can activate.
+  assert.ok(sock.presence.some((p) => p.state === 'available'));
+});
