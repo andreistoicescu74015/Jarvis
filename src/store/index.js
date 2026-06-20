@@ -16,6 +16,7 @@ import { createKv } from './kv.js';
  * @property {ReturnType<typeof createKv>} kv                 Raw namespaced KV.
  * @property {<T>(fn: () => T) => T} transaction             Run fn atomically (all-or-nothing); re-entrant.
  * @property {(ns: string) => ScopedStore} scoped            A KV view bound to one namespace.
+ * @property {(ns: string) => number} clearNamespace        Delete every entry in a namespace.
  * @property {() => void} close
  *
  * @typedef {Object} ScopedStore
@@ -62,6 +63,7 @@ export function createStore({ path = ':memory:' } = {}) {
   return {
     kv,
     transaction,
+    clearNamespace: (ns) => kv.clear(ns),
     scoped(ns) {
       return {
         get: (key) => kv.get(ns, key),

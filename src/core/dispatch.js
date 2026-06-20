@@ -29,7 +29,7 @@ import { b, code, esc } from './format.js';
  * @property {import('../store/index.js').ScopedStore} [store] Per-conversation scoped KV (when configured).
  * @property {ReturnType<typeof createAccessPolicy>} [access] Owner-managed access lists (when a store is configured).
  * @property {{ isActive: (id: string) => boolean, activate: (id: string, by?: string) => boolean, deactivate: (id: string) => boolean, list: () => string[] }} [activation] Per-group activation registry (ADR-0008; when a store is configured).
- * @property {{ propose: () => string, accept: (code: string) => object, adopt: (code: string) => object, unlink: () => object }} [links] Context-link handshake bound to this chat (when a store is configured).
+ * @property {{ propose: () => string, accept: (code: string) => object, unlink: () => object }} [links] Context-link (overlay) handshake bound to this chat (when a store is configured).
  * @property {import('./log.js').Logger} log               Structured logger (never posts to chat).
  * @property {{ shutdown?: () => void, restart?: () => void, logout?: () => void }} [lifecycle] Process lifecycle controls (owner commands; injected per platform).
  * @property {() => Promise<{ id: string, name: string }[]>} listGroups  Groups the bot is in (platform capability; empty off a group platform).
@@ -51,8 +51,13 @@ import { b, code, esc } from './format.js';
 export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, scheduler, requireOwner = false, requireActivation = false } = {}) {
   const ownerResolver = createOwnerResolver({ owner, match });
   const access = store ? createAccessPolicy(store, { match }) : null;
-  const links = store ? createLinks(store) : null;
   const activation = store ? createActivation(store) : null;
+  const links = store
+    ? createLinks(store, {
+        isActivated: (id) => activation.isActive(id), // a group must be active to link
+        clearNamespace: (ns) => store.clearNamespace(ns), // drop a dissolved overlay's shared data
+      })
+    : null;
 
   // First-owner lockdown: the moment an owner is established (OWNER_JID at startup, or `owner claim`),
   // lock Jarvis's DMs to them by enabling the private whitelist - a stranger can no longer DM the bot.
@@ -91,7 +96,14 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
   function deactivateGroup(id) {
     if (!activation) return false;
     const was = activation.deactivate(id);
-    if (was && access) access.clearContext(id); // tear down the group's lists with it
+    if (was) {
+      if (access) access.clearContext(id); // tear down the group's lists with it
+      if (links) links.unlink(id); // leave any link overlay (revert, or dissolve it if this splits the rest)
+      if (store) {
+        store.clearNamespace(`group:${id}`); // wipe the group's own data too - a deactivate is a full reset
+        store.clearNamespace(`community:${id}`);
+      }
+    }
     return was;
   }
 
@@ -247,10 +259,9 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
         : undefined,
       links: links
         ? {
-            propose: () => links.propose(chatId, ownNs),
-            accept: (code) => links.accept(code, chatId, ownNs),
-            adopt: (code) => links.accept(code, chatId, ownNs, 'adopt'),
-            unlink: () => links.unlink(chatId, ownNs),
+            propose: () => links.propose(chatId),
+            accept: (code) => links.accept(code, chatId),
+            unlink: () => links.unlink(chatId),
           }
         : undefined,
       resolveUser: resolveUser ?? ((token) => String(token ?? '').trim()),
