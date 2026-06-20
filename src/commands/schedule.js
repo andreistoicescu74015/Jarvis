@@ -44,13 +44,14 @@ const whenError = (r) =>
 export default {
   name: 'schedule',
   summary: 'Schedule a message to post later (once or repeating).',
-  usage: 'jarvis schedule in <2h> <msg> | at <YYYY-MM-DD> <HH:MM> <msg> | every <1d> <msg> | list | cancel <id|all>',
+  usage: 'jarvis schedule in <2h> <msg> | at <YYYY-MM-DD> <HH:MM> <msg> | every <1d> <msg> | list | cancel <id|all> | disable|enable <id|all>',
   man:
     'Post a message to this chat later, with no one sending a command at that moment. ' +
     '"schedule in 2h <msg>" posts once in two hours; "schedule at 2026-06-18 09:00 <msg>" posts once at ' +
     'an absolute (server-local) time; "schedule every 1d <msg>" repeats. Durations are <number><unit> ' +
     'with unit m (minutes), h (hours) or d (days). "schedule list" shows this chat\'s scheduled messages ' +
-    'with ids; "schedule cancel <id>" removes one, "schedule clear" (or "cancel all") removes them all. ' +
+    'with ids; "schedule cancel <id>" removes one, "schedule clear" (or "cancel all") removes them all; ' +
+    '"schedule disable <id|all>" pauses without deleting (it is kept and skipped), "enable" resumes. ' +
     'Scheduling works only in groups (where an admin can ' +
     'do it), not in private chats - the owner excepted. Schedules survive restarts.',
   scope: { admin: true, proactive: true },
@@ -61,7 +62,23 @@ export default {
     if (!sub || sub === 'list') {
       const jobs = ctx.scheduler.list();
       if (!jobs.length) return 'Nothing scheduled here.';
-      return [b('Scheduled'), bullet(jobs.map((j) => `${code(j.id)}: ${i(describe(j))} -> "${esc(j.text)}"`))].join('\n');
+      return [
+        b('Scheduled'),
+        bullet(jobs.map((j) => `${code(j.id)}: ${i(describe(j))}${j.disabled ? ` ${i('(paused)')}` : ''} -> "${esc(j.text)}"`)),
+      ].join('\n');
+    }
+
+    if (sub === 'disable' || sub === 'enable') {
+      const on = sub === 'enable';
+      const id = (ctx.args[1] ?? '').trim();
+      if (!id) return `Usage: ${code(`jarvis schedule ${sub} <id|all>`)}`;
+      if (id.toLowerCase() === 'all') {
+        const n = ctx.scheduler.setEnabledAll(on);
+        return n ? `${on ? 'Resumed' : 'Paused'} all ${n} scheduled messages here.` : 'Nothing scheduled here.';
+      }
+      return ctx.scheduler.setEnabled(id, on).ok
+        ? `${on ? 'Resumed' : 'Paused'} ${code(id)}.`
+        : `No scheduled message "${esc(id)}" here.`;
     }
 
     if (sub === 'cancel' || sub === 'clear') {
@@ -91,6 +108,6 @@ export default {
       return r.ok ? confirm(r) : whenError(r);
     }
 
-    return `Usage: ${code('jarvis schedule in <2h> <msg> | at <YYYY-MM-DD> <HH:MM> <msg> | every <1d> <msg> | list | cancel <id|all>')}`;
+    return `Usage: ${code('jarvis schedule in <2h> <msg> | at <YYYY-MM-DD> <HH:MM> <msg> | every <1d> <msg> | list | cancel <id|all> | disable|enable <id|all>')}`;
   },
 };

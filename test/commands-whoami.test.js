@@ -25,3 +25,22 @@ test('whoami: tags the owner and admin flags', async () => {
   const out = await handle({ sender: 'boss', level: 'group', isAdmin: true }, { owner: 'boss' });
   assert.match(out, /\(owner, admin\)/);
 });
+
+test('whoami: the owner can look a person up by number (resolved to the canonical id)', async () => {
+  const resolveUser = (t) => {
+    const d = String(t).replace(/[^0-9]/g, '');
+    return d ? `${d}@s.whatsapp.net` : String(t);
+  };
+  const dispatch = createDispatcher(createRegistry([whoami]), { owner: 'boss', resolveUser });
+  const out = toPlain(await dispatch({ text: 'jarvis whoami 40712345678', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(out, /\+40712345678/); // friendly form
+  assert.match(out, /40712345678@s\.whatsapp\.net/); // the canonical id to whitelist
+  // a non-owner with an argument just sees themselves - the lookup is owner-only
+  assert.match(toPlain(await dispatch({ text: 'jarvis whoami 40712345678', sender: 'rando', level: 'private', chatId: 'dm' })), /You are/);
+});
+
+test('whoami: the owner can look a person up by @mention', async () => {
+  const dispatch = createDispatcher(createRegistry([whoami]), { owner: 'boss' });
+  const out = toPlain(await dispatch({ text: 'jarvis whoami @x', sender: 'boss', level: 'group', mentionedJid: ['55@s.whatsapp.net'] }));
+  assert.match(out, /55@s\.whatsapp\.net/);
+});

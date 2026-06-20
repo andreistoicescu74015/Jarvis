@@ -101,6 +101,21 @@ export function createScheduler(store, { now = () => Date.now() } = {}) {
     return mine.length;
   }
 
+  /** Pause (disabled=true) or resume one job, kept either way; a paused job is skipped by `tick`. */
+  function setEnabled(id, chatId, enabled) {
+    const j = jobs.get(id);
+    if (!j || j.chatId !== chatId) return { ok: false, reason: 'not-found' };
+    jobs.set(id, { ...j, disabled: !enabled });
+    return { ok: true };
+  }
+
+  /** Pause or resume every job of a chat at once. Returns the count changed. */
+  function setEnabledAll(chatId, enabled) {
+    const mine = all().filter((j) => j.chatId === chatId);
+    for (const j of mine) jobs.set(j.id, { ...j, disabled: !enabled });
+    return mine.length;
+  }
+
   /**
    * Fire every job due at `at`: deliver it, then reschedule a repeating job to its next
    * future slot (skipping any intervals missed while down) or drop a one-time job. A
@@ -113,7 +128,7 @@ export function createScheduler(store, { now = () => Date.now() } = {}) {
    * @returns {Promise<{ fired: number, failed: number }>}
    */
   async function tick(deliver, at = now()) {
-    const due = all().filter((j) => j.fireAt <= at).sort((a, b) => a.fireAt - b.fireAt);
+    const due = all().filter((j) => j.fireAt <= at && !j.disabled).sort((a, b) => a.fireAt - b.fireAt);
     let fired = 0;
     let failed = 0;
     for (const j of due) {
@@ -147,5 +162,5 @@ export function createScheduler(store, { now = () => Date.now() } = {}) {
     return { fired, failed };
   }
 
-  return { add, list, cancel, clearChat, tick };
+  return { add, list, cancel, clearChat, setEnabled, setEnabledAll, tick };
 }

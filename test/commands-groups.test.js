@@ -4,6 +4,7 @@ import { createRegistry } from '../src/core/registry.js';
 import { createDispatcher } from '../src/core/dispatch.js';
 import { createStore } from '../src/store/index.js';
 import { createActivation } from '../src/core/activation.js';
+import { createLinks } from '../src/core/links.js';
 import groups from '../src/commands/groups.js';
 import { toPlain } from '../src/core/format.js';
 
@@ -73,5 +74,30 @@ test('groups: activate rejects an unknown id and needs an id from a private chat
 
   const noId = toPlain(await handle({ text: 'jarvis groups activate', sender: 'boss', level: 'private' }));
   assert.match(noId, /name it/i);
+  store.close();
+});
+
+test('groups: groups by community and shows link clusters', async () => {
+  const store = createStore({ path: ':memory:' });
+  const activation = createActivation(store);
+  activation.activate('gA@g.us', 'boss');
+  activation.activate('gB@g.us', 'boss');
+  const links = createLinks(store, {
+    isActivated: (id) => activation.isActive(id),
+    clearNamespace: (ns) => store.clearNamespace(ns),
+  });
+  links.accept(links.propose('gA@g.us'), 'gB@g.us'); // link gA + gB into one overlay
+  const listGroups = async () => [
+    { id: 'gA@g.us', name: 'Alpha', isCommunity: false },
+    { id: 'gB@g.us', name: 'Beta', isCommunity: false },
+    { id: 'c@g.us', name: 'Class', community: 'c@g.us', isCommunity: true }, // a community's announcement group
+    { id: 's@g.us', name: 'Sub', community: 'c@g.us', isCommunity: false }, // a sub-group of it
+  ];
+  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, listGroups });
+  const out = toPlain(await handle({ text: 'jarvis groups', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(out, /Community Class/); // a community header, named by its announcement group
+  assert.match(out, /\[community\]/); // the announcement group is tagged
+  assert.match(out, /Linked together/);
+  assert.match(out, /Alpha \+ Beta|Beta \+ Alpha/); // gA and gB shown as one cluster
   store.close();
 });

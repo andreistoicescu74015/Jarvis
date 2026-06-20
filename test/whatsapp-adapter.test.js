@@ -245,17 +245,21 @@ test('adapter: a close from a socket a reconnect already replaced is ignored (no
   assert.equal(makeSocket.sockets.length, 2);
 });
 
-test('adapter: listGroups maps participating groups to {id, name} (id when no subject)', async () => {
+test('adapter: listGroups maps participating groups (id when no subject; community wiring)', async () => {
   const makeSocket = fakeSocketFactory();
   const a = createWhatsAppAdapter(opts({ makeSocket }));
   a.start({ onMessage: async () => {} });
   makeSocket.sockets[0].groupFetchAllParticipating = async () => ({
     'g1@g.us': { id: 'g1@g.us', subject: 'Study' },
     'g2@g.us': { id: 'g2@g.us', subject: '' },
+    'c@g.us': { id: 'c@g.us', subject: 'Class', isCommunity: true }, // a community's announcement group
+    's@g.us': { id: 's@g.us', subject: 'Sub', linkedParent: 'c@g.us' }, // a sub-group of that community
   });
   assert.deepEqual(await a.listGroups(), [
-    { id: 'g1@g.us', name: 'Study' },
-    { id: 'g2@g.us', name: 'g2@g.us' },
+    { id: 'g1@g.us', name: 'Study', community: undefined, isCommunity: false },
+    { id: 'g2@g.us', name: 'g2@g.us', community: undefined, isCommunity: false },
+    { id: 'c@g.us', name: 'Class', community: 'c@g.us', isCommunity: true },
+    { id: 's@g.us', name: 'Sub', community: 'c@g.us', isCommunity: false },
   ]);
 });
 

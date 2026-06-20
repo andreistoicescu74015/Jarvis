@@ -49,17 +49,35 @@ async function manage(ctx, sub) {
   return (await ctx.activation.deactivate(id)) ? `Deactivated Jarvis in ${name}.` : `${name} was not active.`;
 }
 
-/** List the groups, tagging each active/inactive when an activation registry is configured. */
+/** List the groups - grouped by community, tagged active/inactive, with link clusters shown. */
 async function list(ctx) {
   const groups = ctx.listGroups ? await ctx.listGroups() : [];
   if (!groups.length) return 'No groups found (or not available here).';
   const active = new Set(ctx.activation ? ctx.activation.list() : []);
-  const lines = groups
-    .slice()
-    .sort((a, b2) => String(a.name).localeCompare(String(b2.name)))
-    .map((g) => {
-      const base = `${b(esc(g.name))} ${code(esc(g.id))}`;
-      return ctx.activation ? `${base} ${i(active.has(g.id) ? '(active)' : '(inactive)')}` : base;
-    });
-  return [`${b('Groups')} ${i(`(${groups.length})`)}`, bullet(lines)].join('\n');
+  const tag = (g) => {
+    const state = ctx.activation ? ` ${i(active.has(g.id) ? '(active)' : '(inactive)')}` : '';
+    const ann = g.isCommunity ? ` ${i('[community]')}` : '';
+    return `${b(esc(g.name))} ${code(esc(g.id))}${state}${ann}`;
+  };
+  // Split standalone groups from community members (a sub-group's `community` is its parent's id).
+  const sorted = groups.slice().sort((a, b2) => String(a.name).localeCompare(String(b2.name)));
+  const standalone = [];
+  const byCommunity = new Map();
+  for (const g of sorted) {
+    if (!g.community) standalone.push(g);
+    else (byCommunity.get(g.community) ?? byCommunity.set(g.community, []).get(g.community)).push(g);
+  }
+  const out = [`${b('Groups')} ${i(`(${groups.length})`)}`];
+  if (standalone.length) out.push(bullet(standalone.map(tag)));
+  for (const [cid, members] of byCommunity) {
+    const name = groups.find((g) => g.id === cid && g.isCommunity)?.name;
+    out.push(`${b('Community')}${name ? ` ${esc(name)}` : ''}:`, bullet(members.map(tag)));
+  }
+  // Groups sharing one link overlay - shown by name so it is clear which have a joint context.
+  const nameOf = (id) => groups.find((g) => g.id === id)?.name ?? id;
+  const clusters = (ctx.links?.clusters?.() ?? []).filter((c) => c.length > 1);
+  if (clusters.length) {
+    out.push(`${b('Linked together')}:`, bullet(clusters.map((c) => c.map((id) => esc(nameOf(id))).join(' + '))));
+  }
+  return out.join('\n');
 }
