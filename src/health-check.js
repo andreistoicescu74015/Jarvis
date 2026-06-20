@@ -3,9 +3,10 @@
 // container unhealthy on repeated non-zero exits. Keep this dependency-light (no sqlite) so it runs fast.
 import { readFileSync } from 'node:fs';
 import { isFresh } from './health.js';
+import { num } from './core/env.js';
 
 const path = process.env.JARVIS_HEALTH_FILE ?? 'data/health';
-const maxAgeMs = Number(process.env.JARVIS_HEALTH_MAX_AGE_MS) || 120_000;
+const maxAgeMs = num(process.env.JARVIS_HEALTH_MAX_AGE_MS, 120_000);
 
 let healthy = false;
 try {

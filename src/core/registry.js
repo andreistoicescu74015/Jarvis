@@ -7,6 +7,7 @@
  * @property {string} [usage]                    Optional usage hint.
  * @property {string} [man]                      Optional long-form help, shown by `man`.
  * @property {object} [params]                   Optional parameter schema (seed for AI tools; ADR-0005).
+ * @property {string[]} [requires]               ctx capabilities the command needs (e.g. ['store']); the dispatcher reports it unavailable when one is missing.
  * @property {import('./scope.js').Scope} [scope] Optional permission requirements.
  * @property {(ctx: import('./dispatch.js').Ctx) => unknown} run
  *

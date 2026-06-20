@@ -34,8 +34,8 @@ export default {
     '"link adopt <code>" (takes the other chat\'s context; this chat\'s own data is set aside and ' +
     'returns on unlink). "link remove" leaves the link; "link" alone shows the status.',
   scope: { admin: true },
+  requires: ['links'],
   run: (ctx) => {
-    if (!ctx.links) return 'Links are unavailable here.';
     const sub = (ctx.args[0] ?? '').toLowerCase();
 
     if (!sub) {
