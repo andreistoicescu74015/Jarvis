@@ -13,6 +13,7 @@ export function createKv(db) {
   );
   const delStmt = db.prepare('DELETE FROM kv WHERE ns = ? AND key = ?');
   const clearStmt = db.prepare('DELETE FROM kv WHERE ns = ?');
+  const clearAllStmt = db.prepare('DELETE FROM kv');
   const listStmt = db.prepare('SELECT key, value FROM kv WHERE ns = ? ORDER BY key');
 
   return {
@@ -34,6 +35,10 @@ export function createKv(db) {
     /** Delete every entry in a namespace. @returns {number} rows removed. */
     clear(ns) {
       return clearStmt.run(ns).changes;
+    },
+    /** Delete EVERY entry in EVERY namespace (a full data wipe). @returns {number} rows removed. */
+    clearAll() {
+      return clearAllStmt.run().changes;
     },
     /** @returns {{ key: string, value: unknown }[]} all entries in the namespace. */
     list(ns) {

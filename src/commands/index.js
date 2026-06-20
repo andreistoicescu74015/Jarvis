@@ -9,6 +9,7 @@ import blacklist from './blacklist.js';
 import groups from './groups.js';
 import link from './link.js';
 import schedule from './schedule.js';
+import reset from './reset.js';
 import shutdown from './shutdown.js';
 import restart from './restart.js';
 import logout from './logout.js';
@@ -30,6 +31,7 @@ export const commands = [
   groups,
   link,
   schedule,
+  reset,
   shutdown,
   restart,
   logout,

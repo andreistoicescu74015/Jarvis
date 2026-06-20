@@ -275,6 +275,17 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
             add: (when, text) => scheduler.add({ chatId, createdBy: sender, when, text }),
             list: () => scheduler.list(chatId),
             cancel: (id) => scheduler.cancel(id, chatId),
+            clear: () => scheduler.clearChat(chatId),
+          }
+        : undefined,
+      // Owner reset: wipe THIS context's DATA - its notes and schedules. NOT its access lists: those
+      // are managed via whitelist/blacklist, and silently clearing them on a reset would open the chat
+      // up (a security regression). A full access reset is what deactivate -> reactivate already does.
+      // The chat's data ns is the link overlay when linked, so a linked group clears the shared cluster.
+      resetContext: store
+        ? () => {
+            store.clearNamespace(links ? links.nsFor(chatId, ownNs) : ownNs);
+            if (scheduler) scheduler.clearChat(chatId);
           }
         : undefined,
       owner: ownerCap,

@@ -120,3 +120,17 @@ test('store: migrations are idempotent (reopening the same db re-applies nothing
   assert.equal(s2.kv.get('n', 'k'), true);
   s2.close();
 });
+
+test('store: clearNamespace clears one namespace; clearAll wipes every namespace', () => {
+  const s = createStore({ path: ':memory:' });
+  s.kv.set('ns1', 'a', 1);
+  s.kv.set('ns1', 'b', 2);
+  s.kv.set('ns2', 'c', 3);
+  assert.equal(s.clearNamespace('ns1'), 2); // only ns1
+  assert.equal(s.kv.get('ns2', 'c'), 3); // ns2 untouched
+  s.kv.set('ns1', 'a', 1);
+  assert.equal(s.clearAll(), 2); // ns1.a + ns2.c
+  assert.equal(s.kv.get('ns1', 'a'), undefined);
+  assert.equal(s.kv.get('ns2', 'c'), undefined);
+  s.close();
+});

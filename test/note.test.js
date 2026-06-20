@@ -90,3 +90,11 @@ test('note: caps the number of notes per conversation', async () => {
   assert.match(out[500], /Too many notes/i);
   store.close();
 });
+
+test('note: clear removes all notes at once', async () => {
+  const store = createStore({ path: ':memory:' });
+  const out = await run(store, ['jarvis note add a', 'jarvis note add b', 'jarvis note clear', 'jarvis note list']);
+  assert.match(out[2], /Cleared all 2 notes/i);
+  assert.equal(out[3], 'No notes yet.');
+  store.close();
+});
