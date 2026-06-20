@@ -19,6 +19,7 @@ const scheduler = createScheduler(store);
 const lifecycle = {
   shutdown: () => setTimeout(() => process.exit(0), 50),
   restart: () => setTimeout(() => process.exit(1), 50),
+  wipe: () => setTimeout(() => { store.clearAll(); process.exit(1); }, 50),
 };
 const adapter = createCliAdapter();
 const app = createApp(adapter, {

@@ -32,6 +32,19 @@ const activation = createActivation(store);
 // proactive deliver path (outbound), so both honor the same authorization.
 const requireActivation = (process.env.JARVIS_REQUIRE_ACTIVATION ?? 'on') !== 'off';
 
+// libsignal (Baileys' E2E lib) prints session re-establishment straight to the console, bypassing our
+// logger: a wall of "Closing open session..." plus a dumped SessionEntry whenever the bot first
+// exchanges keys with a new contact. Harmless (normal encryption setup) but noisy, and it logs key
+// material - so drop those specific lines. Genuine errors (decrypt failures, etc.) still pass through.
+const SIGNAL_NOISE = /Closing (?:open|stale open) session|Closing session:|SessionEntry|message with closed session/;
+for (const level of ['log', 'warn', 'error']) {
+  const orig = console[level].bind(console);
+  console[level] = (...args) => {
+    if (typeof args[0] === 'string' && SIGNAL_NOISE.test(args[0])) return;
+    orig(...args);
+  };
+}
+
 // Liveness heartbeat for the container HEALTHCHECK (src/health-check.js reads this file): while
 // connected to WhatsApp we stamp the current time here on a short interval, so a stale heartbeat
 // (process wedged, or disconnected too long) reports the container unhealthy. See README.
@@ -97,6 +110,10 @@ const lifecycle = {
   logout: () => {
     log.warn('owner requested logout');
     setTimeout(async () => { await adapter.logout(); quit(1); }, 1500);
+  },
+  wipe: () => {
+    log.warn('owner requested a full data wipe (auth kept)');
+    setTimeout(() => { store.clearAll(); quit(1); }, 1500); // clear the app db (the auth db is untouched), then restart
   },
 };
 

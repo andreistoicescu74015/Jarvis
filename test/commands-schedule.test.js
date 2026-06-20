@@ -80,3 +80,13 @@ test('schedule: unavailable when no scheduler is configured (e.g. without a stor
   const handle = createDispatcher(createRegistry([schedule]), { store: createStore({ path: ':memory:' }) });
   assert.match(await handle(msg('jarvis schedule list')), /unavailable/i);
 });
+
+test('schedule: clear (and "cancel all") cancels every scheduled message here', async () => {
+  const { handle } = setup();
+  await handle(msg('jarvis schedule in 1h a'));
+  await handle(msg('jarvis schedule in 2h b'));
+  assert.match(await handle(msg('jarvis schedule clear')), /Cancelled all 2/i);
+  assert.match(await handle(msg('jarvis schedule list')), /Nothing scheduled/i);
+  await handle(msg('jarvis schedule in 1h c'));
+  assert.match(await handle(msg('jarvis schedule cancel all')), /Cancelled all 1/i); // alias
+});

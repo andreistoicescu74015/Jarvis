@@ -9,10 +9,10 @@ const MAX_NOTES = 500; // notes kept per conversation
 export default {
   name: 'note',
   summary: 'Keep simple notes, scoped to this conversation.',
-  usage: 'jarvis note add <text> | list | get <n> | del <n>',
+  usage: 'jarvis note add <text> | list | get <n> | del <n> | clear',
   man:
     'Notes are scoped to this conversation. Subcommands: add <text> (append a note), ' +
-    'list (show all), get <n> (show one), del <n> (remove one).',
+    'list (show all), get <n> (show one), del <n> (remove one), clear (remove all at once).',
   requires: ['store'],
   run: (ctx) => {
     const sub = (ctx.args[0] ?? '').toLowerCase();
@@ -44,8 +44,13 @@ export default {
         ctx.store.set('notes', notes);
         return `Deleted note: ${esc(removed)}`;
       }
+      case 'clear': {
+        if (!notes.length) return 'No notes to clear.';
+        ctx.store.delete('notes');
+        return `Cleared all ${notes.length} notes here.`;
+      }
       default:
-        return `Usage: ${code('jarvis note add <text> | list | get <n> | del <n>')}`;
+        return `Usage: ${code('jarvis note add <text> | list | get <n> | del <n> | clear')}`;
     }
   },
 };
