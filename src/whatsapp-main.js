@@ -81,6 +81,10 @@ const app = createApp(adapter, {
     // Dormant until an owner exists: silent in groups, private only `owner`, until OWNER_JID is set
     // or someone runs `owner claim`. Disable with JARVIS_REQUIRE_OWNER=off.
     requireOwner: (process.env.JARVIS_REQUIRE_OWNER ?? 'on') !== 'off',
+    // Per-group activation (ADR-0008): silent in any group until the owner runs `jarvis groups
+    // activate` there (or `groups activate <id>` remotely), even if the bot was added by someone
+    // else. Disable with JARVIS_REQUIRE_ACTIVATION=off.
+    requireActivation: (process.env.JARVIS_REQUIRE_ACTIVATION ?? 'on') !== 'off',
     store,
     log,
     match: identity.same,
