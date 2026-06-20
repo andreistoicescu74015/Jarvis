@@ -6,7 +6,7 @@ import { toInbound } from './normalize.js';
 import { resolveAddressing } from './trigger.js';
 import { toContent } from './render.js';
 import { createRateLimiter, typingDelayMs } from './pacing.js';
-import { disconnectAction, backoffMs } from './connection.js';
+import { disconnectAction, stopReason, backoffMs } from './connection.js';
 
 /** Read a WAMessage timestamp (seconds, number or Long) as epoch ms, or 0 if absent. */
 function timestampMs(wa) {
@@ -37,9 +37,11 @@ function timestampMs(wa) {
  *   sleep?: (ms: number) => Promise<void>,
  *   renderQr?: (qr: string) => void,
  *   onLogout?: () => void,
+ *   onFatal?: (reason: string) => void,
  *   learn?: (key: object) => void,
  *   random?: () => number,
  *   now?: () => number,
+ *   maxReconnects?: number,
  *   groupCacheTtlMs?: number,
  *   offlineGraceMs?: number,
  *   humanize?: { markOnline?: boolean, profileName?: string, readReceipts?: boolean, readDelayMs?: number, typingPerCharMs?: number, typingMaxMs?: number, sendJitterMs?: number },
@@ -55,9 +57,11 @@ export function createWhatsAppAdapter({
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   renderQr = (qr) => qrcode.generate(qr, { small: true }),
   onLogout = () => {},
+  onFatal = () => {},
   learn = () => {},
   random = Math.random,
   now = () => Date.now(),
+  maxReconnects = 10,
   groupCacheTtlMs = 5 * 60 * 1000,
   offlineGraceMs = 15 * 1000,
   humanize = {},
@@ -107,10 +111,12 @@ export function createWhatsAppAdapter({
   // check is the core's, downstream); the owner-list "silence" is about not replying, and a blue
   // tick is what a human client shows anyway.
   async function markRead(key) {
-    if (!readReceipts || !key || !sock || stopped) return;
+    const s = sock; // capture: a reconnect during the delay must not act on a new/torn-down socket
+    if (!readReceipts || !key || !s || stopped) return;
     try {
       if (readDelayMs > 0) await sleep(readDelayMs + Math.floor(random() * readDelayMs));
-      await sock.readMessages?.([key]);
+      if (stopped || sock !== s) return;
+      await s.readMessages?.([key]);
     } catch (err) {
       log.debug('wa: read receipt failed', { error: err?.message ?? String(err) });
     }
@@ -122,13 +128,15 @@ export function createWhatsAppAdapter({
   // `profileName` first, then broadcast 'available' (which flips delivery + read receipts to active).
   // Best-effort and runs on every (re)connect; skipped entirely when markOnline is off.
   async function ensurePresence() {
-    if (!markOnline || !sock || stopped) return;
+    const s = sock; // capture: don't touch a socket swapped out by a reconnect mid-await
+    if (!markOnline || !s || stopped) return;
     try {
-      if (!sock.user?.name && profileName) {
-        await sock.updateProfileName(profileName);
+      if (!s.user?.name && profileName) {
+        await s.updateProfileName(profileName);
         log.info('wa: set profile name (account had none)', { name: profileName });
       }
-      await sock.sendPresenceUpdate('available');
+      if (stopped || sock !== s) return;
+      await s.sendPresenceUpdate('available');
     } catch (err) {
       log.warn('wa: could not set presence/name', { error: err?.message ?? String(err) });
     }
@@ -169,19 +177,38 @@ export function createWhatsAppAdapter({
 
     const statusCode = lastDisconnect?.error?.output?.statusCode;
     const action = disconnectAction(statusCode);
-    log.warn('wa: connection closed', { statusCode, action });
+    log.warn('wa: connection closed', { statusCode, action, attempts });
 
     if (action === 'logout') {
       authState.clear();
       stopped = true;
       log.warn('wa: logged out - creds wiped, not reconnecting');
       onLogout();
-    } else if (action === 'restart') {
-      connect();
-    } else {
-      await sleep(backoffMs(attempts++, { rand: random }));
-      if (!stopped) connect();
+      return;
     }
+    if (action === 'stop') {
+      // Terminal: another session took over (440), the account is blocked (403), or the session is
+      // unrecoverable (500). Reconnecting would fight the takeover or hammer a banned account, so we
+      // stay down and let the operator step in (the composition root keeps the process down).
+      stopped = true;
+      const reason = stopReason(statusCode);
+      log.error('wa: fatal disconnect - not reconnecting', { statusCode, reason });
+      onFatal(reason);
+      return;
+    }
+    // 'restart' (515) and 'reconnect' both recreate the socket. Cap consecutive attempts so a flap
+    // cannot hot-loop forever; on exhaustion hand off to the supervisor for a clean restart. The
+    // counter resets on the next 'open'.
+    if (attempts >= maxReconnects) {
+      stopped = true;
+      log.error('wa: too many reconnect attempts - giving up', { attempts });
+      onFatal('exhausted');
+      return;
+    }
+    const delay = backoffMs(attempts, { rand: random });
+    attempts += 1;
+    await sleep(delay);
+    if (!stopped) connect();
   }
 
   async function onUpsert({ type, messages } = {}) {
@@ -220,7 +247,8 @@ export function createWhatsAppAdapter({
     },
 
     async send(chatId, message) {
-      if (!sock || stopped) return;
+      const s = sock; // capture: the pacing wait can span a reconnect; don't send on a new/dead socket
+      if (!s || stopped) return;
       try {
         const content = toContent(message);
         // Look like a person composing: show "typing..." then send. The wait is the global
@@ -228,10 +256,11 @@ export function createWhatsAppAdapter({
         // proportional to the reply length (capped) and a little jitter. Folding the typing time
         // into the limiter means the next send is spaced from this one's real send time.
         const typing = typingDelayMs((content?.text ?? '').length, { perCharMs: typingPerCharMs, maxMs: typingMaxMs });
-        await sock.sendPresenceUpdate('composing', chatId);
+        await s.sendPresenceUpdate('composing', chatId);
         await sleep(rateLimiter.nextWaitMs(typing + Math.floor(random() * sendJitterMs)));
-        await sock.sendMessage(chatId, content);
-        await sock.sendPresenceUpdate('paused', chatId);
+        if (stopped || sock !== s) return; // a reconnect/teardown happened during the pacing wait
+        await s.sendMessage(chatId, content);
+        await s.sendPresenceUpdate('paused', chatId);
       } catch (err) {
         log.error('wa: send failed', { chatId, error: err?.message ?? String(err) });
       }
