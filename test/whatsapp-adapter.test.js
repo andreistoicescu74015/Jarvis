@@ -196,6 +196,41 @@ test('adapter: a fatal close (replaced/forbidden/badSession) stops without recon
   }
 });
 
+test('adapter: being removed from a group signals deactivation (only when it is the bot)', async () => {
+  const makeSocket = fakeSocketFactory();
+  const removed = [];
+  const a = createWhatsAppAdapter(opts({ makeSocket, onRemoved: (id) => removed.push(id) }));
+  a.start({ onMessage: async () => {} });
+  const sock = makeSocket.sockets[0]; // user.id '1234:5@s.whatsapp.net' -> 1234@s.whatsapp.net
+
+  sock.ev.emit('group-participants.update', { id: 'G@g.us', action: 'remove', participants: ['1234@s.whatsapp.net'] });
+  await tick();
+  assert.deepEqual(removed, ['G@g.us']); // the bot itself was removed
+
+  sock.ev.emit('group-participants.update', { id: 'G@g.us', action: 'remove', participants: ['9999@s.whatsapp.net'] });
+  await tick();
+  assert.deepEqual(removed, ['G@g.us']); // someone else leaving is not our removal
+
+  sock.ev.emit('group-participants.update', { id: 'G2@g.us', action: 'add', participants: ['1234@s.whatsapp.net'] });
+  await tick();
+  assert.deepEqual(removed, ['G@g.us']); // an add is not a removal
+});
+
+test('adapter: a close from a socket a reconnect already replaced is ignored (no double-connect)', async () => {
+  const makeSocket = fakeSocketFactory();
+  const a = createWhatsAppAdapter(opts({ makeSocket }));
+  a.start({ onMessage: async () => {} });
+
+  makeSocket.sockets[0].ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 428 } } } });
+  await tick();
+  assert.equal(makeSocket.sockets.length, 2); // reconnected to a fresh socket
+
+  // the now-stale socket[0] fires a late close - it must NOT spawn a third socket
+  makeSocket.sockets[0].ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 428 } } } });
+  await tick();
+  assert.equal(makeSocket.sockets.length, 2);
+});
+
 test('adapter: listGroups maps participating groups to {id, name} (id when no subject)', async () => {
   const makeSocket = fakeSocketFactory();
   const a = createWhatsAppAdapter(opts({ makeSocket }));

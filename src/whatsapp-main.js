@@ -1,9 +1,11 @@
+import { isJidGroup } from 'baileys';
 import { createApp } from './core/app.js';
 import { createRegistry } from './core/registry.js';
 import { createDispatcher } from './core/dispatch.js';
 import { createLogger } from './core/log.js';
 import { createStore } from './store/index.js';
 import { createScheduler } from './core/scheduler.js';
+import { createActivation } from './core/activation.js';
 import { startProactive } from './core/proactive.js';
 import { createSqliteAuthState } from './whatsapp/auth-store.js';
 import { createWhatsAppAdapter } from './whatsapp/adapter.js';
@@ -36,6 +38,10 @@ const store = createStore({ path: process.env.JARVIS_DB ?? 'data/jarvis.db' });
 const authDb = createStore({ path: process.env.JARVIS_AUTH_DB ?? 'data/wa-auth.db' });
 const identity = createIdentityStore(store, { log });
 const scheduler = createScheduler(store);
+const activation = createActivation(store);
+// Per-group activation gate is opt-in (default on); shared by the dispatcher (inbound) and the
+// proactive deliver path (outbound), so both honor the same authorization.
+const requireActivation = (process.env.JARVIS_REQUIRE_ACTIVATION ?? 'on') !== 'off';
 // Read a numeric env var, falling back to `d` for unset/empty/NaN - but honoring an explicit 0
 // (so a knob like a 0ms read delay can be turned off, which `Number(x) || d` would clobber).
 const num = (v, d) => (v == null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
@@ -68,6 +74,9 @@ const adapter = createWhatsAppAdapter({
     log.error('wa: fatal disconnect', { reason });
     quit(reason === 'exhausted' ? 1 : 0);
   },
+  // The bot was removed from a group: deactivate it so Jarvis goes silent there - including stopping
+  // its scheduled proactive sends (which deliver outside the inbound activation gate).
+  onRemoved: (chatId) => activation.deactivate(chatId),
 });
 
 // Owner lifecycle controls (the shutdown / restart / logout commands). Each defers
@@ -92,7 +101,7 @@ const app = createApp(adapter, {
     // Per-group activation (ADR-0008): silent in any group until the owner runs `jarvis groups
     // activate` there (or `groups activate <id>` remotely), even if the bot was added by someone
     // else. Disable with JARVIS_REQUIRE_ACTIVATION=off.
-    requireActivation: (process.env.JARVIS_REQUIRE_ACTIVATION ?? 'on') !== 'off',
+    requireActivation,
     store,
     log,
     match: identity.same,
@@ -117,12 +126,21 @@ const app = createApp(adapter, {
 // send, which paces every message through the global spacing limiter, so output never bursts.
 // Started before the (blocking) start() so the timer is live; the first tick is after one
 // interval, so we never deliver before the socket connects.
-const deliver = (chatId, text) => adapter.send(chatId, text);
+const deliver = (chatId, text) => {
+  // Proactive sends must respect the same activation gate as inbound commands: never post into a
+  // group the owner has not authorized (or has deactivated, or removed the bot from). Private chats
+  // have no activation entry and are never gated. Off when activation is not required (e.g. dev).
+  if (requireActivation && isJidGroup(chatId) && !activation.isActive(chatId)) {
+    log.info('skip scheduled send to an inactive group', { chatId });
+    return;
+  }
+  return adapter.send(chatId, text);
+};
 const proactiveRunner = startProactive(
   async () => {
     await scheduler.tick(deliver, Date.now());
   },
-  { intervalMs: Number(process.env.JARVIS_TICK_MS), log },
+  { intervalMs: num(process.env.JARVIS_TICK_MS, 30_000), log },
 );
 
 let closing = false;
@@ -130,11 +148,19 @@ const quit = async (code = 0) => {
   if (closing) return;
   closing = true;
   log.info('Jarvis shutting down...');
-  await proactiveRunner.stop();
-  await adapter.stop();
-  store.close();
-  authDb.close();
-  process.exit(code);
+  // process.exit() is in `finally` so it ALWAYS runs: a throw from stop()/close() (e.g. a double
+  // close) must not escape as a rejection - that would re-enter quit(), hit the `closing` guard, and
+  // leave the process wedged (no exit, no restart). Each close is guarded so a late write can't abort it.
+  try {
+    await proactiveRunner.stop();
+    await adapter.stop();
+  } catch (err) {
+    log.error('error during shutdown', { error: err?.message ?? String(err) });
+  } finally {
+    try { store.close(); } catch (err) { log.error('store close failed', { error: err?.message ?? String(err) }); }
+    try { authDb.close(); } catch (err) { log.error('auth db close failed', { error: err?.message ?? String(err) }); }
+    process.exit(code);
+  }
 };
 process.on('SIGINT', () => quit(0));
 process.on('SIGTERM', () => quit(0));
