@@ -34,7 +34,7 @@ const log = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
 const registry = createRegistry([ping, help, man, whoami, note, owner, whitelist, blacklist, groups, link, schedule, shutdown, restart, logout]);
 const store = createStore({ path: process.env.JARVIS_DB ?? 'data/jarvis.db' });
 const authDb = createStore({ path: process.env.JARVIS_AUTH_DB ?? 'data/wa-auth.db' });
-const identity = createIdentityStore(store);
+const identity = createIdentityStore(store, { log });
 const scheduler = createScheduler(store);
 // Read a numeric env var, falling back to `d` for unset/empty/NaN - but honoring an explicit 0
 // (so a knob like a 0ms read delay can be turned off, which `Number(x) || d` would clobber).
