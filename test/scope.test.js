@@ -35,6 +35,16 @@ test('checkScope: admin enforced in groups and communities (private user is the 
   assert.equal(checkScope({ admin: true }, { level: 'private', isAdmin: false, isOwner: false }).ok, true);
 });
 
+test('checkScope: ownerOrAdmin - owner anywhere, an admin in a group, nobody else in private', () => {
+  const S = { ownerOrAdmin: true };
+  assert.equal(checkScope(S, { level: 'private', isAdmin: false, isOwner: true }).ok, true); // owner in private
+  assert.equal(checkScope(S, { level: 'group', isAdmin: false, isOwner: true }).ok, true); // owner in a group (need not be admin)
+  assert.equal(checkScope(S, { level: 'group', isAdmin: true, isOwner: false }).ok, true); // admin in a group
+  assert.equal(checkScope(S, { level: 'community', isAdmin: true, isOwner: false }).ok, true); // admin in a community
+  assert.equal(checkScope(S, { level: 'group', isAdmin: false, isOwner: false }).ok, false); // non-admin in a group
+  assert.equal(checkScope(S, { level: 'private', isAdmin: false, isOwner: false }).ok, false); // non-owner in private
+});
+
 test('checkScope: level must match', () => {
   assert.equal(checkScope({ level: 'group' }, { level: 'private', isAdmin: false, isOwner: false }).ok, false);
   assert.equal(checkScope({ level: 'group' }, { level: 'group', isAdmin: false, isOwner: false }).ok, true);

@@ -4,6 +4,7 @@
  * @typedef {Object} Scope
  * @property {'private'|'group'|'community'} [level]  Restrict to a conversation level.
  * @property {boolean} [admin]                        Require a group admin (ignored in private).
+ * @property {boolean} [ownerOrAdmin]                 Management command: the owner anywhere, or a group/community admin in their own chat (owner-only in private).
  * @property {boolean} [owner]                        Require the bot owner.
  *
  * @typedef {Object} ScopeResult
@@ -41,6 +42,12 @@ export function checkScope(scope, ctx) {
   }
   if (scope.owner && !ctx.isOwner) {
     return { ok: false, reason: 'owner only' };
+  }
+  // Management commands (the access lists): the owner may use them anywhere; a group/community admin
+  // may use them in their own chat (a private chat has no admin, so it is owner-only there). The
+  // command then limits a non-owner to their own context (ADR-0008).
+  if (scope.ownerOrAdmin && !ctx.isOwner && !(ctx.level !== 'private' && ctx.isAdmin)) {
+    return { ok: false, reason: 'owner or a group admin only' };
   }
   // admin applies in any multi-user chat (group or community); in private the user is the authority.
   if (scope.admin && ctx.level !== 'private' && !ctx.isAdmin) {

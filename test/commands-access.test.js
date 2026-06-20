@@ -50,9 +50,33 @@ test('access cmd: disable keeps members, enable restores them', async () => {
   assert.equal(await as('bob', 'jarvis ping'), undefined); // restored without re-adding
 });
 
-test('access cmd: the list commands are owner-only', async () => {
-  const { as } = setup();
-  assert.match(await as('rando', 'jarvis blacklist ping add bob'), /Not allowed: owner only/);
+test('access cmd: the list commands need the owner or a group admin', async () => {
+  const { as } = setup(); // `as` is a non-admin group member
+  assert.match(await as('rando', 'jarvis blacklist ping add bob'), /Not allowed: owner or a group admin only/);
+});
+
+test('access cmd: a group admin manages their own chat, but cannot reach another context', async () => {
+  const { handle } = setup(); // env owner 'boss'
+  const admin = (text, over = {}) => handle({ text, sender: 'adm', chatId: 'c1', level: 'group', isAdmin: true, ...over });
+
+  // the admin blocks bob from ping here, and it applies in this chat
+  assert.match(await admin('jarvis blacklist ping add bob'), /Added bob/i);
+  assert.match(await admin('jarvis blacklist ping enable'), /Turned on the blacklist/i);
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'bob', chatId: 'c1', level: 'group' }), undefined);
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'bob', chatId: 'c2', level: 'group' }), 'pong'); // only here
+
+  // but the admin cannot target another chat or everywhere
+  assert.match(await admin('jarvis blacklist ping add bob in cX'), /only manage this chat/i);
+  assert.match(await admin('jarvis blacklist ping enable in *'), /only manage this chat/i);
+});
+
+test('access cmd: an admin can gate the whole bot, but only in their own chat', async () => {
+  const { handle } = setup();
+  const admin = (text) => handle({ text, sender: 'adm', chatId: 'c1', level: 'group', isAdmin: true });
+  await admin('jarvis blacklist * add rando');
+  await admin('jarvis blacklist * enable');
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'rando', chatId: 'c1', level: 'group' }), undefined); // blocked here
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'rando', chatId: 'c2', level: 'group' }), 'pong'); // not elsewhere
 });
 
 test('access cmd: lists cannot target owner-only commands or the owner command', async () => {
