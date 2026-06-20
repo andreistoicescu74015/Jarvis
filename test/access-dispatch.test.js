@@ -62,8 +62,26 @@ test('dispatch+access: the owner command stays reachable despite a private-bot g
 
 test('dispatch+access: owner-only commands are governed by scope, not lists', async () => {
   const { handle } = setup({ owner: 'boss' });
-  // a non-owner, not globally blocked, gets the scope message (not silence)
-  assert.match(await handle({ text: 'jarvis shutdown', sender: 'x', chatId: 'c1' }), /Not allowed: owner only/);
+  // a non-owner, not globally blocked (a group context, where there is no private lockdown), gets the
+  // scope message (not silence)
+  assert.match(await handle({ text: 'jarvis shutdown', sender: 'x', chatId: 'c1', level: 'group' }), /Not allowed: owner only/);
+});
+
+test('dispatch+access: an established owner locks the bot DMs to them (anti-lockout on owner)', async () => {
+  const { handle } = setup({ owner: 'boss' });
+  // once an owner exists, a stranger cannot DM the bot...
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'rando', level: 'private', chatId: 'dm' }), undefined);
+  // ...the owner can, and the bootstrap `owner` command stays reachable to anyone (anti-lockout)
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'boss', level: 'private', chatId: 'dm' }), 'pong');
+  assert.match(await handle({ text: 'jarvis owner', sender: 'rando', level: 'private', chatId: 'dm' }), /Owner/);
+});
+
+test('dispatch+access: claiming locks the DMs; resigning clears the lock (symmetric)', async () => {
+  const { handle, access } = setup(); // no env owner; nobody owns it yet
+  await handle({ text: 'jarvis owner claim', sender: 'boss', level: 'private', chatId: 'dm' });
+  assert.equal(access.get('*', 'private').active, 'whitelist'); // claim locked the DMs
+  await handle({ text: 'jarvis owner resign', sender: 'boss', level: 'private', chatId: 'dm' });
+  assert.equal(access.get('*', 'private').active, 'public'); // resign cleared it for the next owner
 });
 
 test('dispatch+access: with no store the access layer is inactive (everything public)', async () => {
