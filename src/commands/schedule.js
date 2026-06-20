@@ -53,8 +53,8 @@ export default {
     'with ids; "schedule cancel <id>" removes one. Scheduling works only in groups (where an admin can ' +
     'do it), not in private chats - the owner excepted. Schedules survive restarts.',
   scope: { admin: true, proactive: true },
+  requires: ['scheduler'],
   run: (ctx) => {
-    if (!ctx.scheduler) return 'Scheduling is unavailable here.';
     const sub = (ctx.args[0] ?? '').toLowerCase();
 
     if (!sub || sub === 'list') {

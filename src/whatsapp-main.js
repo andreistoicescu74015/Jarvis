@@ -13,20 +13,8 @@ import { createWhatsAppAdapter } from './whatsapp/adapter.js';
 import { createRateLimiter } from './whatsapp/pacing.js';
 import { createIdentityStore } from './whatsapp/identity-store.js';
 import { socketLogger } from './whatsapp/socket-logger.js';
-import ping from './commands/ping.js';
-import help from './commands/help.js';
-import man from './commands/man.js';
-import whoami from './commands/whoami.js';
-import note from './commands/note.js';
-import owner from './commands/owner.js';
-import whitelist from './commands/whitelist.js';
-import blacklist from './commands/blacklist.js';
-import groups from './commands/groups.js';
-import link from './commands/link.js';
-import schedule from './commands/schedule.js';
-import shutdown from './commands/shutdown.js';
-import restart from './commands/restart.js';
-import logout from './commands/logout.js';
+import { commands } from './commands/index.js';
+import { num } from './core/env.js';
 
 /**
  * Composition root for the live WhatsApp bot. Mirrors `cli.js`, but wires the
@@ -34,7 +22,7 @@ import logout from './commands/logout.js';
  * separate sqlite files so credentials stay isolated. Run with `npm start`.
  */
 const log = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
-const registry = createRegistry([ping, help, man, whoami, note, owner, whitelist, blacklist, groups, link, schedule, shutdown, restart, logout]);
+const registry = createRegistry(commands);
 const store = createStore({ path: process.env.JARVIS_DB ?? 'data/jarvis.db' });
 const authDb = createStore({ path: process.env.JARVIS_AUTH_DB ?? 'data/wa-auth.db' });
 const identity = createIdentityStore(store, { log });
@@ -43,9 +31,6 @@ const activation = createActivation(store);
 // Per-group activation gate is opt-in (default on); shared by the dispatcher (inbound) and the
 // proactive deliver path (outbound), so both honor the same authorization.
 const requireActivation = (process.env.JARVIS_REQUIRE_ACTIVATION ?? 'on') !== 'off';
-// Read a numeric env var, falling back to `d` for unset/empty/NaN - but honoring an explicit 0
-// (so a knob like a 0ms read delay can be turned off, which `Number(x) || d` would clobber).
-const num = (v, d) => (v == null || v === '' || !Number.isFinite(Number(v)) ? d : Number(v));
 
 // Liveness heartbeat for the container HEALTHCHECK (src/health-check.js reads this file): while
 // connected to WhatsApp we stamp the current time here on a short interval, so a stale heartbeat

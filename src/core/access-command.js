@@ -39,12 +39,12 @@ export function makeAccessCommand(list) {
       `exclusive per target; the owner is never affected; the owner command cannot be restricted, ` +
       `and the bot cannot be added.`,
     scope: { ownerOrAdmin: true },
+    requires: ['access'],
     run: (ctx) => run(ctx, list),
   };
 }
 
 function run(ctx, list) {
-  if (!ctx.access) return 'Access lists are unavailable here.';
   const other = list === 'whitelist' ? 'blacklist' : 'whitelist';
 
   // Peel a trailing "in <context>" off the arguments.

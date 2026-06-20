@@ -6,9 +6,10 @@ import man from '../src/commands/man.js';
 import ping from '../src/commands/ping.js';
 import shutdown from '../src/commands/shutdown.js';
 import whitelist from '../src/commands/whitelist.js';
+import schedule from '../src/commands/schedule.js';
 import { toPlain } from '../src/core/format.js';
 
-const dispatch = createDispatcher(createRegistry([man, ping, shutdown, whitelist]));
+const dispatch = createDispatcher(createRegistry([man, ping, shutdown, whitelist, schedule]));
 const handle = async (msg) => toPlain(await dispatch(msg)); // render like an adapter, for assertions
 
 test('man: shows a command summary, usage, and audience', async () => {
@@ -25,6 +26,16 @@ test('man: reports an owner-only audience from scope', async () => {
 test('man: includes the long-form man text when present', async () => {
   const out = await handle({ text: 'jarvis man whitelist', sender: 'x' });
   assert.match(out, /whole bot/i); // from the whitelist man text
+});
+
+test('man: reports the owner-or-admin audience for a management command', async () => {
+  const out = await handle({ text: 'jarvis man whitelist', sender: 'x' });
+  assert.match(out, /Who: the owner, or a group admin in their own chat/);
+});
+
+test('man: reports a group-only audience for a proactive command', async () => {
+  const out = await handle({ text: 'jarvis man schedule', sender: 'x' });
+  assert.match(out, /Who: group admins; groups only/);
 });
 
 test('man: documents itself (man is help-adjacent, available to anyone)', async () => {
