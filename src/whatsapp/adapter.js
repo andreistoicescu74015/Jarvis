@@ -38,6 +38,7 @@ function timestampMs(wa) {
  *   renderQr?: (qr: string) => void,
  *   onLogout?: () => void,
  *   onFatal?: (reason: string) => void,
+ *   onRemoved?: (chatId: string) => void,
  *   learn?: (key: object) => void,
  *   random?: () => number,
  *   now?: () => number,
@@ -58,6 +59,7 @@ export function createWhatsAppAdapter({
   renderQr = (qr) => qrcode.generate(qr, { small: true }),
   onLogout = () => {},
   onFatal = () => {},
+  onRemoved = () => {},
   learn = () => {},
   random = Math.random,
   now = () => Date.now(),
@@ -142,26 +144,46 @@ export function createWhatsAppAdapter({
     }
   }
 
+  // Whether the bot itself is among a set of participant jids (LID- or PN-aware).
+  function isSelfParticipant(participants) {
+    const selfIds = [sock?.user?.id, sock?.user?.lid].filter(Boolean).map((j) => jidNormalizedUser(j));
+    return (participants ?? []).some((p) => {
+      const pn = jidNormalizedUser(p);
+      return selfIds.some((s) => s === pn);
+    });
+  }
+
   function connect() {
-    sock = makeSocket({
+    const s = makeSocket({
       auth: authState.state,
       logger: waLog,
       markOnlineOnConnect: markOnline,
       syncFullHistory: false,
       browser: Browsers.ubuntu('Jarvis'),
     });
-    sock.ev.on('creds.update', authState.saveCreds);
-    sock.ev.on('connection.update', onConnectionUpdate);
-    sock.ev.on('messages.upsert', onUpsert);
-    sock.ev.on('groups.update', (updates) => {
+    sock = s;
+    s.ev.on('creds.update', authState.saveCreds);
+    // Bind each socket's connection events to that socket, so a late close from a socket a reconnect
+    // already replaced is ignored (it would otherwise spawn a second, racing socket).
+    s.ev.on('connection.update', (u) => onConnectionUpdate(u, s));
+    s.ev.on('messages.upsert', onUpsert);
+    s.ev.on('groups.update', (updates) => {
       for (const u of updates ?? []) if (u?.id) groupCache.delete(u.id);
     });
-    sock.ev.on('group-participants.update', (u) => {
-      if (u?.id) groupCache.delete(u.id);
+    s.ev.on('group-participants.update', (u) => {
+      if (!u?.id) return;
+      groupCache.delete(u.id);
+      // If the bot itself was removed from the group, tell the core - a group the bot is no longer in
+      // must go silent, including its scheduled proactive sends (which otherwise keep firing into it).
+      if (u.action === 'remove' && isSelfParticipant(u.participants)) {
+        log.warn('wa: removed from a group - signalling deactivation', { id: u.id });
+        onRemoved(u.id);
+      }
     });
   }
 
-  async function onConnectionUpdate({ connection, lastDisconnect, qr } = {}) {
+  async function onConnectionUpdate({ connection, lastDisconnect, qr } = {}, eventSock) {
+    if (eventSock && eventSock !== sock) return; // a stale event from a socket a reconnect replaced
     if (qr) {
       log.info('wa: scan the QR below to pair');
       renderQr(qr);
