@@ -1,14 +1,18 @@
 /**
- * Shared implementation of the owner's `whitelist` / `blacklist` commands. Both are
- * the same UI over the access policy (`ctx.access`), differing only in which list they
- * edit - so the two commands stay thin leaves that import this from the core (never
- * each other). Owner-only; denials and gating live in the dispatcher.
+ * Shared implementation of the `whitelist` / `blacklist` commands. Both are the same UI
+ * over the access policy (`ctx.access`), differing only in which list they edit - so the
+ * two commands stay thin leaves that import this from the core (never each other).
+ *
+ * Authority (ADR-0008): the owner manages any context (here / everywhere / another chat);
+ * a group or community admin manages only their own chat. The scope (`ownerOrAdmin`) lets
+ * an admin in, and this command then locks a non-owner to their own context. Denials and
+ * gating live in the dispatcher.
  *
  * Grammar: jarvis <list> [<target>] [<verb> [<person>]] [in <context>]
  *   <target>   a command name, or `*` (the whole bot). Omitted -> overview.
  *   <verb>     add | remove | enable | disable | clear. Omitted (with a target) -> show.
  *   <person>   an @mention, a phone/id, or `*` (everyone). For add / remove.
- *   in <ctx>   `here` (default) | `*` (everywhere) | a chat id.
+ *   in <ctx>   `here` (default) | `*` (everywhere) | a chat id. Owner only; an admin is locked to here.
  */
 
 const VERBS = new Set(['add', 'remove', 'enable', 'disable', 'clear']);
@@ -24,16 +28,17 @@ export function makeAccessCommand(list) {
     name: list,
     summary:
       list === 'whitelist'
-        ? 'Owner: limit a command to specific people (allow-list).'
-        : 'Owner: block specific people from a command (deny-list).',
+        ? 'Allow-list a command for specific people (owner, or a group admin here).'
+        : 'Block specific people from a command (owner, or a group admin here).',
     usage: `jarvis ${list} <command|*> add|remove <@user|number|*> | enable | disable | clear [in <chat|*>]`,
     man:
       `Manage the ${list} for a command - or the whole bot (*). Verbs: add/remove <person>, ` +
       `enable, disable, clear. A person is an @mention, a phone number, or * (everyone). ` +
-      `Context defaults to this chat; add "in *" for everywhere, or "in <chat>" for another ` +
-      `chat. Whitelist and blacklist are exclusive per target; the owner is never affected; ` +
-      `the owner command cannot be restricted, and the bot cannot be added.`,
-    scope: { owner: true },
+      `Context defaults to this chat. The owner can also target everywhere ("in *") or another ` +
+      `chat ("in <chat>"); a group admin manages only this chat. Whitelist and blacklist are ` +
+      `exclusive per target; the owner is never affected; the owner command cannot be restricted, ` +
+      `and the bot cannot be added.`,
+    scope: { ownerOrAdmin: true },
     run: (ctx) => run(ctx, list),
   };
 }
@@ -51,6 +56,12 @@ function run(ctx, list) {
     if (!c) return usage(list);
     context = c === '*' ? '*' : c.toLowerCase() === 'here' ? ctx.chatId : c;
     args = args.slice(0, at);
+  }
+
+  // A group admin (non-owner) manages only their own chat; only the owner may reach another
+  // context or everywhere ("in *"). This is the context-lock behind the ownerOrAdmin scope.
+  if (!ctx.isOwner && context !== ctx.chatId) {
+    return 'As a group admin you can only manage this chat (drop the "in ..." part).';
   }
 
   const target = (args[0] ?? '').toLowerCase(); // command names are lowercase; match case-insensitively
