@@ -124,3 +124,39 @@ test('scheduler: every due job fires in one tick (pacing is downstream, not here
   assert.deepEqual(sent, ['1', '2']); // both delivered, none deferred
   assert.equal(s.list('A').length, 0);
 });
+
+test('scheduler: a declined delivery (deliver returns false) leaves the job pending - not fired, not advanced', async () => {
+  const s = createScheduler(createStore({ path: ':memory:' }), { now: () => 0 });
+  s.add({ chatId: 'A', when: 'every 1h', text: 'r' }); // repeating, first at 1h
+  // The destination is currently ineligible (e.g. an inactive group): deliver declines.
+  assert.deepEqual(await s.tick(() => false, H), { fired: 0, failed: 0 }); // neither fired nor failed
+  assert.equal(s.list('A')[0].fireAt, H); // still due at 1h - NOT advanced
+  // Eligible again: it fires once and advances normally.
+  const sent = [];
+  assert.deepEqual(await s.tick((_c, t) => sent.push(t), H), { fired: 1, failed: 0 });
+  assert.deepEqual(sent, ['r']);
+  assert.equal(s.list('A')[0].fireAt, 2 * H);
+});
+
+test('scheduler: a declined one-time job is left pending, not silently dropped', async () => {
+  const s = createScheduler(createStore({ path: ':memory:' }), { now: () => 0 });
+  s.add({ chatId: 'A', when: 'in 1h', text: 'once' });
+  await s.tick(() => false, H);
+  assert.equal(s.list('A').length, 1); // still there, will deliver when eligible again
+});
+
+test('scheduler: clearChat removes only that chat\'s jobs (e.g. the bot was removed from a group)', () => {
+  const s = createScheduler(createStore({ path: ':memory:' }), { now: () => 0 });
+  s.add({ chatId: 'A', when: 'in 1h', text: 'a1' });
+  s.add({ chatId: 'A', when: 'in 2h', text: 'a2' });
+  s.add({ chatId: 'B', when: 'in 1h', text: 'b1' });
+  assert.equal(s.clearChat('A'), 2);
+  assert.equal(s.list('A').length, 0);
+  assert.equal(s.list('B').length, 1); // untouched
+});
+
+test('scheduler: add reports empty text distinctly from a bad time', () => {
+  const s = createScheduler(createStore({ path: ':memory:' }), { now: () => 0 });
+  assert.deepEqual(s.add({ chatId: 'A', when: 'in 1h', text: '   ' }), { ok: false, reason: 'empty-text' });
+  assert.equal(s.add({ chatId: 'A', when: 'nonsense', text: 'hi' }).reason, 'bad-when');
+});

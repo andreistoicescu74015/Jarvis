@@ -209,3 +209,25 @@ test('access cmd: the bot itself cannot be added to a list', async () => {
     /^Added /,
   );
 });
+
+test('access cmd: addressing the bot by @mention does not target the bot itself', async () => {
+  const store = createStore({ path: ':memory:' });
+  const handle = createDispatcher(createRegistry([ping, owner, whitelist, blacklist]), { store, owner: 'boss' });
+  // The bot is addressed by @mention AND a victim is @mentioned: WhatsApp lists the bot's own
+  // jid among the mentions (here first). The named target must be the victim, not the bot.
+  assert.match(
+    await handle({
+      text: 'blacklist ping add @victim',
+      addressed: true,
+      self: ['5@s.whatsapp.net'],
+      mentionedJid: ['5@s.whatsapp.net', '99@s.whatsapp.net'],
+      sender: 'boss',
+      chatId: 'c1',
+      level: 'group',
+    }),
+    /Added 99/i,
+  );
+  await handle({ text: 'jarvis blacklist ping enable', sender: 'boss', chatId: 'c1', level: 'group' });
+  assert.equal(await handle({ text: 'jarvis ping', sender: '99@s.whatsapp.net', chatId: 'c1', level: 'group' }), undefined);
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'other', chatId: 'c1', level: 'group' }), 'pong');
+});

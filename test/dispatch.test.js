@@ -37,6 +37,14 @@ test('parse: the addressed flag parses a bare command without a prefix', () => {
   assert.equal(parse('ping milk'), null); // without the flag (or prefix) it is ignored
 });
 
+test('parse: tolerates any whitespace between prefix and command (tab, NBSP)', () => {
+  const tab = String.fromCharCode(9);
+  const nbsp = String.fromCharCode(160);
+  assert.deepEqual(parse('jarvis' + tab + 'ping'), { command: 'ping', args: [], rest: '' });
+  assert.deepEqual(parse('jarvis' + nbsp + 'note add x'), { command: 'note', args: ['add', 'x'], rest: 'add x' });
+  assert.equal(parse('jarvisping'), null); // no whitespace boundary -> not addressed
+});
+
 async function run(text, commands = [ping, help]) {
   const adapter = createTestAdapter();
   const app = createApp(adapter, { handle: createDispatcher(createRegistry(commands)) });

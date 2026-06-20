@@ -27,7 +27,9 @@ const confirm = (r) =>
 const whenError = (r) =>
   r.reason === 'past'
     ? 'That time is already past.'
-    : 'Bad time. Use "in 2h", "at 2026-06-18 09:00", or "every 1d" (units: m, h, d).';
+    : r.reason === 'empty-text'
+      ? 'The message is empty.'
+      : 'Bad time. Use "in 2h", "at 2026-06-18 09:00", or "every 1d" (units: m, h, d).';
 
 /**
  * Schedule a message for the bot to post later - once or repeating - without an inbound

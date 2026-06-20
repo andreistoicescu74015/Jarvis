@@ -157,7 +157,10 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       level,
       sender,
       chatId,
-      mentions: msg.mentionedJid ?? [],
+      // The bot's own id forms are dropped: when the bot is addressed by @mention, its own jid
+      // is among `mentionedJid` (often first), and a command naming a person (e.g. the access
+      // lists) must take the named person, not the bot. Mirrors `stripBotMention` on the text.
+      mentions: (msg.mentionedJid ?? []).filter((id) => !isSelf(id)),
       isOwner,
       isAdmin,
       commands: registry.all(),

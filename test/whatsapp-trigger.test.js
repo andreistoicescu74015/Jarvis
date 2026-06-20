@@ -24,6 +24,14 @@ test('trigger: startsWithPrefix is case-insensitive and exact-or-space', () => {
   assert.equal(startsWithPrefix('hello', 'jarvis'), false);
 });
 
+test('trigger: startsWithPrefix tolerates any whitespace after the prefix (tab, NBSP)', () => {
+  const tab = String.fromCharCode(9);
+  const nbsp = String.fromCharCode(160);
+  assert.equal(startsWithPrefix('jarvis' + tab + 'ping', 'jarvis'), true);
+  assert.equal(startsWithPrefix('jarvis' + nbsp + 'ping', 'jarvis'), true);
+  assert.equal(startsWithPrefix('jarvisping', 'jarvis'), false); // no whitespace boundary, not addressed
+});
+
 test('trigger: stripBotMention removes the bot @mention token(s)', () => {
   assert.equal(stripBotMention('@1234 ping', SELF), 'ping');
   assert.equal(stripBotMention('hey @1234 there', SELF), 'hey there');
