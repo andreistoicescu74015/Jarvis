@@ -12,14 +12,16 @@ const handle = (over = {}, opts = {}) => {
   return dispatch({ text: 'jarvis whoami', sender, level: 'private', ...over }).then(toPlain);
 };
 
-test('whoami: shows a phone number for a WhatsApp user, not a raw jid', async () => {
+test('whoami: shows the friendly phone number AND the normalized jid for a WhatsApp user', async () => {
   const out = await handle({ sender: '40712345678@s.whatsapp.net', level: 'group' });
-  assert.match(out, /You are \+40712345678 in a group chat/);
-  assert.doesNotMatch(out, /@s\.whatsapp\.net/);
+  assert.match(out, /You are \+40712345678 in a group chat/); // friendly form, for reading
+  assert.match(out, /40712345678@s\.whatsapp\.net/); // the normalized jid, to copy into OWNER_JID / whitelist
 });
 
-test('whoami: shows the bare id for a LID, and the raw value when already friendly', async () => {
-  assert.match(await handle({ sender: '5678@lid' }), /You are 5678 in a private chat/);
+test('whoami: shows the bare id plus the lid for a LID, and the raw value when already friendly', async () => {
+  const lid = await handle({ sender: '5678@lid' });
+  assert.match(lid, /You are 5678 in a private chat/); // friendly bare id
+  assert.match(lid, /5678@lid/); // the normalized lid jid, exposed for the owner to copy
   assert.match(await handle({ sender: 'cli-user' }), /You are cli-user in a private chat/);
 });
 

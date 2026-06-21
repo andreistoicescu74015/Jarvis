@@ -14,9 +14,9 @@ export default {
   summary: 'Owner: show who you are, or look a person up.',
   usage: 'jarvis whoami | whoami <@user|number>',
   man:
-    'Owner-only. Bare "whoami" shows who you are and where. "whoami @user" or "whoami <number>" resolves ' +
-    'a person to the canonical id Jarvis matches them by, handy when deciding who may use the bot in ' +
-    'private (then "jarvis whitelist * add ...").',
+    'Owner-only. Bare "whoami" shows who you are, where, and the canonical id Jarvis knows you by - the ' +
+    'value to set as OWNER_JID. "whoami @user" or "whoami <number>" resolves another person to that id, ' +
+    'handy when deciding who may use the bot in private (then "jarvis whitelist * add ...").',
   scope: { owner: true },
   run: (ctx) => {
     // Owner-only command. With an argument, resolve an @mention or typed number to the id Jarvis
@@ -28,6 +28,8 @@ export default {
     }
     const flags = [ctx.isOwner && 'owner', ctx.isAdmin && 'admin'].filter(Boolean);
     const suffix = flags.length ? ` ${i(`(${flags.join(', ')})`)}` : '';
-    return `You are ${code(esc(friendlyId(ctx.sender)))} in a ${b(ctx.level)} chat${suffix}.`;
+    // Show the friendly form for readability AND the canonical id (the JID, copy-pasteable in inline
+    // code) - the value to set as OWNER_JID or to whitelist, mirroring the person-lookup line above.
+    return `You are ${b(friendlyId(ctx.sender))} in a ${b(ctx.level)} chat${suffix} - id ${code(esc(ctx.sender))}.`;
   },
 };
