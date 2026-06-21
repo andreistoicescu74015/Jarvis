@@ -16,6 +16,10 @@ const toolCall = (name, args) => ({
   choices: [{ message: { tool_calls: [{ function: { name, arguments: JSON.stringify(args) } }] } }],
 });
 
+const multiCall = (...pairs) => ({
+  choices: [{ message: { tool_calls: pairs.map(([name, args]) => ({ function: { name, arguments: JSON.stringify(args) } })) } }],
+});
+
 test('ai: no token -> client is null (AI simply off)', () => {
   assert.equal(createAiClient({ token: '' }), null);
   assert.equal(createAiClient({}), null);
@@ -28,7 +32,7 @@ test('ai: translate returns the tool call as { command, args } and sends a well-
     fetchImpl: fakeFetch(toolCall('whitelist', { target: '*', verb: 'enable' }), { capture }),
   });
   const out = await ai.translate({ text: 'open up to everyone', tools });
-  assert.deepEqual(out, { command: 'whitelist', args: { target: '*', verb: 'enable' } });
+  assert.deepEqual(out, [{ command: 'whitelist', args: { target: '*', verb: 'enable' } }]);
   assert.match(capture.url, /\/chat\/completions$/);
   assert.equal(capture.init.headers.authorization, 'Bearer t');
   const body = JSON.parse(capture.init.body);
@@ -65,5 +69,19 @@ test('ai: malformed tool arguments degrade to empty args, not a throw', async ()
     token: 't',
     fetchImpl: fakeFetch({ choices: [{ message: { tool_calls: [{ function: { name: 'ping', arguments: '{bad json' } }] } }] }),
   });
-  assert.deepEqual(await ai.translate({ text: 'x', tools }), { command: 'ping', args: {} });
+  assert.deepEqual(await ai.translate({ text: 'x', tools }), [{ command: 'ping', args: {} }]);
+});
+
+test('ai: multiple tool calls become an ordered chain', async () => {
+  const ai = createAiClient({
+    token: 't',
+    fetchImpl: fakeFetch(multiCall(
+      ['blacklist', { target: 'note', verb: 'add', person: '*' }],
+      ['blacklist', { target: 'note', verb: 'enable' }],
+    )),
+  });
+  assert.deepEqual(await ai.translate({ text: 'block everyone from notes then enable it', tools }), [
+    { command: 'blacklist', args: { target: 'note', verb: 'add', person: '*' } },
+    { command: 'blacklist', args: { target: 'note', verb: 'enable' } },
+  ]);
 });

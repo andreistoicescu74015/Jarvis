@@ -5,6 +5,8 @@ import { createDispatcher } from '../src/core/dispatch.js';
 import { createStore } from '../src/store/index.js';
 import { toPlain } from '../src/core/format.js';
 import whitelist from '../src/commands/whitelist.js';
+import blacklist from '../src/commands/blacklist.js';
+import note from '../src/commands/note.js';
 import groups from '../src/commands/groups.js';
 import schedule from '../src/commands/schedule.js';
 
@@ -17,7 +19,9 @@ function fakeAi(proposal) {
     calls,
     translate: async ({ text, tools }) => {
       calls.push({ text, tools });
-      return typeof proposal === 'function' ? proposal(text, tools) : proposal;
+      const p = typeof proposal === 'function' ? proposal(text, tools) : proposal;
+      if (p == null) return null;
+      return Array.isArray(p) ? p : [p]; // accept a single proposal or a chain
     },
   };
 }
@@ -133,5 +137,34 @@ test('ai dispatch: AI cannot escalate - an owner-only command proposed for a non
   const handle = createDispatcher(createRegistry([ping, groups]), { owner: 'boss', store, ai, listGroups: async () => [] });
   const out = toPlain(await handle({ text: 'jarvis opreste grupul', sender: 'u', level: 'group', chatId: 'g@g.us' }));
   assert.match(out, /Not allowed/i); // the scope guard refuses it even though AI proposed it
+  store.close();
+});
+
+test('ai dispatch: a multi-step request runs as a chain, echoing every command in order', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi([
+    { command: 'blacklist', args: { target: 'note', verb: 'add', person: '*' } },
+    { command: 'blacklist', args: { target: 'note', verb: 'enable' } },
+  ]);
+  const handle = createDispatcher(createRegistry([ping, blacklist, note]), { owner: 'boss', store, ai });
+  const out = toPlain(await handle({ text: 'jarvis adauga toti la lista neagra pt note si activeaz-o', sender: 'boss', level: 'group', chatId: 'g@g.us' }));
+  assert.match(out, /Understood: jarvis blacklist note add \* ; jarvis blacklist note enable/); // both echoed, in order
+  assert.match(out, /Added everyone to the blacklist for "note"/);
+  assert.match(out, /Turned on the blacklist for "note"/);
+  store.close();
+});
+
+test('ai dispatch: an unusable step in a chain is skipped; the valid steps still run', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi([
+    { command: 'schedule', args: {} }, // missing the required action -> dropped during resolution
+    { command: 'ping', args: {} }, // valid -> runs
+  ]);
+  const handle = createDispatcher(createRegistry([ping, schedule]), {
+    owner: 'boss', store, ai, scheduler: { list: () => [], add: () => ({}), cancel: () => ({}) },
+  });
+  const out = toPlain(await handle({ text: 'jarvis fa ceva imposibil si apoi ping', sender: 'boss', level: 'group', chatId: 'g@g.us' }));
+  assert.match(out, /Understood: jarvis ping/); // only the resolvable step is echoed and run
+  assert.match(out, /pong/);
   store.close();
 });

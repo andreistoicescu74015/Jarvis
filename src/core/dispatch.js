@@ -48,7 +48,7 @@ import { toolCatalog, toCommandLine } from './tools.js';
  * `handle(msg)` for `createApp`.
  *
  * @param {import('./registry.js').Registry} registry
- * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, send?: (target: string, text: string) => unknown, community?: { info: (id?: string) => Promise<object | undefined>, groups: (id?: string) => Promise<object[]>, all: () => Promise<object[]> }, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object }, requireOwner?: boolean, requireActivation?: boolean }} [opts]
+ * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, send?: (target: string, text: string) => unknown, community?: { info: (id?: string) => Promise<object | undefined>, groups: (id?: string) => Promise<object[]>, all: () => Promise<object[]> }, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object }, ai?: { translate: (input: { text: string, tools: object[] }) => Promise<Array<{ command: string, args: object }> | null> }, requireOwner?: boolean, requireActivation?: boolean }} [opts]
  * @returns {(msg: import('./app.js').InboundMessage) => Promise<string | undefined>}
  */
 export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, community, scheduler, ai, requireOwner = false, requireActivation = false } = {}) {
@@ -115,32 +115,36 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     return was;
   }
 
-  // Translate a natural-language request into one command via the AI client (best-effort). Returns
-  // the resolved { cmd, command, args, rest, line } ready to dispatch, or null when the model
-  // declines, names an unknown command, or omits a required argument. The model only proposes; every
-  // guard still runs on the result, so AI can never reach a command the caller could not have typed.
-  async function aiResolve(request, scopeCtx) {
+  // Translate a natural-language request into a CHAIN of one or more commands via the AI client
+  // (best-effort). The model may emit several tool calls for a multi-step request ("add everyone, then
+  // enable it") - each is resolved to a canonical command line ready to dispatch. Returns [] when AI is
+  // off, the model declines, or every proposal is unusable. Each resolved command still runs through
+  // every guard below, so AI can never reach a command the caller could not have typed by hand.
+  async function aiResolveChain(request, scopeCtx) {
     const tools = toolCatalog(registry.all(), scopeCtx);
-    if (!tools.length) return null;
-    const proposal = await ai.translate({ text: request, tools });
-    if (!proposal) return null;
-    let line;
-    try {
-      line = toCommandLine(registry.get(proposal.command), proposal.args);
-    } catch {
-      return null; // a missing required argument means the translation is incomplete
+    if (!tools.length) return [];
+    const proposals = await ai.translate({ text: request, tools });
+    if (!Array.isArray(proposals)) return [];
+    const chain = [];
+    for (const p of proposals) {
+      let line;
+      try {
+        line = toCommandLine(registry.get(p.command), p.args);
+      } catch {
+        continue; // skip an incomplete proposal (a missing required argument)
+      }
+      const reparsed = parse(line, prefix, { addressed: true });
+      const cmd = reparsed?.command ? registry.get(reparsed.command) : undefined;
+      if (cmd) chain.push({ cmd, command: reparsed.command, args: reparsed.args, rest: reparsed.rest, line });
     }
-    const reparsed = parse(line, prefix, { addressed: true });
-    const cmd = reparsed?.command ? registry.get(reparsed.command) : undefined;
-    if (!cmd) return null;
-    return { cmd, command: reparsed.command, args: reparsed.args, rest: reparsed.rest, line };
+    return chain;
   }
 
   return async function handle(msg) {
     const parsed = parse(msg.text, prefix, { addressed: msg.addressed });
     if (!parsed) return undefined; // not addressed to the bot
 
-    let { command, args, rest } = parsed;
+    const { command, args, rest } = parsed;
     const level = msg.level ?? 'private';
     const sender = msg.sender ?? '';
     const chatId = msg.chatId ?? 'cli';
@@ -207,62 +211,23 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       }
     }
 
-    // Owner-managed access lists (ADR-0006). The owner bypasses the whole layer, and
-    // the bootstrap `owner` command stays reachable so the bot can never be locked
-    // out of ownership. The GLOBAL gate is checked before the empty / unknown-command
-    // replies, so a blocked sender is fully silent (even to a bare prefix or junk).
-    // A denial is logged for audit, never surfaced in chat.
-    // The owner bypasses the lists everywhere; a group/community admin bypasses them in their own
-    // (already-active) chat - admins always have access where Jarvis runs. The bootstrap `owner`
-    // command stays exempt so the bot can never be locked out of ownership.
-    let exemptFromLists = isOwner || isAdmin || command === 'owner';
-    if (access && !exemptFromLists && !access.passes('*', accessContext, sender)) {
+    // Owner-managed access lists (ADR-0006). The owner bypasses the whole layer, and the bootstrap
+    // `owner` command stays reachable so the bot can never be locked out of ownership. The GLOBAL gate
+    // is checked before the empty / unknown-command replies, so a blocked sender is fully silent (even
+    // to a bare prefix or junk). A denial is logged for audit, never surfaced in chat. The owner
+    // bypasses the lists everywhere; a group/community admin bypasses them in their own (already-active)
+    // chat - admins always have access where Jarvis runs.
+    const globalExempt = isOwner || isAdmin || command === 'owner';
+    if (access && !globalExempt && !access.passes('*', accessContext, sender)) {
       log.info('access deny (global)', { sender, chatId });
       return undefined;
     }
 
     if (!command) return `Try ${code(`${prefix} help`)}.`;
 
-    let cmd = registry.get(command);
-    // AI command translation (the only non-deterministic step). The user addressed Jarvis but the
-    // first word is not a command - so if a translator is wired and allowed here, ask the model to map
-    // the natural-language request onto ONE command, then run THAT command through every guard below.
-    // Owner-only for now: AI is OFF by default and the owner is the exception (a `jarvis ai on/off`
-    // toggle for others comes later). Best-effort - any failure falls back to the "unknown command" reply.
-    let understood = '';
-    const aiAllowed = isOwner || aiEnabledIn(accessContext); // owner always; others where the owner opened it
-    if (!cmd && ai && aiAllowed) {
-      const request = rest ? `${command} ${rest}` : command;
-      const resolved = await aiResolve(request, { level, isAdmin, isOwner });
-      if (resolved) {
-        ({ cmd, command, args, rest } = resolved);
-        exemptFromLists = isOwner || isAdmin || command === 'owner'; // re-evaluate for the command AI resolved to
-        understood = `${b('Understood:')} ${code(`${prefix} ${resolved.line}`)}`;
-        log.info('ai: translated a request', { to: resolved.line, sender });
-      }
-    }
-    if (!cmd) return `Unknown command ${code(esc(command))}. Try ${code(`${prefix} help`)}.`;
-
-    // Per-command gate: only a non-owner on a non-owner command is subject to it
-    // (owner-only commands are governed by `scope`; `owner` is exempt above).
-    if (access && !exemptFromLists && !cmd.scope?.owner && !access.passes(command, accessContext, sender)) {
-      log.info('access deny (command)', { sender, chatId, command });
-      return undefined;
-    }
-
-    const scoped = checkScope(cmd.scope, { level, isAdmin, isOwner });
-    if (!scoped.ok) return `Not allowed: ${scoped.reason}.`;
-
-    // Declarative capability requirements: a command lists the ctx capabilities it needs
-    // (e.g. `requires: ['scheduler']`). When one isn't wired on this platform/config, the
-    // command is uniformly reported unavailable, instead of each command hand-rolling a guard.
+    // `capable` / `ownerCap` are message-scoped but command-independent, so they are built once and
+    // shared by every command run below (a single typed command, or each step of an AI chain).
     const capable = { store, access, links, activation, scheduler, lifecycle, send, community, aiGate: aiGateStore };
-    if (cmd.requires?.some((cap) => !capable[cap])) {
-      return 'That command is unavailable here.';
-    }
-
-    // Owner-slot management for the `owner` command (claim only if free; resign only
-    // by the owner). Ownership is established here explicitly, never as a side effect.
     const ownerCap = {
       exists: !!ownerResolver.current,
       isMe: isOwner,
@@ -289,111 +254,143 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       },
     };
 
-    const replies = [];
-    const ctx = {
-      command,
-      args,
-      rest,
-      text: msg.text,
-      level,
-      sender,
-      chatId,
-      communityId,
-      // The bot's own id forms are dropped: when the bot is addressed by @mention, its own jid
-      // is among `mentionedJid` (often first), and a command naming a person (e.g. the access
-      // lists) must take the named person, not the bot. Mirrors `stripBotMention` on the text.
-      mentions: (msg.mentionedJid ?? []).filter((id) => !isSelf(id)),
-      isOwner,
-      isAdmin,
-      commands: registry.all(),
-      reply: (text) => replies.push(text),
-      store: store ? store.scoped(links.nsFor(chatId, ownNs)) : undefined,
-      chats: links ? links.chats(chatId) : [chatId],
-      access: access ?? undefined,
-      activation: activation
-        ? {
-            isActive: (id) => activation.isActive(id),
-            activate: (id, by = sender) => activateGroup(id, by),
-            deactivate: (id) => deactivateGroup(id),
-            // Community umbrella (silence gate only - no access reset, no announce): activating a
-            // community id authorizes every group under it. Raw on purpose, unlike activate() above.
-            activateCommunity: (id, by = sender) => activation.activate(id, by),
-            deactivateCommunity: (id) => activation.deactivate(id),
-            list: () => activation.list(),
-          }
-        : undefined,
-      // AI-translation opt-in for this context (the `ai` command); owner is exempt from the gate.
-      aiGate: aiGateStore
-        ? {
-            isOn: () => aiEnabledIn(accessContext),
-            on: () => aiGateStore.set(accessContext, true),
-            off: () => aiGateStore.delete(accessContext),
-            available: !!ai,
-          }
-        : undefined,
-      links: links
-        ? {
-            propose: () => links.propose(chatId),
-            accept: (code) => links.accept(code, chatId),
-            unlink: () => links.unlink(chatId),
-            clusters: () => links.clusters(),
-          }
-        : undefined,
-      resolveUser: resolveUser ?? ((token) => String(token ?? '').trim()),
-      isSelf,
-      log,
-      lifecycle,
-      listGroups: listGroups ?? (() => []),
-      send: send ?? undefined,
-      // Community reads, bound to this chat's community by default (pass an id to target another).
-      community: community
-        ? {
-            info: (id = communityId) => community.info(id),
-            groups: (id = communityId) => community.groups(id),
-            all: () => community.all(),
-          }
-        : undefined,
-      scheduler: scheduler
-        ? {
-            add: (when, text) => scheduler.add({ chatId, createdBy: sender, when, text }),
-            list: () => scheduler.list(chatId),
-            cancel: (id) => scheduler.cancel(id, chatId),
-            clear: () => scheduler.clearChat(chatId),
-            setEnabled: (id, on) => scheduler.setEnabled(id, chatId, on),
-            setEnabledAll: (on) => scheduler.setEnabledAll(chatId, on),
-          }
-        : undefined,
-      // Owner reset: wipe THIS context's DATA - its notes and schedules. NOT its access lists: those
-      // are managed via whitelist/blacklist, and silently clearing them on a reset would open the chat
-      // up (a security regression). A full access reset is what deactivate -> reactivate already does.
-      // The chat's data ns is the link overlay when linked, so a linked group clears the shared cluster.
-      resetContext: store
-        ? () => {
-            store.clearNamespace(links ? links.nsFor(chatId, ownNs) : ownNs);
-            if (scheduler) scheduler.clearChat(chatId);
-          }
-        : undefined,
-      owner: ownerCap,
-    };
+    // Run ONE already-resolved command: its per-command access list, scope, and capability checks,
+    // then execute it. Returns the reply (or a denial), or undefined when silently blocked or it
+    // produced nothing. Shared by the typed path and EACH step of an AI-translated chain, so every
+    // command - however it arrived - passes the same guards (the owner/admin/`owner`-command bypass
+    // the lists; owner-only commands are governed by `scope`).
+    async function runOne(cmd, command, args, rest) {
+      const exempt = isOwner || isAdmin || command === 'owner';
+      if (access && !exempt && !cmd.scope?.owner && !access.passes(command, accessContext, sender)) {
+        log.info('access deny (command)', { sender, chatId, command });
+        return undefined;
+      }
+      const scoped = checkScope(cmd.scope, { level, isAdmin, isOwner });
+      if (!scoped.ok) return `Not allowed: ${scoped.reason}.`;
+      if (cmd.requires?.some((cap) => !capable[cap])) return 'That command is unavailable here.';
 
-    try {
-      const result = await cmd.run(ctx);
-      if (result != null && result !== '') replies.push(String(result));
-    } catch (err) {
-      // A command failure is logged internally and never surfaced in chat: it
-      // would be noise and could leak internals. Any partial replies are dropped.
-      log.error(`command "${command}" failed`, {
-        error: err?.message ?? String(err),
-        sender,
+      const replies = [];
+      const ctx = {
+        command,
+        args,
+        rest,
+        text: msg.text,
         level,
-      });
-      return undefined;
+        sender,
+        chatId,
+        communityId,
+        // The bot's own id forms are dropped: when the bot is addressed by @mention, its own jid
+        // is among `mentionedJid` (often first), and a command naming a person (e.g. the access
+        // lists) must take the named person, not the bot. Mirrors `stripBotMention` on the text.
+        mentions: (msg.mentionedJid ?? []).filter((id) => !isSelf(id)),
+        isOwner,
+        isAdmin,
+        commands: registry.all(),
+        reply: (text) => replies.push(text),
+        store: store ? store.scoped(links.nsFor(chatId, ownNs)) : undefined,
+        chats: links ? links.chats(chatId) : [chatId],
+        access: access ?? undefined,
+        activation: activation
+          ? {
+              isActive: (id) => activation.isActive(id),
+              activate: (id, by = sender) => activateGroup(id, by),
+              deactivate: (id) => deactivateGroup(id),
+              // Community umbrella (silence gate only - no access reset, no announce): activating a
+              // community id authorizes every group under it. Raw on purpose, unlike activate() above.
+              activateCommunity: (id, by = sender) => activation.activate(id, by),
+              deactivateCommunity: (id) => activation.deactivate(id),
+              list: () => activation.list(),
+            }
+          : undefined,
+        // AI-translation opt-in for this context (the `ai` command); owner is exempt from the gate.
+        aiGate: aiGateStore
+          ? {
+              isOn: () => aiEnabledIn(accessContext),
+              on: () => aiGateStore.set(accessContext, true),
+              off: () => aiGateStore.delete(accessContext),
+              available: !!ai,
+            }
+          : undefined,
+        links: links
+          ? {
+              propose: () => links.propose(chatId),
+              accept: (code) => links.accept(code, chatId),
+              unlink: () => links.unlink(chatId),
+              clusters: () => links.clusters(),
+            }
+          : undefined,
+        resolveUser: resolveUser ?? ((token) => String(token ?? '').trim()),
+        isSelf,
+        log,
+        lifecycle,
+        listGroups: listGroups ?? (() => []),
+        send: send ?? undefined,
+        // Community reads, bound to this chat's community by default (pass an id to target another).
+        community: community
+          ? {
+              info: (id = communityId) => community.info(id),
+              groups: (id = communityId) => community.groups(id),
+              all: () => community.all(),
+            }
+          : undefined,
+        scheduler: scheduler
+          ? {
+              add: (when, text) => scheduler.add({ chatId, createdBy: sender, when, text }),
+              list: () => scheduler.list(chatId),
+              cancel: (id) => scheduler.cancel(id, chatId),
+              clear: () => scheduler.clearChat(chatId),
+              setEnabled: (id, on) => scheduler.setEnabled(id, chatId, on),
+              setEnabledAll: (on) => scheduler.setEnabledAll(chatId, on),
+            }
+          : undefined,
+        // Owner reset: wipe THIS context's DATA - its notes and schedules. NOT its access lists: those
+        // are managed via whitelist/blacklist, and silently clearing them on a reset would open the chat
+        // up (a security regression). A full access reset is what deactivate -> reactivate already does.
+        // The chat's data ns is the link overlay when linked, so a linked group clears the shared cluster.
+        resetContext: store
+          ? () => {
+              store.clearNamespace(links ? links.nsFor(chatId, ownNs) : ownNs);
+              if (scheduler) scheduler.clearChat(chatId);
+            }
+          : undefined,
+        owner: ownerCap,
+      };
+
+      try {
+        const result = await cmd.run(ctx);
+        if (result != null && result !== '') replies.push(String(result));
+      } catch (err) {
+        // A command failure is logged internally and never surfaced in chat: it would be noise and
+        // could leak internals. Any partial replies are dropped.
+        log.error(`command "${command}" failed`, { error: err?.message ?? String(err), sender, level });
+        return undefined;
+      }
+      return replies.length ? replies.join('\n') : undefined;
     }
 
-    const body = replies.length ? replies.join('\n') : undefined;
-    // When AI re-interpreted the request, lead with the command it understood, so the user sees
-    // (and learns) the canonical command that ran.
-    if (understood) return body ? `${understood}\n${body}` : understood;
-    return body;
+    const known = registry.get(command);
+    if (known) return runOne(known, command, args, rest); // a known command: run it directly
+
+    // Not a known command, but the user addressed Jarvis. If a translator is wired and allowed here,
+    // ask the model to map the natural-language request onto ONE OR MORE commands (a chain), then run
+    // each through runOne - the model only proposes; every guard still applies per step. AI is off by
+    // default and owner-gated; `jarvis ai on` opens it to others per chat. Best-effort: on no match it
+    // falls back to the normal unknown-command reply. The reply leads with the command(s) it
+    // understood, so the user sees (and learns) exactly what ran.
+    if (ai && (isOwner || aiEnabledIn(accessContext))) {
+      const request = rest ? `${command} ${rest}` : command;
+      const chain = await aiResolveChain(request, { level, isAdmin, isOwner });
+      if (chain.length) {
+        log.info('ai: translated a request', { to: chain.map((s) => s.line), sender });
+        const understood = `${b('Understood:')} ${chain.map((s) => code(`${prefix} ${s.line}`)).join(' ; ')}`;
+        const outs = [];
+        for (const step of chain) {
+          const out = await runOne(step.cmd, step.command, step.args, step.rest);
+          if (out) outs.push(out);
+        }
+        return [understood, ...outs].join('\n');
+      }
+    }
+    return `Unknown command ${code(esc(command))}. Try ${code(`${prefix} help`)}.`;
   };
 }
