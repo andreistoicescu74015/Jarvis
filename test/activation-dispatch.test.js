@@ -98,6 +98,54 @@ test('activation: a fresh activation announces in the group', async () => {
   store.close();
 });
 
+test('activation umbrella: activating a community opens the gate for a sub-group with no own entry', async () => {
+  const { store, handle } = setup();
+  const activation = createActivation(store);
+  const sub = { text: 'jarvis ping', sender: 'u', level: 'community', chatId: 's@g.us', community: 'c@g.us' };
+  assert.equal(await handle(sub), undefined); // inactive community -> silent for a non-owner
+  activation.activate('c@g.us', 'boss'); // activate the community (the umbrella)
+  assert.equal(toPlain(await handle(sub)), 'pong'); // the sub-group is now active...
+  assert.equal(activation.isActive('s@g.us'), false); // ...purely via the umbrella, no own entry
+  store.close();
+});
+
+test('activation umbrella: deactivating a community reverts umbrella-only groups but keeps individual ones', async () => {
+  const { store, handle } = setup();
+  const activation = createActivation(store);
+  activation.activate('c@g.us', 'boss'); // umbrella on
+  activation.activate('s2@g.us', 'boss'); // s2 also activated on its own
+  const s1 = { text: 'jarvis ping', sender: 'u', level: 'community', chatId: 's1@g.us', community: 'c@g.us' };
+  const s2 = { text: 'jarvis ping', sender: 'u', level: 'community', chatId: 's2@g.us', community: 'c@g.us' };
+  assert.equal(toPlain(await handle(s1)), 'pong'); // via umbrella
+  assert.equal(toPlain(await handle(s2)), 'pong'); // via own entry (and umbrella)
+  activation.deactivate('c@g.us'); // umbrella off
+  assert.equal(await handle(s1), undefined); // s1 had no own entry -> silent again
+  assert.equal(toPlain(await handle(s2)), 'pong'); // s2 keeps its own activation
+  store.close();
+});
+
+test('activation umbrella: the owner addressing the announcement group activates the community', async () => {
+  const { store, handle } = setup();
+  const activation = createActivation(store);
+  // an announcement group's own id IS the community id, so activating it umbrellas the community
+  const ann = { text: 'jarvis ping', sender: 'boss', level: 'community', chatId: 'c@g.us', community: 'c@g.us' };
+  assert.equal(toPlain(await handle(ann)), 'pong'); // owner auto-activates by addressing
+  assert.equal(activation.isActive('c@g.us'), true);
+  const sub = { text: 'jarvis ping', sender: 'u', level: 'community', chatId: 's@g.us', community: 'c@g.us' };
+  assert.equal(toPlain(await handle(sub)), 'pong'); // a non-owner sub-group is now covered
+  store.close();
+});
+
+test('activation umbrella: addressing the announcement group is LEAN - it does not lock the group admins-only', async () => {
+  const { store, handle } = setup();
+  // the owner addresses the announcement group (own id == community id) -> lean umbrella activation
+  await handle({ text: 'jarvis ping', sender: 'boss', level: 'community', chatId: 'c@g.us', community: 'c@g.us' });
+  // unlike a normal group activation (admins-only), the announcement group stays open: a non-admin passes
+  const member = { text: 'jarvis ping', sender: 'u', level: 'community', chatId: 'c@g.us', community: 'c@g.us', isAdmin: false };
+  assert.equal(toPlain(await handle(member)), 'pong');
+  store.close();
+});
+
 test('activation: deactivating a group unlinks it and wipes its own data', async () => {
   const store = createStore({ path: ':memory:' });
   const activation = createActivation(store);

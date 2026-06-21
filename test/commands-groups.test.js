@@ -19,6 +19,17 @@ test('groups: lists the known groups with ids, sorted by name', async () => {
   assert.match(out, /- Friends 456-2@g\.us\n- Study 123-1@g\.us/); // alphabetical
 });
 
+test('groups: shows member counts when the platform reports them', async () => {
+  const listGroups = async () => [
+    { id: 'a@g.us', name: 'Alpha', size: 88 },
+    { id: 'b@g.us', name: 'Beta' }, // no size reported
+  ];
+  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', listGroups });
+  const out = toPlain(await handle({ text: 'jarvis groups', sender: 'boss', level: 'private' }));
+  assert.match(out, /Alpha a@g\.us \(88\)/); // count shown
+  assert.match(out, /Beta b@g\.us(?:\n|$)/); // Beta has no count appended
+});
+
 test('groups: is owner-only', async () => {
   const handle = createDispatcher(createRegistry([groups]), {
     owner: 'boss',
@@ -74,6 +85,22 @@ test('groups: activate rejects an unknown id and needs an id from a private chat
 
   const noId = toPlain(await handle({ text: 'jarvis groups activate', sender: 'boss', level: 'private' }));
   assert.match(noId, /name it/i);
+  store.close();
+});
+
+test('groups: a sub-group active via its community umbrella is tagged so', async () => {
+  const store = createStore({ path: ':memory:' });
+  createActivation(store).activate('c@g.us', 'boss'); // activate the community (umbrella), by its own id
+  const listGroups = async () => [
+    { id: 'c@g.us', name: 'Class', community: 'c@g.us', isCommunity: true }, // announcement group
+    { id: 's@g.us', name: 'Sub', community: 'c@g.us', isCommunity: false }, // sub-group of it
+    { id: 'g@g.us', name: 'Solo', isCommunity: false }, // unrelated standalone group
+  ];
+  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, listGroups });
+  const out = toPlain(await handle({ text: 'jarvis groups', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(out, /Class c@g\.us \(active\)/); // announcement group: active via its own id
+  assert.match(out, /Sub s@g\.us \(active via community\)/); // sub-group: active via the umbrella
+  assert.match(out, /Solo g@g\.us \(inactive\)/); // unrelated group: still inactive
   store.close();
 });
 

@@ -134,6 +134,7 @@ const app = createApp(adapter, {
     lifecycle,
     listGroups: () => adapter.listGroups(),
     send: (target, message) => adapter.send(target, message),
+    community: adapter.community,
     scheduler,
     // Canonicalize a named person for the access lists: a JID (e.g. from an @mention)
     // is resolved toward its phone form; a bare number becomes a phone JID. Matching
@@ -152,13 +153,17 @@ const app = createApp(adapter, {
 // send, which paces every message through the global spacing limiter, so output never bursts.
 // Started before the (blocking) start() so the timer is live; the first tick is after one
 // interval, so we never deliver before the socket connects.
-const deliver = (chatId, text) => {
+const deliver = async (chatId, text) => {
   // Proactive sends must respect the same activation gate as inbound commands: never post into a
-  // group the owner has not authorized (or has deactivated, or removed the bot from). Private chats
-  // have no activation entry and are never gated. Off when activation is not required (e.g. dev).
-  if (requireActivation && isJidGroup(chatId) && !activation.isActive(chatId)) {
-    log.info('skip scheduled send to an inactive group', { chatId });
-    return false; // DECLINE: signal the scheduler this was not delivered, so it leaves the job pending
+  // group the owner has not authorized (or has deactivated, or removed the bot from). A group also
+  // counts as active under its community umbrella (a community activated -> all its groups are on).
+  // Private chats have no activation entry and are never gated. Off when activation is not required.
+  if (requireActivation && isJidGroup(chatId)) {
+    const communityId = await adapter.communityOf(chatId);
+    if (!activation.isActive(chatId) && !(communityId && activation.isActive(communityId))) {
+      log.info('skip scheduled send to an inactive group', { chatId });
+      return false; // DECLINE: signal the scheduler this was not delivered, so it leaves the job pending
+    }
   }
   return adapter.send(chatId, text);
 };

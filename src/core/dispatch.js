@@ -18,6 +18,7 @@ import { b, code, esc } from './format.js';
  * @property {'private'|'group'|'community'} level         Conversation level.
  * @property {string} sender                               Sender id.
  * @property {string} chatId                               Conversation id (the access "context").
+ * @property {string} [communityId]                        Parent community jid of this chat, when in one (the target for community-wide activation).
  * @property {string[]} chats                               Chats sharing this context (the link cluster); just [chatId] when unlinked.
  * @property {string[]} mentions                           Ids @mentioned in the message (naming people).
  * @property {boolean} isOwner                             Sender is the bot owner.
@@ -28,12 +29,13 @@ import { b, code, esc } from './format.js';
  * @property {(id: string) => boolean} isSelf              True if the id is the bot itself (its trigger name or own id forms).
  * @property {import('../store/index.js').ScopedStore} [store] Per-conversation scoped KV (when configured).
  * @property {ReturnType<typeof createAccessPolicy>} [access] Owner-managed access lists (when a store is configured).
- * @property {{ isActive: (id: string) => boolean, activate: (id: string, by?: string) => boolean, deactivate: (id: string) => boolean, list: () => string[] }} [activation] Per-group activation registry (ADR-0008; when a store is configured).
+ * @property {{ isActive: (id: string) => boolean, activate: (id: string, by?: string) => boolean, deactivate: (id: string) => boolean, activateCommunity: (id: string, by?: string) => boolean, deactivateCommunity: (id: string) => boolean, list: () => string[] }} [activation] Per-group activation registry, plus the community umbrella (ADR-0008; when a store is configured).
  * @property {{ propose: () => string, accept: (code: string) => object, unlink: () => object }} [links] Context-link (overlay) handshake bound to this chat (when a store is configured).
  * @property {import('./log.js').Logger} log               Structured logger (never posts to chat).
  * @property {{ shutdown?: () => void, restart?: () => void, logout?: () => void }} [lifecycle] Process lifecycle controls (owner commands; injected per platform).
  * @property {() => Promise<{ id: string, name: string }[]>} listGroups  Groups the bot is in (platform capability; empty off a group platform).
  * @property {(target: string, text: string) => unknown} [send]  Send a message to any chat/user (proactive; platform capability).
+ * @property {{ info: (id?: string) => Promise<import('../whatsapp/community.js').Community | undefined>, groups: (id?: string) => Promise<object[]>, all: () => Promise<object[]> }} [community] WhatsApp community reads (metadata + linked sub-groups; platform capability, absent off WhatsApp). `info`/`groups` default to the current chat's community.
  * @property {{ add: (when: string, text: string) => object, list: () => object[], cancel: (id: string) => object }} [scheduler] Schedule a message to post later, bound to this chat (when a scheduler is configured).
  * @property {{ exists: boolean, isMe: boolean, fromEnv: boolean, contact: string, claim: () => boolean, resign: () => void }} [owner] Owner-slot management (the `owner` command).
  */
@@ -45,10 +47,10 @@ import { b, code, esc } from './format.js';
  * `handle(msg)` for `createApp`.
  *
  * @param {import('./registry.js').Registry} registry
- * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, send?: (target: string, text: string) => unknown, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object }, requireOwner?: boolean, requireActivation?: boolean }} [opts]
+ * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, send?: (target: string, text: string) => unknown, community?: { info: (id?: string) => Promise<object | undefined>, groups: (id?: string) => Promise<object[]>, all: () => Promise<object[]> }, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object }, requireOwner?: boolean, requireActivation?: boolean }} [opts]
  * @returns {(msg: import('./app.js').InboundMessage) => Promise<string | undefined>}
  */
-export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, scheduler, requireOwner = false, requireActivation = false } = {}) {
+export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, community, scheduler, requireOwner = false, requireActivation = false } = {}) {
   const ownerResolver = createOwnerResolver({ owner, match });
   const access = store ? createAccessPolicy(store, { match }) : null;
   const activation = store ? createActivation(store) : null;
@@ -117,6 +119,9 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     const chatId = msg.chatId ?? 'cli';
     const ownNs = `${level}:${chatId}`;
     const accessContext = accessContextFor(level, chatId); // 'private' for any DM, else the chat id
+    // The community this chat belongs to (announcement group = itself, a sub-group = its parent), so
+    // `ctx.community.info()` targets the right jid with no argument. Threaded from the inbound metadata.
+    const communityId = msg.community ?? (level === 'community' ? chatId : undefined);
     const isAdmin = msg.isAdmin ?? false;
     const isOwner = ownerResolver.isOwner(sender);
     // The bot itself, by its trigger name or its own id forms - so a command can refuse
@@ -144,23 +149,34 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     // passes even in an inactive group, so activation can be done from inside. Private chats are
     // never gated here. Opt-in via requireActivation (off for the dev CLI and unit tests); fully
     // suppressed (no reply), like the gates around it.
+    // A group/community is active if its own id is activated OR its parent community is (the community
+    // umbrella: activating a community opens the silence gate for every group in it, including ones
+    // added later). `communityId` is the chat's community - itself for an announcement group.
+    const activeHere = activation && (activation.isActive(chatId) || (communityId && activation.isActive(communityId)));
     if (
       requireActivation &&
       activation &&
       (level === 'group' || level === 'community') &&
-      !activation.isActive(chatId)
+      !activeHere
     ) {
       if (!isOwner) {
         log.info('inactive group: not activated', { chatId, command, sender });
         return undefined; // a non-owner stays silent until the owner activates the group
       }
       // The owner's mere address authorizes the group: any message (even a bare "jarvis") activates
-      // it, then proceeds. `groups` is the exception - it activates explicitly, so its own
-      // confirmation reads cleanly and is not pre-empted here.
-      if (command !== 'groups') {
-        await activateGroup(chatId, sender);
-        if (!command) return undefined; // bare prefix: the activation notice is the reply (no "Try help")
-        // else fall through and run the command in the now-active group
+      // it, then proceeds. `groups`/`community` are the exception - they activate explicitly, so their
+      // own confirmation reads cleanly and is not pre-empted here.
+      if (command !== 'groups' && command !== 'community') {
+        if (level === 'community' && communityId === chatId) {
+          // The announcement group's id IS the community id: addressing it activates the WHOLE
+          // community leanly (umbrella, gate-only - no admins-only reset, no announce), consistent
+          // with `community activate`. No announce, so a bare prefix falls through to "Try help".
+          activation.activate(chatId, sender);
+        } else {
+          // A normal group or a community sub-group: the usual admins-only reset + announce.
+          await activateGroup(chatId, sender);
+          if (!command) return undefined; // bare prefix: the announce IS the reply (no "Try help")
+        }
       }
     }
 
@@ -196,7 +212,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     // Declarative capability requirements: a command lists the ctx capabilities it needs
     // (e.g. `requires: ['scheduler']`). When one isn't wired on this platform/config, the
     // command is uniformly reported unavailable, instead of each command hand-rolling a guard.
-    const capable = { store, access, links, activation, scheduler, lifecycle, send };
+    const capable = { store, access, links, activation, scheduler, lifecycle, send, community };
     if (cmd.requires?.some((cap) => !capable[cap])) {
       return 'That command is unavailable here.';
     }
@@ -238,6 +254,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       level,
       sender,
       chatId,
+      communityId,
       // The bot's own id forms are dropped: when the bot is addressed by @mention, its own jid
       // is among `mentionedJid` (often first), and a command naming a person (e.g. the access
       // lists) must take the named person, not the bot. Mirrors `stripBotMention` on the text.
@@ -254,6 +271,10 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
             isActive: (id) => activation.isActive(id),
             activate: (id, by = sender) => activateGroup(id, by),
             deactivate: (id) => deactivateGroup(id),
+            // Community umbrella (silence gate only - no access reset, no announce): activating a
+            // community id authorizes every group under it. Raw on purpose, unlike activate() above.
+            activateCommunity: (id, by = sender) => activation.activate(id, by),
+            deactivateCommunity: (id) => activation.deactivate(id),
             list: () => activation.list(),
           }
         : undefined,
@@ -271,6 +292,14 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       lifecycle,
       listGroups: listGroups ?? (() => []),
       send: send ?? undefined,
+      // Community reads, bound to this chat's community by default (pass an id to target another).
+      community: community
+        ? {
+            info: (id = communityId) => community.info(id),
+            groups: (id = communityId) => community.groups(id),
+            all: () => community.all(),
+          }
+        : undefined,
       scheduler: scheduler
         ? {
             add: (when, text) => scheduler.add({ chatId, createdBy: sender, when, text }),

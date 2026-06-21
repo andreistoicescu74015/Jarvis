@@ -51,6 +51,25 @@ test('normalize: a community is detected from group metadata flags', () => {
     { groupMetadata: { isCommunity: true, participants: [] } },
   );
   assert.equal(inbound.level, 'community');
+  assert.equal(inbound.community, GROUP); // an announcement group is its own community id
+});
+
+test('normalize: a sub-group carries its parent community id', () => {
+  const inbound = toInbound(
+    { key: { remoteJid: GROUP, participant: '9@s.whatsapp.net' }, message: { conversation: 'hi' } },
+    { groupMetadata: { linkedParent: 'c@g.us', participants: [] } },
+  );
+  assert.equal(inbound.level, 'community');
+  assert.equal(inbound.community, 'c@g.us'); // points at the parent community
+});
+
+test('normalize: a plain group carries no community id', () => {
+  const inbound = toInbound(
+    { key: { remoteJid: GROUP, participant: '9@s.whatsapp.net' }, message: { conversation: 'hi' } },
+    { groupMetadata: { participants: [] } },
+  );
+  assert.equal(inbound.level, 'group');
+  assert.equal('community' in inbound, false); // field omitted, not undefined
 });
 
 test('normalize: extended text carries mentions; ephemeral wrappers are unwrapped', () => {

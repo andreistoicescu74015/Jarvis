@@ -55,9 +55,16 @@ async function list(ctx) {
   if (!groups.length) return 'No groups found (or not available here).';
   const active = new Set(ctx.activation ? ctx.activation.list() : []);
   const tag = (g) => {
-    const state = ctx.activation ? ` ${i(active.has(g.id) ? '(active)' : '(inactive)')}` : '';
+    const size = Number.isFinite(g.size) ? ` ${i(`(${g.size})`)}` : '';
+    let state = '';
+    if (ctx.activation) {
+      // Effective activation: a sub-group is on if its own id is active OR its community is (umbrella).
+      const ownActive = active.has(g.id);
+      const viaCommunity = !ownActive && g.community && active.has(g.community);
+      state = ` ${i(ownActive ? '(active)' : viaCommunity ? '(active via community)' : '(inactive)')}`;
+    }
     const ann = g.isCommunity ? ` ${i('[community]')}` : '';
-    return `${b(esc(g.name))} ${code(esc(g.id))}${state}${ann}`;
+    return `${b(esc(g.name))} ${code(esc(g.id))}${size}${state}${ann}`;
   };
   // Split standalone groups from community members (a sub-group's `community` is its parent's id).
   const sorted = groups.slice().sort((a, b2) => String(a.name).localeCompare(String(b2.name)));
