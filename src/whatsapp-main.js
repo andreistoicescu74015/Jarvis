@@ -15,6 +15,7 @@ import { createIdentityStore } from './whatsapp/identity-store.js';
 import { socketLogger } from './whatsapp/socket-logger.js';
 import { commands } from './commands/index.js';
 import { num } from './core/env.js';
+import { createAiClient } from './core/ai.js';
 
 /**
  * Composition root for the live WhatsApp bot. Mirrors `cli.js`, but wires the
@@ -28,6 +29,16 @@ const authDb = createStore({ path: process.env.JARVIS_AUTH_DB ?? 'data/wa-auth.d
 const identity = createIdentityStore(store, { log });
 const scheduler = createScheduler(store);
 const activation = createActivation(store);
+// AI command translation (opt-in, owner-gated in the dispatcher). With GITHUB_MODELS_TOKEN set, the
+// owner can address Jarvis in natural language and have it mapped to one command (GitHub Models,
+// OpenAI-compatible). No token -> the client is null and AI is simply off. The provider is a config
+// triple, swappable to any OpenAI-compatible endpoint (Azure AI Foundry, ...) with no code change.
+const ai = createAiClient({
+  token: process.env.GITHUB_MODELS_TOKEN ?? '',
+  baseUrl: process.env.JARVIS_AI_BASE_URL ?? 'https://models.github.ai/inference',
+  model: process.env.JARVIS_AI_MODEL ?? 'openai/gpt-4o-mini',
+  log,
+});
 // Per-group activation gate is opt-in (default on); shared by the dispatcher (inbound) and the
 // proactive deliver path (outbound), so both honor the same authorization.
 const requireActivation = (process.env.JARVIS_REQUIRE_ACTIVATION ?? 'on') !== 'off';
@@ -136,6 +147,7 @@ const app = createApp(adapter, {
     send: (target, message) => adapter.send(target, message),
     community: adapter.community,
     scheduler,
+    ai,
     // Canonicalize a named person for the access lists: a JID (e.g. from an @mention)
     // is resolved toward its phone form; a bare number becomes a phone JID. Matching
     // then bridges LID <-> phone, so a person named one way matches a sender on the other.

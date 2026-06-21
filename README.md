@@ -16,7 +16,8 @@ for the branch / commit / PR flow.
 ## Status
 
 WhatsApp MVP: it connects to a dedicated account, handles `jarvis <command>` (and @mentions),
-persists data, and runs unattended in Docker.
+persists data, and runs unattended in Docker. The owner can also phrase a command in natural
+language (opt-in AI translation; set `GITHUB_MODELS_TOKEN` - see `.env.example`).
 
 ## Develop
 
