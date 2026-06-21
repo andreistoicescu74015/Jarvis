@@ -10,11 +10,19 @@ test('identity: learns a LID<->PN pair from a group message key and bridges them
   const store = createStore({ path: ':memory:' });
   const id = createIdentityStore(store);
   assert.equal(id.same(LID, PN), false); // unknown before learning
-  id.learnFromKey({ participant: LID, participantPn: PN });
+  id.learnFromKey({ participant: LID, participantAlt: PN }); // real rc13 inbound key: participant + participantAlt
   assert.equal(id.pnForLid(LID), PN);
   assert.equal(id.lidForPn(PN), LID);
   assert.equal(id.same(LID, PN), true); // bridged both ways
   assert.equal(id.same(PN, LID), true);
+  store.close();
+});
+
+test('identity: learnFromKey also accepts the legacy participantPn field defensively', () => {
+  const store = createStore({ path: ':memory:' });
+  const id = createIdentityStore(store);
+  id.learnFromKey({ participant: LID, participantPn: PN });
+  assert.equal(id.same(LID, PN), true);
   store.close();
 });
 
