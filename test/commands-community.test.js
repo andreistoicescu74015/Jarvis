@@ -59,12 +59,12 @@ test('community: shows a community with no linked sub-groups', async () => {
   assert.match(out, /No linked sub-groups/);
 });
 
-test('community: is owner-or-admin only', async () => {
+test('community: is owner-only (an admin is no longer allowed)', async () => {
   const handle = createDispatcher(createRegistry([community]), { owner: 'boss', community: fakeCommunity(INFO) });
-  const denied = await handle({ text: 'jarvis community', sender: 'rando', level: 'community', chatId: 'c@g.us', isAdmin: false });
-  assert.match(denied, /Not allowed: owner or a group admin only/);
-  const ok = toPlain(await handle({ text: 'jarvis community', sender: 'adm', level: 'community', chatId: 'c@g.us', isAdmin: true }));
-  assert.match(ok, /Community Anul 2/);
+  const denied = await handle({ text: 'jarvis community', sender: 'adm', level: 'community', chatId: 'c@g.us', isAdmin: true });
+  assert.match(denied, /Not allowed: owner only/);
+  const ok = toPlain(await handle({ text: 'jarvis community', sender: 'boss', level: 'private' }));
+  assert.match(ok, /Community Anul 2/); // the owner passes
 });
 
 test('community: reports unavailable where the platform has no community capability (e.g. CLI)', async () => {
@@ -110,7 +110,7 @@ test('community: activation is owner-only - an admin cannot', async () => {
   const store = createStore({ path: ':memory:' });
   const handle = createDispatcher(createRegistry([community]), { owner: 'boss', store, community: fakeCommunity(INFO) });
   const out = await handle({ text: 'jarvis community activate', sender: 'adm', level: 'community', chatId: 'c@g.us', community: 'c@g.us', isAdmin: true });
-  assert.match(toPlain(out), /Only the owner can activate a community/);
+  assert.match(toPlain(out), /Not allowed: owner only/);
   assert.equal(createActivation(store).isActive('c@g.us'), false);
   store.close();
 });

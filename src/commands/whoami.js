@@ -11,17 +11,18 @@ function friendlyId(sender) {
 /** @type {import('../core/registry.js').Command} */
 export default {
   name: 'whoami',
-  summary: 'Show who you are (the owner can also look a person up).',
-  usage: 'jarvis whoami | whoami <@user|number> (owner)',
+  summary: 'Owner: show who you are, or look a person up.',
+  usage: 'jarvis whoami | whoami <@user|number>',
   man:
-    'Bare "whoami" shows who you are and where. The OWNER can also resolve a person - "whoami @user" or ' +
-    '"whoami <number>" - to the canonical id Jarvis matches them by, handy when deciding who may use the ' +
-    'bot in private (then "jarvis whitelist * add ...").',
+    'Owner-only. Bare "whoami" shows who you are and where. "whoami @user" or "whoami <number>" resolves ' +
+    'a person to the canonical id Jarvis matches them by, handy when deciding who may use the bot in ' +
+    'private (then "jarvis whitelist * add ...").',
+  scope: { owner: true },
   run: (ctx) => {
-    // Owner-only person lookup: resolve an @mention or a typed number to the id Jarvis stores and
-    // matches against. Anyone else (or the owner with no argument) just sees themselves.
+    // Owner-only command. With an argument, resolve an @mention or typed number to the id Jarvis
+    // stores and matches against; with none, just show the owner themselves.
     const named = ctx.mentions?.[0] ?? (ctx.args[0] || undefined);
-    if (ctx.isOwner && named) {
+    if (named) {
       const id = ctx.resolveUser ? ctx.resolveUser(named) : String(named);
       return `${b(friendlyId(id))} - id ${code(esc(id))}.`;
     }

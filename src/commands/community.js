@@ -13,7 +13,7 @@ import { b, i, code, bullet, esc } from '../core/format.js';
  */
 export default {
   name: 'community',
-  summary: 'Show a community, or activate/deactivate Jarvis across all its groups.',
+  summary: 'Owner: show a community, or activate/deactivate Jarvis across all its groups.',
   usage: 'jarvis community | community activate [<id>] | community deactivate [<id>]',
   man:
     'Show a WhatsApp community: its linked sub-groups with member counts, the total reach, and ' +
@@ -22,7 +22,7 @@ export default {
     '"community deactivate [<id>]" reverses it, but groups you activated individually stay on. Run ' +
     'it inside the community (or one of its groups), or name it by id (from "jarvis groups"). ' +
     'Activating a community does not change any group\'s access lists.',
-  scope: { ownerOrAdmin: true },
+  scope: { owner: true },
   requires: ['community'],
   run: async (ctx) => {
     const sub = (ctx.args[0] ?? '').toLowerCase();
@@ -31,9 +31,8 @@ export default {
   },
 };
 
-/** Activate/deactivate Jarvis across a whole community - owner-only (the umbrella gate). */
+/** Activate/deactivate Jarvis across a whole community (the command is owner-only; the umbrella gate). */
 async function manage(ctx, sub) {
-  if (!ctx.isOwner) return `Only the owner can ${sub} a community.`;
   if (!ctx.activation) return 'Activation is unavailable here.';
   const id = (ctx.args[1] ?? '').trim() || ctx.communityId;
   if (!id) {
