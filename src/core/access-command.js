@@ -56,18 +56,20 @@ function run(ctx, list) {
   const target = (ctx.args[0] ?? '').toLowerCase(); // command names are lowercase; match case-insensitively
   if (!target) return overview(ctx, list, context);
 
-  const verb = (ctx.args[1] ?? '').toLowerCase();
-  if (!verb) return show(ctx, list, target, context);
-  if (!VERBS.has(verb)) return usage(list);
-
-  // Validate a command target. `*` (whole bot) is always valid; owner-only commands and the
-  // bootstrap `owner` command can never be restricted (they would be moot or could lock the bot out).
+  // Validate the target (a command name, or * for the whole bot) up front - before a show OR an action.
+  // Otherwise a non-command target like "enable" (a user, or the AI translator, that dropped the command
+  // name - e.g. "blacklist enable") would silently show an empty rule for something that is not a command.
+  // `*` is always valid; owner-only commands and the bootstrap `owner` command can never be restricted.
   if (target !== '*') {
     const cmd = ctx.commands.find((c) => c.name === target);
     if (!cmd) return `No such command: ${target}.`;
     if (target === 'owner') return 'The owner command cannot be restricted (it must stay reachable).';
     if (cmd.scope?.owner) return `${target} is owner-only; access lists do not apply to it.`;
   }
+
+  const verb = (ctx.args[1] ?? '').toLowerCase();
+  if (!verb) return show(ctx, list, target, context);
+  if (!VERBS.has(verb)) return usage(list);
 
   switch (verb) {
     case 'enable': {
