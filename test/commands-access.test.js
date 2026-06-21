@@ -31,6 +31,16 @@ test('access cmd: blacklist add does not apply until enable, then blocks (silent
   assert.equal(await as('alice', 'jarvis ping'), 'pong'); // others unaffected
 });
 
+test('access cmd: a non-command target errors instead of showing a phantom empty rule', async () => {
+  const { boss } = setup();
+  // "blacklist enable" - the command name was dropped (a user typo, or an AI translation of
+  // "enable the blacklist" with no command). "enable" is not a command, so it must error clearly.
+  assert.match(await boss('jarvis blacklist enable'), /No such command: enable/i);
+  assert.match(await boss('jarvis whitelist disable'), /No such command: disable/i);
+  // a real command target still shows its rule
+  assert.match(await boss('jarvis blacklist note'), /blacklist for "note"/i);
+});
+
 test('access cmd: whitelist restricts a command to listed people', async () => {
   const { boss, as } = setup();
   await boss('jarvis whitelist ping add alice');
