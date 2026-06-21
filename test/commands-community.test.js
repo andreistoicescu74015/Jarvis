@@ -86,6 +86,17 @@ test('community: the owner activates Jarvis across the whole community', async (
   store.close();
 });
 
+test('community: activation is not blocked when the community read is unavailable (transient failure)', async () => {
+  const store = createStore({ path: ':memory:' });
+  // info returns undefined (e.g. a transient metadata-fetch failure) - activation is a local write,
+  // so it must still go through; the confirmation just falls back to the id instead of the name.
+  const handle = createDispatcher(createRegistry([community]), { owner: 'boss', store, community: fakeCommunity(undefined) });
+  const out = toPlain(await handle({ text: 'jarvis community activate c@g.us', sender: 'boss', level: 'private' }));
+  assert.match(out, /Activated Jarvis across/);
+  assert.equal(createActivation(store).isActive('c@g.us'), true);
+  store.close();
+});
+
 test('community: the owner deactivates the community umbrella (by id, from a DM)', async () => {
   const store = createStore({ path: ':memory:' });
   createActivation(store).activate('c@g.us', 'boss');

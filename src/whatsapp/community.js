@@ -15,7 +15,7 @@
  * @property {string} name
  * @property {string} [description]
  * @property {SubGroup[]} subGroups   The linked groups.
- * @property {number} reach           Total community members (the announcement audience), 0 if unknown.
+ * @property {number} reach           The announcement group's audience (member count) - the proxy for community reach; 0 if unknown.
  */
 
 /**

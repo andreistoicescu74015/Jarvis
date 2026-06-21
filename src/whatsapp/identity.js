@@ -29,12 +29,13 @@ export function normalizeUser(jid) {
  * are enough to tell a community apart. Without metadata a group stays 'group'.
  *
  * @param {string} remoteJid
- * @param {{ isCommunity?: boolean, linkedParent?: unknown, communityId?: unknown } | undefined} [groupMetadata]
+ * @param {{ isCommunity?: boolean, linkedParent?: unknown } | undefined} [groupMetadata]
  * @returns {'private'|'group'|'community'}
  */
 export function levelOf(remoteJid, groupMetadata) {
   if (!isJidGroup(remoteJid)) return 'private';
-  if (groupMetadata && (groupMetadata.isCommunity || groupMetadata.linkedParent || groupMetadata.communityId)) {
+  // The same two flags `communityIdOf` reads, so the level and the resolved community jid never diverge.
+  if (groupMetadata && (groupMetadata.isCommunity || groupMetadata.linkedParent)) {
     return 'community';
   }
   return 'group';

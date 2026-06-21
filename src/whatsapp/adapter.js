@@ -123,7 +123,7 @@ export function createWhatsAppAdapter({
     try {
       const [meta, linked] = await Promise.all([sock.communityMetadata(jid), sock.communityFetchLinkedGroups(jid)]);
       const value = toCommunity(meta, linked);
-      communityCache.set(jid, { value, at: now() });
+      if (value) communityCache.set(jid, { value, at: now() }); // don't cache an empty read - let it retry
       return value;
     } catch (err) {
       log.debug('wa: community fetch failed', { jid, error: err?.message ?? String(err) });
