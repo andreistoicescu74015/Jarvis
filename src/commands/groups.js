@@ -55,7 +55,13 @@ async function list(ctx) {
   if (!groups.length) return 'No groups found (or not available here).';
   const active = new Set(ctx.activation ? ctx.activation.list() : []);
   const tag = (g) => {
-    const state = ctx.activation ? ` ${i(active.has(g.id) ? '(active)' : '(inactive)')}` : '';
+    let state = '';
+    if (ctx.activation) {
+      // Effective activation: a sub-group is on if its own id is active OR its community is (umbrella).
+      const ownActive = active.has(g.id);
+      const viaCommunity = !ownActive && g.community && active.has(g.community);
+      state = ` ${i(ownActive ? '(active)' : viaCommunity ? '(active via community)' : '(inactive)')}`;
+    }
     const ann = g.isCommunity ? ` ${i('[community]')}` : '';
     return `${b(esc(g.name))} ${code(esc(g.id))}${state}${ann}`;
   };

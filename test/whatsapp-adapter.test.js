@@ -319,6 +319,21 @@ test('adapter: community.all shallow-lists the participating communities', async
   ]);
 });
 
+test('adapter: communityOf resolves a chat parent community from group metadata', async () => {
+  const makeSocket = fakeSocketFactory();
+  const a = createWhatsAppAdapter(opts({ makeSocket }));
+  a.start({ onMessage: async () => {} });
+  makeSocket.sockets[0].groupMetadata = async (jid) => {
+    if (jid === 's@g.us') return { id: jid, linkedParent: 'c@g.us', participants: [] }; // a sub-group
+    if (jid === 'c@g.us') return { id: jid, isCommunity: true, participants: [] }; // announcement group
+    return { id: jid, participants: [] }; // a plain group
+  };
+  assert.equal(await a.communityOf('s@g.us'), 'c@g.us'); // sub-group -> its parent community
+  assert.equal(await a.communityOf('c@g.us'), 'c@g.us'); // announcement group -> itself
+  assert.equal(await a.communityOf('plain@g.us'), undefined); // a plain group -> none
+  assert.equal(await a.communityOf('1@s.whatsapp.net'), undefined); // not a group at all
+});
+
 test('adapter: read-before-reply marks only addressed, non-self messages seen', async () => {
   const makeSocket = fakeSocketFactory();
   const a = createWhatsAppAdapter(opts({ makeSocket }));

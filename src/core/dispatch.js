@@ -18,6 +18,7 @@ import { b, code, esc } from './format.js';
  * @property {'private'|'group'|'community'} level         Conversation level.
  * @property {string} sender                               Sender id.
  * @property {string} chatId                               Conversation id (the access "context").
+ * @property {string} [communityId]                        Parent community jid of this chat, when in one (the target for community-wide activation).
  * @property {string[]} chats                               Chats sharing this context (the link cluster); just [chatId] when unlinked.
  * @property {string[]} mentions                           Ids @mentioned in the message (naming people).
  * @property {boolean} isOwner                             Sender is the bot owner.
@@ -28,7 +29,7 @@ import { b, code, esc } from './format.js';
  * @property {(id: string) => boolean} isSelf              True if the id is the bot itself (its trigger name or own id forms).
  * @property {import('../store/index.js').ScopedStore} [store] Per-conversation scoped KV (when configured).
  * @property {ReturnType<typeof createAccessPolicy>} [access] Owner-managed access lists (when a store is configured).
- * @property {{ isActive: (id: string) => boolean, activate: (id: string, by?: string) => boolean, deactivate: (id: string) => boolean, list: () => string[] }} [activation] Per-group activation registry (ADR-0008; when a store is configured).
+ * @property {{ isActive: (id: string) => boolean, activate: (id: string, by?: string) => boolean, deactivate: (id: string) => boolean, activateCommunity: (id: string, by?: string) => boolean, deactivateCommunity: (id: string) => boolean, list: () => string[] }} [activation] Per-group activation registry, plus the community umbrella (ADR-0008; when a store is configured).
  * @property {{ propose: () => string, accept: (code: string) => object, unlink: () => object }} [links] Context-link (overlay) handshake bound to this chat (when a store is configured).
  * @property {import('./log.js').Logger} log               Structured logger (never posts to chat).
  * @property {{ shutdown?: () => void, restart?: () => void, logout?: () => void }} [lifecycle] Process lifecycle controls (owner commands; injected per platform).
@@ -148,20 +149,24 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     // passes even in an inactive group, so activation can be done from inside. Private chats are
     // never gated here. Opt-in via requireActivation (off for the dev CLI and unit tests); fully
     // suppressed (no reply), like the gates around it.
+    // A group/community is active if its own id is activated OR its parent community is (the community
+    // umbrella: activating a community opens the silence gate for every group in it, including ones
+    // added later). `communityId` is the chat's community - itself for an announcement group.
+    const activeHere = activation && (activation.isActive(chatId) || (communityId && activation.isActive(communityId)));
     if (
       requireActivation &&
       activation &&
       (level === 'group' || level === 'community') &&
-      !activation.isActive(chatId)
+      !activeHere
     ) {
       if (!isOwner) {
         log.info('inactive group: not activated', { chatId, command, sender });
         return undefined; // a non-owner stays silent until the owner activates the group
       }
       // The owner's mere address authorizes the group: any message (even a bare "jarvis") activates
-      // it, then proceeds. `groups` is the exception - it activates explicitly, so its own
-      // confirmation reads cleanly and is not pre-empted here.
-      if (command !== 'groups') {
+      // it, then proceeds. `groups`/`community` are the exception - they activate explicitly, so their
+      // own confirmation reads cleanly and is not pre-empted here.
+      if (command !== 'groups' && command !== 'community') {
         await activateGroup(chatId, sender);
         if (!command) return undefined; // bare prefix: the activation notice is the reply (no "Try help")
         // else fall through and run the command in the now-active group
@@ -242,6 +247,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       level,
       sender,
       chatId,
+      communityId,
       // The bot's own id forms are dropped: when the bot is addressed by @mention, its own jid
       // is among `mentionedJid` (often first), and a command naming a person (e.g. the access
       // lists) must take the named person, not the bot. Mirrors `stripBotMention` on the text.
@@ -258,6 +264,10 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
             isActive: (id) => activation.isActive(id),
             activate: (id, by = sender) => activateGroup(id, by),
             deactivate: (id) => deactivateGroup(id),
+            // Community umbrella (silence gate only - no access reset, no announce): activating a
+            // community id authorizes every group under it. Raw on purpose, unlike activate() above.
+            activateCommunity: (id, by = sender) => activation.activate(id, by),
+            deactivateCommunity: (id) => activation.deactivate(id),
             list: () => activation.list(),
           }
         : undefined,

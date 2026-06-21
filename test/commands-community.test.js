@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRegistry } from '../src/core/registry.js';
 import { createDispatcher } from '../src/core/dispatch.js';
+import { createStore } from '../src/store/index.js';
+import { createActivation } from '../src/core/activation.js';
 import community from '../src/commands/community.js';
 import { toPlain } from '../src/core/format.js';
 
@@ -68,4 +70,46 @@ test('community: is owner-or-admin only', async () => {
 test('community: reports unavailable where the platform has no community capability (e.g. CLI)', async () => {
   const handle = createDispatcher(createRegistry([community]), { owner: 'boss' }); // no community injected
   assert.match(await handle({ text: 'jarvis community', sender: 'boss', level: 'private' }), /unavailable here/);
+});
+
+// --- community-wide activation (the umbrella) ---
+
+test('community: the owner activates Jarvis across the whole community', async () => {
+  const store = createStore({ path: ':memory:' });
+  const handle = createDispatcher(createRegistry([community]), { owner: 'boss', store, community: fakeCommunity(INFO) });
+  const msg = { text: 'jarvis community activate', sender: 'boss', level: 'community', chatId: 'c@g.us', community: 'c@g.us' };
+  const out = toPlain(await handle(msg));
+  assert.match(out, /Activated Jarvis across/);
+  assert.match(out, /2 groups are now on/);
+  assert.equal(createActivation(store).isActive('c@g.us'), true);
+  assert.match(toPlain(await handle(msg)), /already active/); // idempotent
+  store.close();
+});
+
+test('community: the owner deactivates the community umbrella (by id, from a DM)', async () => {
+  const store = createStore({ path: ':memory:' });
+  createActivation(store).activate('c@g.us', 'boss');
+  const handle = createDispatcher(createRegistry([community]), { owner: 'boss', store, community: fakeCommunity(INFO) });
+  const out = toPlain(await handle({ text: 'jarvis community deactivate c@g.us', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(out, /Deactivated Jarvis across/);
+  assert.equal(createActivation(store).isActive('c@g.us'), false);
+});
+
+test('community: activation is owner-only - an admin cannot', async () => {
+  const store = createStore({ path: ':memory:' });
+  const handle = createDispatcher(createRegistry([community]), { owner: 'boss', store, community: fakeCommunity(INFO) });
+  const out = await handle({ text: 'jarvis community activate', sender: 'adm', level: 'community', chatId: 'c@g.us', community: 'c@g.us', isAdmin: true });
+  assert.match(toPlain(out), /Only the owner can activate a community/);
+  assert.equal(createActivation(store).isActive('c@g.us'), false);
+  store.close();
+});
+
+test('community: the show view tags the activation state across the community', async () => {
+  const store = createStore({ path: ':memory:' });
+  createActivation(store).activate('c@g.us', 'boss'); // umbrella on
+  const handle = createDispatcher(createRegistry([community]), { owner: 'boss', store, community: fakeCommunity(INFO) });
+  const out = toPlain(await handle({ text: 'jarvis community', sender: 'boss', level: 'community', chatId: 'c@g.us', community: 'c@g.us' }));
+  assert.match(out, /Community Anul 2 .*\(active\)/);
+  assert.match(out, /General \(412\) \(on\)/);
+  store.close();
 });

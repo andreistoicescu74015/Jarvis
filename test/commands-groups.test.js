@@ -77,6 +77,22 @@ test('groups: activate rejects an unknown id and needs an id from a private chat
   store.close();
 });
 
+test('groups: a sub-group active via its community umbrella is tagged so', async () => {
+  const store = createStore({ path: ':memory:' });
+  createActivation(store).activate('c@g.us', 'boss'); // activate the community (umbrella), by its own id
+  const listGroups = async () => [
+    { id: 'c@g.us', name: 'Class', community: 'c@g.us', isCommunity: true }, // announcement group
+    { id: 's@g.us', name: 'Sub', community: 'c@g.us', isCommunity: false }, // sub-group of it
+    { id: 'g@g.us', name: 'Solo', isCommunity: false }, // unrelated standalone group
+  ];
+  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, listGroups });
+  const out = toPlain(await handle({ text: 'jarvis groups', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(out, /Class c@g\.us \(active\)/); // announcement group: active via its own id
+  assert.match(out, /Sub s@g\.us \(active via community\)/); // sub-group: active via the umbrella
+  assert.match(out, /Solo g@g\.us \(inactive\)/); // unrelated group: still inactive
+  store.close();
+});
+
 test('groups: groups by community and shows link clusters', async () => {
   const store = createStore({ path: ':memory:' });
   const activation = createActivation(store);

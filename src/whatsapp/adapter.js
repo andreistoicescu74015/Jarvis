@@ -1,6 +1,7 @@
-import makeWASocket, { Browsers, jidNormalizedUser } from 'baileys';
+import makeWASocket, { Browsers, jidNormalizedUser, isJidGroup } from 'baileys';
 import qrcode from 'qrcode-terminal';
 import { nullLogger } from '../core/log.js';
+import { communityIdOf } from './identity.js';
 import { socketLogger } from './socket-logger.js';
 import { toInbound } from './normalize.js';
 import { resolveAddressing } from './trigger.js';
@@ -364,6 +365,14 @@ export function createWhatsAppAdapter({
           return [];
         }
       },
+    },
+
+    // Resolve a chat's parent community jid (announcement group = itself, a sub-group = its parent),
+    // from cached group metadata - for the activation umbrella on the proactive path, which has only a
+    // chatId. Undefined for a non-group, a plain group, or a metadata miss.
+    async communityOf(chatId) {
+      if (!chatId || !isJidGroup(chatId) || !sock || stopped) return undefined;
+      return communityIdOf(chatId, await groupMetadata(chatId));
     },
 
     async logout() {
