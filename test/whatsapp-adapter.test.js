@@ -43,6 +43,12 @@ const opts = (over) => ({
 
 const tick = () => new Promise((r) => setImmediate(r));
 
+/** A logger that records warn messages, so tests can assert what surfaces vs stays quiet. */
+const captureLog = () => {
+  const warns = [];
+  return { warns, log: { info() {}, debug() {}, warn: (m) => warns.push(m), error() {} } };
+};
+
 test('adapter: exposes the Adapter contract', () => {
   const a = createWhatsAppAdapter(opts());
   assert.equal(typeof a.start, 'function');
@@ -135,6 +141,38 @@ test('adapter: 515 restartRequired recreates the socket; 401 loggedOut wipes and
   await tick();
   assert.equal(makeSocket.sockets.length, 2); // no reconnect after logout
   assert.equal(authState.cleared, 1); // creds wiped
+});
+
+test('adapter: a logout before ever connecting reads as a rejected pairing, not a device unlink', async () => {
+  const makeSocket = fakeSocketFactory();
+  const { log, warns } = captureLog();
+  createWhatsAppAdapter(opts({ makeSocket, log })).start({ onMessage: async () => {} });
+  // 401 with no prior 'open' = WhatsApp rejecting the just-paired session (companion-pairing flakiness)
+  makeSocket.sockets[0].ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 401 } } } });
+  await tick();
+  assert.ok(warns.some((m) => /pairing rejected/i.test(m)));
+  assert.ok(!warns.some((m) => /device unlinked/i.test(m)));
+});
+
+test('adapter: a logout after a working connection reads as a device unlink', async () => {
+  const makeSocket = fakeSocketFactory();
+  const { log, warns } = captureLog();
+  createWhatsAppAdapter(opts({ makeSocket, log })).start({ onMessage: async () => {} });
+  makeSocket.sockets[0].ev.emit('connection.update', { connection: 'open' }); // connected at least once
+  await tick();
+  makeSocket.sockets[0].ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 401 } } } });
+  await tick();
+  assert.ok(warns.some((m) => /device unlinked/i.test(m)));
+  assert.ok(!warns.some((m) => /pairing rejected/i.test(m)));
+});
+
+test('adapter: a routine reconnect close (428) stays out of the warn log', async () => {
+  const makeSocket = fakeSocketFactory();
+  const { log, warns } = captureLog();
+  createWhatsAppAdapter(opts({ makeSocket, log })).start({ onMessage: async () => {} });
+  makeSocket.sockets[0].ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 428 } } } });
+  await tick();
+  assert.ok(!warns.some((m) => /connection closed/.test(m))); // routine churn is debug, not warn
 });
 
 test('adapter: a transient close reconnects with backoff up to a cap, then gives up (onFatal)', async () => {
@@ -432,4 +470,15 @@ test('adapter: a failing profile-name update still goes online (app-state not sy
   await tick();
   // The name failure is isolated: the bot must still broadcast 'available' so receipts can activate.
   assert.ok(sock.presence.some((p) => p.state === 'available'));
+});
+
+test('adapter: the expected fresh-pairing profile-name failure stays out of the warn log', async () => {
+  const makeSocket = fakeSocketFactory();
+  const { log, warns } = captureLog();
+  createWhatsAppAdapter(opts({ makeSocket, log, humanize: { profileName: 'Jarvis' } })).start({ onMessage: async () => {} });
+  const sock = makeSocket.sockets[0];
+  sock.updateProfileName = async () => { throw new Error('App state key not present!'); };
+  sock.ev.emit('connection.update', { connection: 'open' });
+  await tick();
+  assert.ok(!warns.some((m) => /profile name/.test(m))); // the app-state-key case is debug, not warn
 });
