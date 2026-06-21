@@ -6,6 +6,7 @@ import { createLinks } from './links.js';
 import { createActivation } from './activation.js';
 import { nullLogger } from './log.js';
 import { b, code, esc } from './format.js';
+import { toolCatalog, toCommandLine } from './tools.js';
 
 /**
  * The capabilities a command receives. Grows over later issues (ai, scheduler, ...).
@@ -50,7 +51,7 @@ import { b, code, esc } from './format.js';
  * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, send?: (target: string, text: string) => unknown, community?: { info: (id?: string) => Promise<object | undefined>, groups: (id?: string) => Promise<object[]>, all: () => Promise<object[]> }, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object }, requireOwner?: boolean, requireActivation?: boolean }} [opts]
  * @returns {(msg: import('./app.js').InboundMessage) => Promise<string | undefined>}
  */
-export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, community, scheduler, requireOwner = false, requireActivation = false } = {}) {
+export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, community, scheduler, ai, requireOwner = false, requireActivation = false } = {}) {
   const ownerResolver = createOwnerResolver({ owner, match });
   const access = store ? createAccessPolicy(store, { match }) : null;
   const activation = store ? createActivation(store) : null;
@@ -109,11 +110,32 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     return was;
   }
 
+  // Translate a natural-language request into one command via the AI client (best-effort). Returns
+  // the resolved { cmd, command, args, rest, line } ready to dispatch, or null when the model
+  // declines, names an unknown command, or omits a required argument. The model only proposes; every
+  // guard still runs on the result, so AI can never reach a command the caller could not have typed.
+  async function aiResolve(request, scopeCtx) {
+    const tools = toolCatalog(registry.all(), scopeCtx);
+    if (!tools.length) return null;
+    const proposal = await ai.translate({ text: request, tools });
+    if (!proposal) return null;
+    let line;
+    try {
+      line = toCommandLine(registry.get(proposal.command), proposal.args);
+    } catch {
+      return null; // a missing required argument means the translation is incomplete
+    }
+    const reparsed = parse(line, prefix, { addressed: true });
+    const cmd = reparsed?.command ? registry.get(reparsed.command) : undefined;
+    if (!cmd) return null;
+    return { cmd, command: reparsed.command, args: reparsed.args, rest: reparsed.rest, line };
+  }
+
   return async function handle(msg) {
     const parsed = parse(msg.text, prefix, { addressed: msg.addressed });
     if (!parsed) return undefined; // not addressed to the bot
 
-    const { command, args, rest } = parsed;
+    let { command, args, rest } = parsed;
     const level = msg.level ?? 'private';
     const sender = msg.sender ?? '';
     const chatId = msg.chatId ?? 'cli';
@@ -196,7 +218,23 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
 
     if (!command) return `Try ${code(`${prefix} help`)}.`;
 
-    const cmd = registry.get(command);
+    let cmd = registry.get(command);
+    // AI command translation (the only non-deterministic step). The user addressed Jarvis but the
+    // first word is not a command - so if a translator is wired and allowed here, ask the model to map
+    // the natural-language request onto ONE command, then run THAT command through every guard below.
+    // Owner-only for now: AI is OFF by default and the owner is the exception (a `jarvis ai on/off`
+    // toggle for others comes later). Best-effort - any failure falls back to the "unknown command" reply.
+    let understood = '';
+    const aiAllowed = isOwner; // later: || aiEnabledFor(accessContext)
+    if (!cmd && ai && aiAllowed) {
+      const request = rest ? `${command} ${rest}` : command;
+      const resolved = await aiResolve(request, { level, isAdmin, isOwner });
+      if (resolved) {
+        ({ cmd, command, args, rest } = resolved);
+        understood = `${b('Understood:')} ${code(`${prefix} ${resolved.line}`)}`;
+        log.info('ai: translated a request', { to: resolved.line, sender });
+      }
+    }
     if (!cmd) return `Unknown command ${code(esc(command))}. Try ${code(`${prefix} help`)}.`;
 
     // Per-command gate: only a non-owner on a non-owner command is subject to it
@@ -337,6 +375,10 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       return undefined;
     }
 
-    return replies.length ? replies.join('\n') : undefined;
+    const body = replies.length ? replies.join('\n') : undefined;
+    // When AI re-interpreted the request, lead with the command it understood, so the user sees
+    // (and learns) the canonical command that ran.
+    if (understood) return body ? `${understood}\n${body}` : understood;
+    return body;
   };
 }
