@@ -34,6 +34,15 @@ test('socketLogger: errors/fatals map to error; info/debug/trace are dropped', (
   assert.equal(lines.info.length, 0);
 });
 
+test('socketLogger: the redundant "stream errored out" error is demoted to debug; real errors surface', () => {
+  const { log, lines } = capture();
+  const wa = socketLogger(log);
+  wa.error('stream errored out'); // Baileys logs this at error before every close (e.g. the 515 restart)
+  wa.error('boom'); // a genuine error
+  assert.deepEqual(lines.error, ['wa: boom']); // real error still surfaces
+  assert.deepEqual(lines.debug, ['wa: stream errored out']); // redundant churn demoted
+});
+
 test('socketLogger: accepts pino object-or-message call shapes and never throws', () => {
   const { log, lines } = capture();
   const wa = socketLogger(log);
