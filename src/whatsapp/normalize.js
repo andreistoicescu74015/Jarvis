@@ -1,5 +1,5 @@
 import { normalizeMessageContent } from 'baileys';
-import { levelOf, isAdminInGroup, normalizeUser } from './identity.js';
+import { levelOf, communityIdOf, isAdminInGroup, normalizeUser } from './identity.js';
 
 /**
  * Turn a raw Baileys message into the core's inbound shape (plus `mentionedJid`,
@@ -26,6 +26,7 @@ export function toInbound(wa, { groupMetadata } = {}) {
 
   const sender = normalizeUser(key.participant || remoteJid);
   const level = levelOf(remoteJid, groupMetadata);
+  const community = communityIdOf(remoteJid, groupMetadata);
   const ctxInfo = contextInfoOf(content);
 
   return {
@@ -36,6 +37,9 @@ export function toInbound(wa, { groupMetadata } = {}) {
     level,
     fromMe: !!key.fromMe,
     isAdmin: level === 'private' ? false : isAdminInGroup(sender, groupMetadata),
+    // The parent community jid, only when this chat is part of one - so a community read
+    // (e.g. `jarvis community`) can target the right jid without re-fetching metadata.
+    ...(community ? { community } : {}),
     mentionedJid: ctxInfo?.mentionedJid ?? [],
     raw: wa,
   };

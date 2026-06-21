@@ -263,6 +263,62 @@ test('adapter: listGroups maps participating groups (id when no subject; communi
   ]);
 });
 
+test('adapter: community.info shapes metadata + linked groups and caches the read', async () => {
+  const makeSocket = fakeSocketFactory();
+  const a = createWhatsAppAdapter(opts({ makeSocket }));
+  a.start({ onMessage: async () => {} });
+  const s = makeSocket.sockets[0];
+  let metaCalls = 0;
+  s.communityMetadata = async (jid) => { metaCalls += 1; return { id: jid, subject: 'Anul 2', desc: 'Info hub', size: 501 }; };
+  s.communityFetchLinkedGroups = async () => ({
+    communityJid: 'c@g.us',
+    isCommunity: true,
+    linkedGroups: [
+      { id: 'g1@g.us', subject: 'General', size: 412 },
+      { id: 'g2@g.us', subject: 'Lab', size: 88 },
+    ],
+  });
+  assert.deepEqual(await a.community.info('c@g.us'), {
+    id: 'c@g.us',
+    name: 'Anul 2',
+    description: 'Info hub',
+    subGroups: [
+      { id: 'g1@g.us', name: 'General', size: 412 },
+      { id: 'g2@g.us', name: 'Lab', size: 88 },
+    ],
+    reach: 501,
+  });
+  assert.deepEqual(await a.community.groups('c@g.us'), [
+    { id: 'g1@g.us', name: 'General', size: 412 },
+    { id: 'g2@g.us', name: 'Lab', size: 88 },
+  ]);
+  assert.equal(metaCalls, 1); // the second read is served from the TTL cache
+});
+
+test('adapter: community.info is best-effort - a fetch error yields undefined, never throws', async () => {
+  const makeSocket = fakeSocketFactory();
+  const a = createWhatsAppAdapter(opts({ makeSocket }));
+  a.start({ onMessage: async () => {} });
+  const s = makeSocket.sockets[0];
+  s.communityMetadata = async () => { throw new Error('not a community'); };
+  s.communityFetchLinkedGroups = async () => ({ linkedGroups: [] });
+  assert.equal(await a.community.info('x@g.us'), undefined);
+});
+
+test('adapter: community.all shallow-lists the participating communities', async () => {
+  const makeSocket = fakeSocketFactory();
+  const a = createWhatsAppAdapter(opts({ makeSocket }));
+  a.start({ onMessage: async () => {} });
+  makeSocket.sockets[0].communityFetchAllParticipating = async () => ({
+    'c@g.us': { id: 'c@g.us', subject: 'Anul 2', size: 501 },
+    'd@g.us': { id: 'd@g.us', subject: '', participants: [{}, {}] },
+  });
+  assert.deepEqual(await a.community.all(), [
+    { id: 'c@g.us', name: 'Anul 2', reach: 501 },
+    { id: 'd@g.us', name: 'd@g.us', reach: 2 },
+  ]);
+});
+
 test('adapter: read-before-reply marks only addressed, non-self messages seen', async () => {
   const makeSocket = fakeSocketFactory();
   const a = createWhatsAppAdapter(opts({ makeSocket }));

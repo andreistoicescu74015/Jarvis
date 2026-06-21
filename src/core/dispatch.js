@@ -34,6 +34,7 @@ import { b, code, esc } from './format.js';
  * @property {{ shutdown?: () => void, restart?: () => void, logout?: () => void }} [lifecycle] Process lifecycle controls (owner commands; injected per platform).
  * @property {() => Promise<{ id: string, name: string }[]>} listGroups  Groups the bot is in (platform capability; empty off a group platform).
  * @property {(target: string, text: string) => unknown} [send]  Send a message to any chat/user (proactive; platform capability).
+ * @property {{ info: (id?: string) => Promise<import('../whatsapp/community.js').Community | undefined>, groups: (id?: string) => Promise<object[]>, all: () => Promise<object[]> }} [community] WhatsApp community reads (metadata + linked sub-groups; platform capability, absent off WhatsApp). `info`/`groups` default to the current chat's community.
  * @property {{ add: (when: string, text: string) => object, list: () => object[], cancel: (id: string) => object }} [scheduler] Schedule a message to post later, bound to this chat (when a scheduler is configured).
  * @property {{ exists: boolean, isMe: boolean, fromEnv: boolean, contact: string, claim: () => boolean, resign: () => void }} [owner] Owner-slot management (the `owner` command).
  */
@@ -45,10 +46,10 @@ import { b, code, esc } from './format.js';
  * `handle(msg)` for `createApp`.
  *
  * @param {import('./registry.js').Registry} registry
- * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, send?: (target: string, text: string) => unknown, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object }, requireOwner?: boolean, requireActivation?: boolean }} [opts]
+ * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, send?: (target: string, text: string) => unknown, community?: { info: (id?: string) => Promise<object | undefined>, groups: (id?: string) => Promise<object[]>, all: () => Promise<object[]> }, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object }, requireOwner?: boolean, requireActivation?: boolean }} [opts]
  * @returns {(msg: import('./app.js').InboundMessage) => Promise<string | undefined>}
  */
-export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, scheduler, requireOwner = false, requireActivation = false } = {}) {
+export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, community, scheduler, requireOwner = false, requireActivation = false } = {}) {
   const ownerResolver = createOwnerResolver({ owner, match });
   const access = store ? createAccessPolicy(store, { match }) : null;
   const activation = store ? createActivation(store) : null;
@@ -117,6 +118,9 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     const chatId = msg.chatId ?? 'cli';
     const ownNs = `${level}:${chatId}`;
     const accessContext = accessContextFor(level, chatId); // 'private' for any DM, else the chat id
+    // The community this chat belongs to (announcement group = itself, a sub-group = its parent), so
+    // `ctx.community.info()` targets the right jid with no argument. Threaded from the inbound metadata.
+    const communityId = msg.community ?? (level === 'community' ? chatId : undefined);
     const isAdmin = msg.isAdmin ?? false;
     const isOwner = ownerResolver.isOwner(sender);
     // The bot itself, by its trigger name or its own id forms - so a command can refuse
@@ -196,7 +200,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     // Declarative capability requirements: a command lists the ctx capabilities it needs
     // (e.g. `requires: ['scheduler']`). When one isn't wired on this platform/config, the
     // command is uniformly reported unavailable, instead of each command hand-rolling a guard.
-    const capable = { store, access, links, activation, scheduler, lifecycle, send };
+    const capable = { store, access, links, activation, scheduler, lifecycle, send, community };
     if (cmd.requires?.some((cap) => !capable[cap])) {
       return 'That command is unavailable here.';
     }
@@ -271,6 +275,14 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       lifecycle,
       listGroups: listGroups ?? (() => []),
       send: send ?? undefined,
+      // Community reads, bound to this chat's community by default (pass an id to target another).
+      community: community
+        ? {
+            info: (id = communityId) => community.info(id),
+            groups: (id = communityId) => community.groups(id),
+            all: () => community.all(),
+          }
+        : undefined,
       scheduler: scheduler
         ? {
             add: (when, text) => scheduler.add({ chatId, createdBy: sender, when, text }),

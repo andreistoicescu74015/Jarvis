@@ -23,8 +23,10 @@ export function normalizeUser(jid) {
 
 /**
  * The conversation level of a chat. Group vs private comes from the JID; a group
- * counts as a *community* only when its metadata says so - v7 has no dedicated
- * community API, so we test truthy flags. Without metadata a group stays 'group'.
+ * counts as a *community* only when its metadata says so. We read the truthy flags
+ * Baileys already surfaces (`isCommunity` / `linkedParent`) rather than calling the
+ * community API (which v7 does expose) - classifying runs per message, and the flags
+ * are enough to tell a community apart. Without metadata a group stays 'group'.
  *
  * @param {string} remoteJid
  * @param {{ isCommunity?: boolean, linkedParent?: unknown, communityId?: unknown } | undefined} [groupMetadata]
@@ -36,6 +38,24 @@ export function levelOf(remoteJid, groupMetadata) {
     return 'community';
   }
   return 'group';
+}
+
+/**
+ * The community (announcement-group) jid a chat belongs to, or undefined when the
+ * chat is not part of one. The announcement group is its own community id
+ * (`isCommunity`); a sub-group points at its parent (`linkedParent`). This is what
+ * a community read should target - calling the community API with a sub-group's own
+ * jid would not resolve the community. Pure.
+ *
+ * @param {string} remoteJid
+ * @param {{ isCommunity?: boolean, linkedParent?: unknown } | undefined} [groupMetadata]
+ * @returns {string | undefined}
+ */
+export function communityIdOf(remoteJid, groupMetadata) {
+  if (!groupMetadata) return undefined;
+  if (groupMetadata.linkedParent) return String(groupMetadata.linkedParent);
+  if (groupMetadata.isCommunity) return remoteJid;
+  return undefined;
 }
 
 /**

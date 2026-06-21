@@ -7,6 +7,7 @@ import { resolveAddressing } from './trigger.js';
 import { toContent } from './render.js';
 import { createRateLimiter, typingDelayMs } from './pacing.js';
 import { disconnectAction, stopReason, backoffMs } from './connection.js';
+import { toCommunity } from './community.js';
 
 /** Read a WAMessage timestamp (seconds, number or Long) as epoch ms, or 0 if absent. */
 function timestampMs(wa) {
@@ -95,6 +96,8 @@ export function createWhatsAppAdapter({
   let connectedAt = 0; // epoch ms of the latest 'open'; 0 = never connected
   /** @type {Map<string, { meta: any, at: number }>} group metadata cache with TTL. */
   const groupCache = new Map();
+  /** @type {Map<string, { value: any, at: number }>} community read cache with TTL. */
+  const communityCache = new Map();
 
   async function groupMetadata(jid) {
     const cached = groupCache.get(jid);
@@ -105,6 +108,25 @@ export function createWhatsAppAdapter({
       return meta;
     } catch {
       return cached?.meta; // fall back to stale on a fetch error, else undefined
+    }
+  }
+
+  // Read a community's shape (name, description, linked sub-groups + member counts) by its
+  // announcement-group jid. Two reads (metadata + linked groups) folded into one cached value,
+  // mirroring groupMetadata: cheap on repeat, best-effort (falls back to stale, then undefined,
+  // on a fetch error - a read must never throw into a command). Read-only; no community is mutated.
+  async function communityInfo(jid) {
+    if (!jid || !sock || stopped) return undefined;
+    const cached = communityCache.get(jid);
+    if (cached && now() - cached.at < groupCacheTtlMs) return cached.value;
+    try {
+      const [meta, linked] = await Promise.all([sock.communityMetadata(jid), sock.communityFetchLinkedGroups(jid)]);
+      const value = toCommunity(meta, linked);
+      communityCache.set(jid, { value, at: now() });
+      return value;
+    } catch (err) {
+      log.debug('wa: community fetch failed', { jid, error: err?.message ?? String(err) });
+      return cached?.value;
     }
   }
 
@@ -319,6 +341,29 @@ export function createWhatsAppAdapter({
         log.error('wa: failed to list groups', { error: err?.message ?? String(err) });
         return [];
       }
+    },
+
+    // Community reads (platform capability; read-only). `info` returns a shaped Community
+    // (name, description, linked sub-groups + member counts, reach) by announcement-group jid,
+    // cached; `groups` is just its sub-groups; `all` shallow-lists the communities the bot is in
+    // (no sub-groups, to avoid a fetch per community). Off a community this is simply absent.
+    community: {
+      info: (id) => communityInfo(id),
+      groups: async (id) => (await communityInfo(id))?.subGroups ?? [],
+      all: async () => {
+        if (!sock || stopped) return [];
+        try {
+          const all = await sock.communityFetchAllParticipating();
+          return Object.values(all || {}).map((c) => ({
+            id: c.id,
+            name: c.subject || c.id,
+            reach: Number.isFinite(c.size) ? c.size : Array.isArray(c.participants) ? c.participants.length : 0,
+          }));
+        } catch (err) {
+          log.error('wa: failed to list communities', { error: err?.message ?? String(err) });
+          return [];
+        }
+      },
     },
 
     async logout() {

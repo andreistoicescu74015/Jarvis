@@ -12,6 +12,7 @@
  * @property {string} sender                        Sender id.
  * @property {'private'|'group'|'community'} level  Conversation level.
  * @property {boolean} fromMe                       True if sent by the bot's own account.
+ * @property {string} [community]                   Parent community jid, when this chat is part of one.
  * @property {boolean} [isAdmin]                    Sender is an admin of this chat (groups).
  * @property {boolean} [addressed]                  Platform already decided the bot is addressed without a prefix (e.g. @mention); the text is a bare command.
  * @property {string[]} [self]                      The bot's own id forms, so a command can avoid acting on the bot.

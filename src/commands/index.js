@@ -7,6 +7,7 @@ import owner from './owner.js';
 import whitelist from './whitelist.js';
 import blacklist from './blacklist.js';
 import groups from './groups.js';
+import community from './community.js';
 import link from './link.js';
 import schedule from './schedule.js';
 import reset from './reset.js';
@@ -29,6 +30,7 @@ export const commands = [
   whitelist,
   blacklist,
   groups,
+  community,
   link,
   schedule,
   reset,

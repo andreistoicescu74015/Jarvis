@@ -134,6 +134,7 @@ const app = createApp(adapter, {
     lifecycle,
     listGroups: () => adapter.listGroups(),
     send: (target, message) => adapter.send(target, message),
+    community: adapter.community,
     scheduler,
     // Canonicalize a named person for the access lists: a JID (e.g. from an @mention)
     // is resolved toward its phone form; a bare number becomes a phone JID. Matching
