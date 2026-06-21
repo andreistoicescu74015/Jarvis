@@ -63,7 +63,7 @@ test('adapter: learns identity pairs from every inbound key (even non-commands)'
   a.start({ onMessage: async () => {} });
   makeSocket.sockets[0].ev.emit('messages.upsert', {
     type: 'notify',
-    messages: [{ key: { remoteJid: 'G@g.us', participant: '111@lid', participantPn: '40712@s.whatsapp.net' }, message: { conversation: 'hello' } }],
+    messages: [{ key: { remoteJid: 'G@g.us', participant: '111@lid', participantAlt: '40712@s.whatsapp.net' }, message: { conversation: 'hello' } }],
   });
   await tick();
   assert.equal(learned.length, 1);
@@ -108,6 +108,21 @@ test('adapter: non-notify upserts are ignored', async () => {
   });
   await tick();
   assert.equal(received.length, 0);
+});
+
+test('adapter: a redelivered message (same key.id) is handled only once', async () => {
+  const makeSocket = fakeSocketFactory();
+  const received = [];
+  const a = createWhatsAppAdapter(opts({ makeSocket }));
+  a.start({ onMessage: async (m) => { received.push(m); } });
+
+  const dup = { key: { remoteJid: '9@s.whatsapp.net', id: 'dup1' }, message: { conversation: 'jarvis ping' } };
+  makeSocket.sockets[0].ev.emit('messages.upsert', { type: 'notify', messages: [dup] });
+  await tick();
+  makeSocket.sockets[0].ev.emit('messages.upsert', { type: 'notify', messages: [dup] }); // redelivered
+  await tick();
+
+  assert.equal(received.length, 1); // the duplicate key.id is dropped
 });
 
 test('adapter: send renders content and brackets it with presence updates', async () => {

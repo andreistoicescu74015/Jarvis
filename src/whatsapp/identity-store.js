@@ -6,9 +6,11 @@ import { nullLogger } from '../core/log.js';
  * Learn and persist LID <-> phone-number pairs so the same person can be matched
  * across both id spaces (v7 is LID-primary, but the owner is usually configured by
  * phone number). Pairs are learned lazily from message keys - in a group a v7 key
- * carries both `participant` (LID) and `participantPn` (PN) - and reused for owner
- * matching. Backed by the store; survives restarts. Identity is never used to grant
- * trust beyond owner/admin matching (crossover stays code-based).
+ * carries both `participant` (the addressing-mode JID, usually the LID) and
+ * `participantAlt` (its alternate form, the phone number); the legacy `participantPn`
+ * is accepted defensively. Reused for owner matching. Backed by the store; survives
+ * restarts. Identity is never used to grant trust beyond owner/admin matching
+ * (crossover stays code-based).
  *
  * @param {import('../store/index.js').Store} store
  * @param {{ namespace?: string, log?: import('../core/log.js').Logger }} [opts]
