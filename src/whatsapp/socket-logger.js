@@ -10,12 +10,20 @@ const HARMLESS_WARN = [
   /missing key from v0/i, // app-state sync key not available yet, then it gives up ("parking")
   /ignoring presence update/i, // presence ignored while the account has no profile name
 ];
+// Baileys logs a generic "stream errored out" at ERROR level before EVERY stream close - including the
+// normal 515 post-pairing restart and routine idle drops. The meaningful outcome (515 restart / 401 logout /
+// a fatal disconnect) is categorized and logged by the adapter's connection.update handler, so this generic
+// line is redundant churn; demote it to debug so the operator log shows only the real, categorized outcome.
+const HARMLESS_ERROR = [
+  /stream errored out/i,
+];
 
 /**
  * A minimal pino-compatible logger (Baileys' `ILogger`) backed by our own logger,
  * so we add no logging dependency. Baileys logs very verbosely; we forward only
  * `warn`/`error`/`fatal` to `log` and drop the rest (harmless app-state-sync warnings
- * are demoted to `debug`). `child()` returns self and `level` is a plain settable
+ * and the redundant "stream errored out" error are demoted to `debug`). `child()`
+ * returns self and `level` is a plain settable
  * property. It never throws.
  *
  * @param {import('../core/log.js').Logger} [log]
@@ -35,7 +43,11 @@ export function socketLogger(log = nullLogger, level = 'warn') {
       if (harmless(msg)) log.debug(`wa: ${msg}`);
       else log.warn(`wa: ${msg}`);
     },
-    error: (o, m) => log.error(`wa: ${text(o, m)}`),
+    error: (o, m) => {
+      const msg = text(o, m);
+      if (HARMLESS_ERROR.some((re) => re.test(msg))) log.debug(`wa: ${msg}`);
+      else log.error(`wa: ${msg}`);
+    },
     fatal: (o, m) => log.error(`wa: ${text(o, m)}`),
     child: () => self,
   };
