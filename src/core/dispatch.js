@@ -61,6 +61,10 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
         clearNamespace: (ns) => store.clearNamespace(ns), // drop a dissolved overlay's shared data
       })
     : null;
+  // Per-context opt-in for AI command translation. Off by default; the owner always has it, and
+  // `jarvis ai on` opens it to everyone else who may use the bot in that context (the `ai` command).
+  const aiGateStore = store ? store.scoped('ai-enabled') : null;
+  const aiEnabledIn = (context) => !!aiGateStore?.get(context);
 
   // First-owner lockdown: the moment an owner is established (OWNER_JID at startup, or `owner claim`),
   // lock Jarvis's DMs to them by enabling the private whitelist - a stranger can no longer DM the bot.
@@ -101,6 +105,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     const was = activation.deactivate(id);
     if (was) {
       if (access) access.clearContext(id); // tear down the group's lists with it
+      aiGateStore?.delete(id); // and its AI-translation opt-in (a deactivate is a full reset)
       if (links) links.unlink(id); // leave any link overlay (revert, or dissolve it if this splits the rest)
       if (store) {
         store.clearNamespace(`group:${id}`); // wipe the group's own data too - a deactivate is a full reset
@@ -210,7 +215,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     // The owner bypasses the lists everywhere; a group/community admin bypasses them in their own
     // (already-active) chat - admins always have access where Jarvis runs. The bootstrap `owner`
     // command stays exempt so the bot can never be locked out of ownership.
-    const exemptFromLists = isOwner || isAdmin || command === 'owner';
+    let exemptFromLists = isOwner || isAdmin || command === 'owner';
     if (access && !exemptFromLists && !access.passes('*', accessContext, sender)) {
       log.info('access deny (global)', { sender, chatId });
       return undefined;
@@ -225,12 +230,13 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     // Owner-only for now: AI is OFF by default and the owner is the exception (a `jarvis ai on/off`
     // toggle for others comes later). Best-effort - any failure falls back to the "unknown command" reply.
     let understood = '';
-    const aiAllowed = isOwner; // later: || aiEnabledFor(accessContext)
+    const aiAllowed = isOwner || aiEnabledIn(accessContext); // owner always; others where the owner opened it
     if (!cmd && ai && aiAllowed) {
       const request = rest ? `${command} ${rest}` : command;
       const resolved = await aiResolve(request, { level, isAdmin, isOwner });
       if (resolved) {
         ({ cmd, command, args, rest } = resolved);
+        exemptFromLists = isOwner || isAdmin || command === 'owner'; // re-evaluate for the command AI resolved to
         understood = `${b('Understood:')} ${code(`${prefix} ${resolved.line}`)}`;
         log.info('ai: translated a request', { to: resolved.line, sender });
       }
@@ -250,7 +256,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     // Declarative capability requirements: a command lists the ctx capabilities it needs
     // (e.g. `requires: ['scheduler']`). When one isn't wired on this platform/config, the
     // command is uniformly reported unavailable, instead of each command hand-rolling a guard.
-    const capable = { store, access, links, activation, scheduler, lifecycle, send, community };
+    const capable = { store, access, links, activation, scheduler, lifecycle, send, community, aiGate: aiGateStore };
     if (cmd.requires?.some((cap) => !capable[cap])) {
       return 'That command is unavailable here.';
     }
@@ -314,6 +320,15 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
             activateCommunity: (id, by = sender) => activation.activate(id, by),
             deactivateCommunity: (id) => activation.deactivate(id),
             list: () => activation.list(),
+          }
+        : undefined,
+      // AI-translation opt-in for this context (the `ai` command); owner is exempt from the gate.
+      aiGate: aiGateStore
+        ? {
+            isOn: () => aiEnabledIn(accessContext),
+            on: () => aiGateStore.set(accessContext, true),
+            off: () => aiGateStore.delete(accessContext),
+            available: !!ai,
           }
         : undefined,
       links: links
