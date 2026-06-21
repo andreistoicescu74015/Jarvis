@@ -9,6 +9,7 @@ import blacklist from '../src/commands/blacklist.js';
 import note from '../src/commands/note.js';
 import groups from '../src/commands/groups.js';
 import schedule from '../src/commands/schedule.js';
+import reset from '../src/commands/reset.js';
 
 const ping = { name: 'ping', summary: 'p', run: () => 'pong' };
 
@@ -166,5 +167,27 @@ test('ai dispatch: an unusable step in a chain is skipped; the valid steps still
   const out = toPlain(await handle({ text: 'jarvis fa ceva imposibil si apoi ping', sender: 'boss', level: 'group', chatId: 'g@g.us' }));
   assert.match(out, /Understood: jarvis ping/); // only the resolvable step is echoed and run
   assert.match(out, /pong/);
+  store.close();
+});
+
+test('ai dispatch: a destructive command is not auto-run from a translation - the user must type it', async () => {
+  const store = createStore({ path: ':memory:' });
+  let wiped = 0;
+  const ai = fakeAi({ command: 'reset', args: { scope: 'all' } });
+  const handle = createDispatcher(createRegistry([ping, reset]), { owner: 'boss', store, ai, lifecycle: { wipe: () => { wiped += 1; } } });
+  const out = toPlain(await handle({ text: 'jarvis sterge absolut tot', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(out, /Understood: jarvis reset all/); // it shows what it understood
+  assert.match(out, /type .*jarvis reset all.* yourself to confirm/i); // but asks the owner to type it
+  assert.equal(wiped, 0); // and does NOT execute it from a guess
+  store.close();
+});
+
+test('ai dispatch: typing a destructive command directly runs it (typing is the confirmation)', async () => {
+  const store = createStore({ path: ':memory:' });
+  let wiped = 0;
+  const handle = createDispatcher(createRegistry([ping, reset]), { owner: 'boss', store, lifecycle: { wipe: () => { wiped += 1; } } });
+  const out = toPlain(await handle({ text: 'jarvis reset all', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(out, /Wiping all data/i);
+  assert.equal(wiped, 1);
   store.close();
 });

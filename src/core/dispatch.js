@@ -385,6 +385,12 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
         const understood = `${b('Understood:')} ${chain.map((s) => code(`${prefix} ${s.line}`)).join(' ; ')}`;
         const outs = [];
         for (const step of chain) {
+          if (step.cmd.confirm) {
+            // A destructive command is never auto-run from a natural-language guess: the user has to
+            // type it, and typing it IS the confirmation (the typed path below runs it normally).
+            outs.push(`I won't run a destructive command from a guess - type ${code(`${prefix} ${step.line}`)} yourself to confirm.`);
+            continue;
+          }
           const out = await runOne(step.cmd, step.command, step.args, step.rest);
           if (out) outs.push(out);
         }
