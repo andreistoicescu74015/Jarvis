@@ -305,6 +305,18 @@ test('adapter: community.info is best-effort - a fetch error yields undefined, n
   assert.equal(await a.community.info('x@g.us'), undefined);
 });
 
+test('adapter: community.info does not cache an empty read - it retries until the backend recovers', async () => {
+  const makeSocket = fakeSocketFactory();
+  const a = createWhatsAppAdapter(opts({ makeSocket }));
+  a.start({ onMessage: async () => {} });
+  const s = makeSocket.sockets[0];
+  s.communityFetchLinkedGroups = async () => ({ linkedGroups: [] });
+  let attempt = 0;
+  s.communityMetadata = async (jid) => (++attempt === 1 ? {} : { id: jid, subject: 'Anul 2', size: 7 }); // first: id-less
+  assert.equal(await a.community.info('c@g.us'), undefined); // empty read -> NOT cached
+  assert.deepEqual(await a.community.info('c@g.us'), { id: 'c@g.us', name: 'Anul 2', subGroups: [], reach: 7 }); // retried -> real value
+});
+
 test('adapter: community.all shallow-lists the participating communities', async () => {
   const makeSocket = fakeSocketFactory();
   const a = createWhatsAppAdapter(opts({ makeSocket }));

@@ -39,14 +39,16 @@ async function manage(ctx, sub) {
   if (!id) {
     return `Run this inside a community, or name it: ${code(`jarvis community ${sub} <id>`)} (ids from ${code('jarvis groups')}).`;
   }
+  // Activation is a local KV write - never block it on the (network, best-effort) community read.
+  // The read only enriches the confirmation with the name + group count when it is available.
   const info = await ctx.community.info(id);
-  if (!info) return `No community found for ${code(esc(id))} (ids from ${code('jarvis groups')}).`;
-  const name = b(esc(info.name));
-  const n = info.subGroups.length;
+  const name = info ? b(esc(info.name)) : code(esc(id));
   if (sub === 'activate') {
-    return ctx.activation.activateCommunity(id, ctx.sender)
+    if (!ctx.activation.activateCommunity(id, ctx.sender)) return `${name} is already active.`;
+    const n = info?.subGroups.length;
+    return n != null
       ? `Activated Jarvis across ${name} - its ${n} group${n === 1 ? '' : 's'} are now on.`
-      : `${name} is already active.`;
+      : `Activated Jarvis across ${name}.`;
   }
   return ctx.activation.deactivateCommunity(id)
     ? `Deactivated Jarvis across ${name}. Groups you activated individually stay on.`
