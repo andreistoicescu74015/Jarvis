@@ -20,6 +20,10 @@ export default {
     'the current group; "groups activate <id>" one named by id (copy it from the list); ' +
     '"groups deactivate [<id>]" turns it back off. Activation survives restarts.',
   scope: { owner: true },
+  params: [
+    { name: 'action', enum: ['activate', 'deactivate'], desc: 'turn the bot on/off in a group, or omit to list groups' },
+    { name: 'id', desc: 'the group id (omit for the current group)' },
+  ],
   run: async (ctx) => {
     const sub = (ctx.args[0] ?? '').toLowerCase();
     if (sub === 'activate' || sub === 'deactivate') return manage(ctx, sub);

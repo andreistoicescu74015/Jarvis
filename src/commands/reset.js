@@ -18,6 +18,7 @@ export default {
     'schedules, links, access lists, activations - and restarts with a clean store, keeping the WhatsApp ' +
     'login (it is NOT a logout). Owner-only and irreversible.',
   scope: { owner: true },
+  params: [{ name: 'scope', enum: ['all'], desc: '"all" wipes every context and restarts clean; omit to reset just this chat' }],
   run: (ctx) => {
     const sub = (ctx.args[0] ?? '').toLowerCase();
     if (sub === 'all') {
