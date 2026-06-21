@@ -167,9 +167,13 @@ export function createWhatsAppAdapter({
         await s.updateProfileName(profileName);
         log.info('wa: set profile name (account had none)', { name: profileName });
       } catch (err) {
-        log.warn('wa: could not set the profile name - set one on the account if receipts stay one-tick', {
-          error: err?.message ?? String(err),
-        });
+        const error = err?.message ?? String(err);
+        // "App state key not present" is the expected fresh-pairing case (app-state not synced yet); it
+        // self-resolves or is handled by naming the account, so keep it at debug. Surface real failures.
+        log[/app state key/i.test(error) ? 'debug' : 'warn'](
+          'wa: could not set the profile name - set one on the account if receipts stay one-tick',
+          { error },
+        );
       }
     }
     if (stopped || sock !== s) return;
@@ -237,12 +241,20 @@ export function createWhatsAppAdapter({
 
     const statusCode = lastDisconnect?.error?.output?.statusCode;
     const action = disconnectAction(statusCode);
-    log.warn('wa: connection closed', { statusCode, action, attempts });
+    // Routine churn (the post-pairing 515 restart, idle 428 reconnects) is expected - keep it at debug so
+    // the operator log stays signal; a persistent flap still surfaces via the reconnect-exhaustion error.
+    if (action === 'restart' || action === 'reconnect') log.debug('wa: connection closed', { statusCode, action, attempts });
 
     if (action === 'logout') {
       authState.clear();
       stopped = true;
-      log.warn('wa: logged out - creds wiped, not reconnecting');
+      // A logout BEFORE we ever connected is WhatsApp rejecting the just-paired session (a known
+      // companion-pairing flakiness), not a real unlink. Both wipe creds and re-pair; say which happened.
+      if (connectedAt) {
+        log.warn('wa: logged out - device unlinked; creds wiped, a fresh QR will be shown to re-pair');
+      } else {
+        log.warn('wa: pairing rejected by WhatsApp (device removed before connecting) - creds wiped; re-scan the fresh QR. If it keeps happening, remove old linked devices on your phone, then pair once.');
+      }
       onLogout();
       return;
     }
