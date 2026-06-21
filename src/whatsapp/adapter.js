@@ -99,6 +99,20 @@ export function createWhatsAppAdapter({
   const groupCache = new Map();
   /** @type {Map<string, { value: any, at: number }>} community read cache with TTL. */
   const communityCache = new Map();
+  // Message-id de-dup. Baileys can redeliver the same message (decryption / phone retries) and
+  // WhatsApp can re-push a key.id, so without this a redelivered ADDRESSED command would run twice
+  // (activate, schedule, owner claim, an AI translation...). Track recently-seen ids in a bounded,
+  // insertion-ordered set, evicting the oldest past the cap. In-memory: it survives reconnects and
+  // resets on restart, where the offline-backlog filter already covers old messages.
+  const seenIds = new Set();
+  const SEEN_IDS_MAX = 1000;
+  function firstSeen(id) {
+    if (!id) return true; // nothing to dedup on -> treat as new, never drop a real message
+    if (seenIds.has(id)) return false;
+    seenIds.add(id);
+    if (seenIds.size > SEEN_IDS_MAX) seenIds.delete(seenIds.values().next().value); // evict oldest
+    return true;
+  }
 
   async function groupMetadata(jid) {
     const cached = groupCache.get(jid);
@@ -295,6 +309,10 @@ export function createWhatsAppAdapter({
         // we came online. Messages without a timestamp can't be aged, so they pass.
         const ts = timestampMs(wa);
         if (connectedAt && ts && ts < connectedAt - offlineGraceMs) continue;
+
+        // Drop a message we've already processed: Baileys/WhatsApp can redeliver the same key.id,
+        // and a redelivered command must never run twice.
+        if (!firstSeen(wa?.key?.id)) continue;
 
         learn(wa.key); // lazily record LID <-> phone pairs from the key
 
