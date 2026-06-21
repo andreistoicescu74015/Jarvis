@@ -14,6 +14,10 @@ export default {
     'Notes are scoped to this conversation. Subcommands: add <text> (append a note), ' +
     'list (show all), get <n> (show one), del <n> (remove one), clear (remove all at once).',
   requires: ['store'],
+  params: [
+    { name: 'action', enum: ['add', 'list', 'get', 'del', 'clear'], required: true, desc: 'what to do' },
+    { name: 'text', variadic: true, desc: 'the note text (for add), or the note number (for get/del)' },
+  ],
   run: (ctx) => {
     const sub = (ctx.args[0] ?? '').toLowerCase();
     const rest = ctx.args.slice(1);

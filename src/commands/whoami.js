@@ -18,6 +18,7 @@ export default {
     'value to set as OWNER_JID. "whoami @user" or "whoami <number>" resolves another person to that id, ' +
     'handy when deciding who may use the bot in private (then "jarvis whitelist * add ...").',
   scope: { owner: true },
+  params: [{ name: 'person', desc: 'an @mention or phone number to look up; omit to show yourself' }],
   run: (ctx) => {
     // Owner-only command. With an argument, resolve an @mention or typed number to the id Jarvis
     // stores and matches against; with none, just show the owner themselves.

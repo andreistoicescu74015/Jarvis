@@ -14,6 +14,7 @@ export default {
   man:
     'Show the manual for a command: its summary, usage, who may use it, and any extra ' +
     'detail. Example: "jarvis man whitelist". Use "jarvis help" for the full list.',
+  params: [{ name: 'command', desc: 'the command to explain, e.g. "whitelist" (omit to show usage)' }],
   run: (ctx) => {
     const name = (ctx.args[0] ?? '').toLowerCase();
     if (!name) return `Usage: ${code('jarvis man <command>')}. Try ${code('jarvis help')} for the list.`;

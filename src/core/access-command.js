@@ -40,6 +40,11 @@ export function makeAccessCommand(list) {
       `is never affected; the owner command cannot be restricted, and the bot cannot be added.`,
     scope: { ownerOrAdmin: true },
     requires: ['access'],
+    params: [
+      { name: 'target', desc: 'a command name, or * for the whole bot' },
+      { name: 'verb', enum: ['add', 'remove', 'enable', 'disable', 'clear'], desc: 'the action' },
+      { name: 'person', desc: '@mention, phone number, or * for everyone (for add/remove)' },
+    ],
     run: (ctx) => run(ctx, list),
   };
 }

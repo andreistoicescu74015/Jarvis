@@ -24,6 +24,10 @@ export default {
     'Activating a community does not change any group\'s access lists.',
   scope: { owner: true },
   requires: ['community'],
+  params: [
+    { name: 'action', enum: ['activate', 'deactivate'], desc: 'turn the bot on/off across a whole community, or omit to show it' },
+    { name: 'id', desc: 'the community id (omit for the current one)' },
+  ],
   run: async (ctx) => {
     const sub = (ctx.args[0] ?? '').toLowerCase();
     if (sub === 'activate' || sub === 'deactivate') return manage(ctx, sub);

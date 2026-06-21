@@ -36,6 +36,10 @@ export default {
     'own data. Access lists are NOT shared - only data. "link" alone shows the status.',
   scope: { admin: true },
   requires: ['links'],
+  params: [
+    { name: 'action', enum: ['new', 'accept', 'remove'], desc: 'create a link code, accept one, remove the link, or omit to show status' },
+    { name: 'code', desc: 'the one-time link code (for accept)' },
+  ],
   run: (ctx) => {
     if (ctx.level === 'private') return 'Linking works only between groups.';
     const sub = (ctx.args[0] ?? '').toLowerCase();
