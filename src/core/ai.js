@@ -15,10 +15,10 @@ import { nullLogger } from './log.js';
 const SYSTEM_PROMPT = [
   'You are the command interpreter for a WhatsApp assistant named Jarvis.',
   'A user has addressed Jarvis in natural language (any language, including Romanian).',
-  'Translate their request into exactly ONE of the available command tools, called with the right arguments.',
+  'Translate their request into one or more of the available command tools, called with the right arguments.',
   'Rules:',
-  '- Call a tool ONLY when the request clearly maps to one. If nothing fits, do not call any tool.',
-  '- Choose the single best command. Fill arguments precisely; do not invent arguments the user did not imply.',
+  '- Map the request to tool calls. A multi-step request ("add everyone, then enable it") becomes several tool calls, in the order they should run. If nothing fits, call no tool.',
+  '- Use ONLY the tools offered - they are exactly what is possible in this chat. Do not invent commands, or arguments the user did not imply.',
   '- "everyone" / "all" / "toata lumea" means the literal "*". Keep names, phone numbers, mentions and ids verbatim.',
 ].join('\n');
 
@@ -32,8 +32,9 @@ const SYSTEM_PROMPT = [
  *   timeoutMs?: number,
  *   system?: string,
  * }} [opts]
- * @returns {{ translate: (input: { text: string, tools: object[] }) => Promise<{ command: string, args: object } | null> } | null}
- *   Null when no token is configured - AI is simply off and the caller stays deterministic-only.
+ * @returns {{ translate: (input: { text: string, tools: object[] }) => Promise<Array<{ command: string, args: object }> | null> } | null}
+ *   The client is null when no token is configured - AI is simply off and the caller stays
+ *   deterministic-only. `translate` resolves to the model's tool calls (a chain, in order) or null.
  */
 export function createAiClient({
   token = '',
@@ -71,16 +72,22 @@ export function createAiClient({
         return null;
       }
       const data = await res.json();
-      const call = data?.choices?.[0]?.message?.tool_calls?.[0];
-      if (!call?.function?.name) return null; // model called no tool -> no command matched
-      let args = {};
-      try {
-        const parsed = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-        if (parsed && typeof parsed === 'object') args = parsed;
-      } catch {
-        args = {}; // a malformed argument blob still yields a valid (argument-less) proposal
+      const calls = data?.choices?.[0]?.message?.tool_calls;
+      if (!Array.isArray(calls) || !calls.length) return null; // model called no tool -> no command matched
+      const proposals = [];
+      for (const call of calls) {
+        const name = call?.function?.name;
+        if (!name) continue;
+        let args = {};
+        try {
+          const parsed = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+          if (parsed && typeof parsed === 'object') args = parsed;
+        } catch {
+          args = {}; // a malformed argument blob still yields a valid (argument-less) proposal
+        }
+        proposals.push({ command: name, args });
       }
-      return { command: call.function.name, args };
+      return proposals.length ? proposals : null;
     } catch (err) {
       log.warn('ai: translation error', { error: err?.message ?? String(err) });
       return null;

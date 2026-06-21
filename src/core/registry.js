@@ -24,6 +24,7 @@
  * @property {string} [man]                      Optional long-form help, shown by `man`.
  * @property {Param[]} [params]                  Ordered parameter schema - the AI-tools bridge (ADR-0005); see Param above.
  * @property {string[]} [requires]               ctx capabilities the command needs (e.g. ['store']); the dispatcher reports it unavailable when one is missing.
+ * @property {boolean} [confirm]                 Destructive: the AI translator never auto-runs it - the user must type it (typing is the confirmation).
  * @property {import('./scope.js').Scope} [scope] Optional permission requirements.
  * @property {(ctx: import('./dispatch.js').Ctx) => unknown} run
  *

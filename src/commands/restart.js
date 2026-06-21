@@ -4,6 +4,7 @@ export default {
   summary: 'Owner: restart Jarvis (needs a process supervisor to come back up).',
   usage: 'jarvis restart',
   scope: { owner: true },
+  confirm: true, // disruptive - never auto-run from an AI translation; the user must type it
   run: (ctx) => {
     if (typeof ctx.lifecycle?.restart !== 'function') return 'Not available here.';
     ctx.lifecycle.restart();
