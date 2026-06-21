@@ -103,3 +103,35 @@ test('ai dispatch: with no AI client wired, an unknown command is just unknown',
   assert.match(out, /Unknown command/);
   store.close();
 });
+
+test('ai dispatch: a non-owner gets AI where the owner turned it on for the chat', async () => {
+  const store = createStore({ path: ':memory:' });
+  store.scoped('ai-enabled').set('g@g.us', true); // owner opened AI here (via `jarvis ai on`)
+  const ai = fakeAi({ command: 'ping', args: {} });
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai });
+  const out = toPlain(await handle({ text: 'jarvis salut bot', sender: 'u', level: 'group', chatId: 'g@g.us' }));
+  assert.match(out, /Understood: jarvis ping/);
+  assert.match(out, /pong/);
+  assert.equal(ai.calls.length, 1);
+  store.close();
+});
+
+test('ai dispatch: a non-owner gets no AI where it is off (the default)', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi({ command: 'ping', args: {} });
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai });
+  const out = toPlain(await handle({ text: 'jarvis salut bot', sender: 'u', level: 'group', chatId: 'g@g.us' }));
+  assert.match(out, /Unknown command/);
+  assert.equal(ai.calls.length, 0); // AI not consulted for a non-owner where it is off
+  store.close();
+});
+
+test('ai dispatch: AI cannot escalate - an owner-only command proposed for a non-owner is still refused', async () => {
+  const store = createStore({ path: ':memory:' });
+  store.scoped('ai-enabled').set('g@g.us', true);
+  const ai = fakeAi({ command: 'groups', args: { action: 'deactivate' } }); // owner-only command
+  const handle = createDispatcher(createRegistry([ping, groups]), { owner: 'boss', store, ai, listGroups: async () => [] });
+  const out = toPlain(await handle({ text: 'jarvis opreste grupul', sender: 'u', level: 'group', chatId: 'g@g.us' }));
+  assert.match(out, /Not allowed/i); // the scope guard refuses it even though AI proposed it
+  store.close();
+});
