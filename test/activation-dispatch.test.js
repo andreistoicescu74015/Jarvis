@@ -136,6 +136,16 @@ test('activation umbrella: the owner addressing the announcement group activates
   store.close();
 });
 
+test('activation umbrella: addressing the announcement group is LEAN - it does not lock the group admins-only', async () => {
+  const { store, handle } = setup();
+  // the owner addresses the announcement group (own id == community id) -> lean umbrella activation
+  await handle({ text: 'jarvis ping', sender: 'boss', level: 'community', chatId: 'c@g.us', community: 'c@g.us' });
+  // unlike a normal group activation (admins-only), the announcement group stays open: a non-admin passes
+  const member = { text: 'jarvis ping', sender: 'u', level: 'community', chatId: 'c@g.us', community: 'c@g.us', isAdmin: false };
+  assert.equal(toPlain(await handle(member)), 'pong');
+  store.close();
+});
+
 test('activation: deactivating a group unlinks it and wipes its own data', async () => {
   const store = createStore({ path: ':memory:' });
   const activation = createActivation(store);

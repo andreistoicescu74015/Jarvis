@@ -19,6 +19,17 @@ test('groups: lists the known groups with ids, sorted by name', async () => {
   assert.match(out, /- Friends 456-2@g\.us\n- Study 123-1@g\.us/); // alphabetical
 });
 
+test('groups: shows member counts when the platform reports them', async () => {
+  const listGroups = async () => [
+    { id: 'a@g.us', name: 'Alpha', size: 88 },
+    { id: 'b@g.us', name: 'Beta' }, // no size reported
+  ];
+  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', listGroups });
+  const out = toPlain(await handle({ text: 'jarvis groups', sender: 'boss', level: 'private' }));
+  assert.match(out, /Alpha a@g\.us \(88\)/); // count shown
+  assert.match(out, /Beta b@g\.us(?:\n|$)/); // Beta has no count appended
+});
+
 test('groups: is owner-only', async () => {
   const handle = createDispatcher(createRegistry([groups]), {
     owner: 'boss',

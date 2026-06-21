@@ -319,6 +319,22 @@ test('adapter: community.all shallow-lists the participating communities', async
   ]);
 });
 
+test('adapter: listGroups includes member counts when WhatsApp reports them', async () => {
+  const makeSocket = fakeSocketFactory();
+  const a = createWhatsAppAdapter(opts({ makeSocket }));
+  a.start({ onMessage: async () => {} });
+  makeSocket.sockets[0].groupFetchAllParticipating = async () => ({
+    'a@g.us': { id: 'a@g.us', subject: 'A', size: 88 }, // size reported directly
+    'b@g.us': { id: 'b@g.us', subject: 'B', participants: [{}, {}, {}] }, // counted from participants
+    'c@g.us': { id: 'c@g.us', subject: 'C' }, // no size info -> field omitted
+  });
+  assert.deepEqual(await a.listGroups(), [
+    { id: 'a@g.us', name: 'A', community: undefined, isCommunity: false, size: 88 },
+    { id: 'b@g.us', name: 'B', community: undefined, isCommunity: false, size: 3 },
+    { id: 'c@g.us', name: 'C', community: undefined, isCommunity: false },
+  ]);
+});
+
 test('adapter: communityOf resolves a chat parent community from group metadata', async () => {
   const makeSocket = fakeSocketFactory();
   const a = createWhatsAppAdapter(opts({ makeSocket }));

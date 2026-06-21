@@ -167,9 +167,16 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       // it, then proceeds. `groups`/`community` are the exception - they activate explicitly, so their
       // own confirmation reads cleanly and is not pre-empted here.
       if (command !== 'groups' && command !== 'community') {
-        await activateGroup(chatId, sender);
-        if (!command) return undefined; // bare prefix: the activation notice is the reply (no "Try help")
-        // else fall through and run the command in the now-active group
+        if (level === 'community' && communityId === chatId) {
+          // The announcement group's id IS the community id: addressing it activates the WHOLE
+          // community leanly (umbrella, gate-only - no admins-only reset, no announce), consistent
+          // with `community activate`. No announce, so a bare prefix falls through to "Try help".
+          activation.activate(chatId, sender);
+        } else {
+          // A normal group or a community sub-group: the usual admins-only reset + announce.
+          await activateGroup(chatId, sender);
+          if (!command) return undefined; // bare prefix: the announce IS the reply (no "Try help")
+        }
       }
     }
 

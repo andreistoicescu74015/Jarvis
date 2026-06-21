@@ -330,14 +330,18 @@ export function createWhatsAppAdapter({
       if (!sock || stopped) return [];
       try {
         const all = await sock.groupFetchAllParticipating();
-        return Object.values(all || {}).map((g) => ({
-          id: g.id,
-          name: g.subject || g.id,
-          // Community wiring: a sub-group carries `linkedParent` (its community's announcement group);
-          // the announcement group itself is flagged `isCommunity`. Either lets the list group them.
-          community: g.linkedParent || (g.isCommunity ? g.id : undefined),
-          isCommunity: !!g.isCommunity,
-        }));
+        return Object.values(all || {}).map((g) => {
+          const size = Number.isFinite(g.size) ? g.size : Array.isArray(g.participants) ? g.participants.length : undefined;
+          return {
+            id: g.id,
+            name: g.subject || g.id,
+            // Community wiring: a sub-group carries `linkedParent` (its community's announcement group);
+            // the announcement group itself is flagged `isCommunity`. Either lets the list group them.
+            community: g.linkedParent || (g.isCommunity ? g.id : undefined),
+            isCommunity: !!g.isCommunity,
+            ...(size !== undefined ? { size } : {}), // member count, when WhatsApp reports it
+          };
+        });
       } catch (err) {
         log.error('wa: failed to list groups', { error: err?.message ?? String(err) });
         return [];
