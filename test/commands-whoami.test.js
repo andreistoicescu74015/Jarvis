@@ -5,9 +5,11 @@ import { createDispatcher } from '../src/core/dispatch.js';
 import { toPlain } from '../src/core/format.js';
 import whoami from '../src/commands/whoami.js';
 
+// whoami is owner-only, so these self-identity checks make the sender the owner.
 const handle = (over = {}, opts = {}) => {
-  const dispatch = createDispatcher(createRegistry([whoami]), opts);
-  return dispatch({ text: 'jarvis whoami', sender: 'x', level: 'private', ...over }).then(toPlain);
+  const sender = over.sender ?? 'boss';
+  const dispatch = createDispatcher(createRegistry([whoami]), { owner: sender, ...opts });
+  return dispatch({ text: 'jarvis whoami', sender, level: 'private', ...over }).then(toPlain);
 };
 
 test('whoami: shows a phone number for a WhatsApp user, not a raw jid', async () => {
@@ -22,11 +24,11 @@ test('whoami: shows the bare id for a LID, and the raw value when already friend
 });
 
 test('whoami: tags the owner and admin flags', async () => {
-  const out = await handle({ sender: 'boss', level: 'group', isAdmin: true }, { owner: 'boss' });
+  const out = await handle({ sender: 'boss', level: 'group', isAdmin: true });
   assert.match(out, /\(owner, admin\)/);
 });
 
-test('whoami: the owner can look a person up by number (resolved to the canonical id)', async () => {
+test('whoami: the owner looks a person up by number (resolved to the canonical id)', async () => {
   const resolveUser = (t) => {
     const d = String(t).replace(/[^0-9]/g, '');
     return d ? `${d}@s.whatsapp.net` : String(t);
@@ -35,12 +37,16 @@ test('whoami: the owner can look a person up by number (resolved to the canonica
   const out = toPlain(await dispatch({ text: 'jarvis whoami 40712345678', sender: 'boss', level: 'private', chatId: 'dm' }));
   assert.match(out, /\+40712345678/); // friendly form
   assert.match(out, /40712345678@s\.whatsapp\.net/); // the canonical id to whitelist
-  // a non-owner with an argument just sees themselves - the lookup is owner-only
-  assert.match(toPlain(await dispatch({ text: 'jarvis whoami 40712345678', sender: 'rando', level: 'private', chatId: 'dm' })), /You are/);
 });
 
-test('whoami: the owner can look a person up by @mention', async () => {
+test('whoami: the owner looks a person up by @mention', async () => {
   const dispatch = createDispatcher(createRegistry([whoami]), { owner: 'boss' });
   const out = toPlain(await dispatch({ text: 'jarvis whoami @x', sender: 'boss', level: 'group', mentionedJid: ['55@s.whatsapp.net'] }));
   assert.match(out, /55@s\.whatsapp\.net/);
+});
+
+test('whoami: is owner-only - a non-owner is not allowed', async () => {
+  const dispatch = createDispatcher(createRegistry([whoami]), { owner: 'boss' });
+  const out = await dispatch({ text: 'jarvis whoami', sender: 'rando', level: 'private', chatId: 'dm' });
+  assert.match(out, /Not allowed: owner only/);
 });
