@@ -29,7 +29,11 @@ const whenError = (r) =>
     ? 'That time is already past.'
     : r.reason === 'empty-text'
       ? 'The message is empty.'
-      : 'Bad time. Use "in 2h", "at 2026-06-18 09:00", or "every 1d" (units: m, h, d).';
+      : r.reason === 'too-long'
+        ? `That message is too long (max ${r.max} characters).`
+        : r.reason === 'too-many'
+          ? `Too many scheduled messages here (max ${r.max}); cancel some first.`
+          : 'Bad time. Use "in 2h", "at 2026-06-18 09:00", or "every 1d" (units: m, h, d).';
 
 /**
  * Schedule a message for the bot to post later - once or repeating - without an inbound

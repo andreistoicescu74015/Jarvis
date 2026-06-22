@@ -58,10 +58,10 @@ export function createAccessPolicy(store, { match = sameUser, namespace = 'acces
   function passes(target, context, user) {
     const rec = read(target, context);
     if (rec.active === 'public') return true;
-    const hit = hits(user, rec[rec.active]);
-    if (rec.active === 'whitelist') return hit; // only listed people pass
-    if (rec.active === 'blacklist') return !hit; // everyone but the listed pass
-    return true;
+    if (rec.active === 'whitelist') return hits(user, rec.whitelist); // only listed people pass
+    if (rec.active === 'blacklist') return !hits(user, rec.blacklist); // everyone but the listed pass
+    return false; // unknown mode -> fail closed. Unreachable with valid data (modes are public/whitelist/
+    // blacklist); a corrupt or hand-edited record denies (and never throws) rather than opening up.
   }
 
   // --- mutators: the dispatcher exposes these to the owner-only list commands ---

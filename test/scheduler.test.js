@@ -37,6 +37,18 @@ test('scheduler: add returns an id; list is per-chat, soonest first', () => {
   assert.equal(s.list('B').length, 1); // bound per chat
 });
 
+test('scheduler: add rejects an over-long message and an over-full chat (bounded storage)', () => {
+  const s = createScheduler(createStore({ path: ':memory:' }), { now: () => 0 });
+  const long = s.add({ chatId: 'A', when: 'in 1h', text: 'x'.repeat(1001) });
+  assert.equal(long.ok, false);
+  assert.equal(long.reason, 'too-long');
+  for (let n = 0; n < 100; n++) assert.equal(s.add({ chatId: 'B', when: 'in 1h', text: `m${n}` }).ok, true);
+  const overflow = s.add({ chatId: 'B', when: 'in 1h', text: 'one too many' });
+  assert.equal(overflow.ok, false);
+  assert.equal(overflow.reason, 'too-many');
+  assert.equal(s.list('B').length, 100); // capped, not 101
+});
+
 test('scheduler: a one-time job fires once at its time, then is gone', async () => {
   let now = 0;
   const s = createScheduler(createStore({ path: ':memory:' }), { now: () => now });
