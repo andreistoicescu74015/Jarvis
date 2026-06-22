@@ -14,13 +14,13 @@ function setup(opts = {}) {
   return { store, handle };
 }
 
-test('ai command: the owner turns translation on and off for a chat; status reflects it', async () => {
-  const { store, handle } = setup({ ai: { translate: async () => null } }); // a provider is wired (available)
+test('ai command: the owner turns chatbot mode on and off for a chat; status reflects it', async () => {
+  const { store, handle } = setup({ ai: { translate: async () => ({ commands: [], answer: null }) } }); // a provider is wired (available)
   const chat = { sender: 'boss', level: 'group', chatId: 'g@g.us' };
-  assert.match(toPlain(await handle({ ...chat, text: 'jarvis ai' })), /translation is off here/i);
-  assert.match(toPlain(await handle({ ...chat, text: 'jarvis ai on' })), /translation is on/i);
-  assert.match(toPlain(await handle({ ...chat, text: 'jarvis ai' })), /translation is on here/i);
-  assert.match(toPlain(await handle({ ...chat, text: 'jarvis ai off' })), /translation is off/i);
+  assert.match(toPlain(await handle({ ...chat, text: 'jarvis ai' })), /Chatbot mode is off here/i);
+  assert.match(toPlain(await handle({ ...chat, text: 'jarvis ai on' })), /Chatbot mode is on/i);
+  assert.match(toPlain(await handle({ ...chat, text: 'jarvis ai' })), /Chatbot mode is on here/i);
+  assert.match(toPlain(await handle({ ...chat, text: 'jarvis ai off' })), /Chatbot mode is off/i);
   store.close();
 });
 
@@ -38,7 +38,7 @@ test('ai command: notes when no AI provider is configured', async () => {
   store.close();
 });
 
-test('ai command: the per-chat opt-in is isolated to its own context', async () => {
+test('ai command: the per-chat chatbot opt-in is isolated to its own context', async () => {
   const { store, handle } = setup();
   await handle({ text: 'jarvis ai on', sender: 'boss', level: 'group', chatId: 'gA@g.us' });
   assert.match(toPlain(await handle({ text: 'jarvis ai', sender: 'boss', level: 'group', chatId: 'gA@g.us' })), /on here/i);

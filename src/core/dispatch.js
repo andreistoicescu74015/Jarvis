@@ -66,8 +66,9 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
         clearNamespace: (ns) => store.clearNamespace(ns), // drop a dissolved overlay's shared data
       })
     : null;
-  // Per-context opt-in for AI command translation. Off by default; the owner always has it, and
-  // `jarvis ai on` opens it to everyone else who may use the bot in that context (the `ai` command).
+  // Per-context CHATBOT mode (the `ai` command). Command translation is ALWAYS on; this gate only
+  // controls whether Jarvis also answers general questions conversationally when nothing maps to a
+  // command. Off by default; the owner opens it per chat with `jarvis ai on`.
   const aiGateStore = store ? store.scoped('ai-enabled') : null;
   const aiEnabledIn = (context) => !!aiGateStore?.get(context);
 
@@ -120,24 +121,24 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     return was;
   }
 
-  // Translate a natural-language request into a CHAIN of one or more commands via the AI client
-  // (best-effort). The model may emit several tool calls for a multi-step request ("add everyone, then
-  // enable it") - each is resolved to a canonical command line ready to dispatch. Returns [] when AI is
-  // off, the model declines, or every proposal is unusable. Each resolved command still runs through
-  // every guard below, so AI can never reach a command the caller could not have typed by hand.
-  async function aiResolveChain(request, scopeCtx) {
+  // Translate a natural-language request via the AI client (best-effort). Returns the resolved command
+  // CHAIN (each step a canonical command line ready to dispatch through every guard) and, in chat mode,
+  // a plain-text ANSWER the model wrote when nothing mapped. Either may be empty/null; both are when AI
+  // is off or the call fails. Each resolved command still runs through every guard below, so AI can
+  // never reach a command the caller could not have typed by hand.
+  async function aiResolve(request, scopeCtx, chat) {
     const tools = toolCatalog(registry.all(), scopeCtx);
-    if (!tools.length) return [];
-    let proposals;
+    if (!tools.length) return { chain: [], answer: null };
+    let result;
     try {
       // The translator is best-effort and must never crash the deterministic bot (ADR-0003): the
       // production client swallows its own errors, but an injected/alternate one might throw - isolate it.
-      proposals = await ai.translate({ text: request, tools });
+      result = await ai.translate({ text: request, tools, chat });
     } catch (err) {
       log.error('ai: translation threw', { error: err?.message ?? String(err) });
-      return [];
+      return { chain: [], answer: null };
     }
-    if (!Array.isArray(proposals)) return [];
+    const proposals = Array.isArray(result?.commands) ? result.commands : [];
     const chain = [];
     for (const p of proposals) {
       let line;
@@ -152,9 +153,9 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     }
     if (chain.length > AI_MAX_CHAIN) {
       log.info('ai: truncating an over-long command chain', { proposed: chain.length, cap: AI_MAX_CHAIN });
-      return chain.slice(0, AI_MAX_CHAIN);
+      return { chain: chain.slice(0, AI_MAX_CHAIN), answer: null };
     }
-    return chain;
+    return { chain, answer: result?.answer ?? null };
   }
 
   return async function handle(msg) {
@@ -286,13 +287,14 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       if (!scoped.ok) return `Not allowed: ${scoped.reason}.`;
       if (cmd.requires?.some((cap) => !capable[cap])) return 'That command is unavailable here.';
 
-      // From an AI translation (aiLine set): a destructive command - or a destructive SUBCOMMAND (e.g.
-      // `note clear`, `groups deactivate`) - is never auto-run from a guess. Checked AFTER the access/
-      // scope guards, so a command the caller could not run anyway reports that, not a misleading
-      // "type it". Typing the command takes the normal path below (no aiLine), where typing IS consent.
+      // From an AI translation (aiLine set): a SENSITIVE command - one that affects the bot itself
+      // (owner/reset/shutdown/restart/logout) or destroys data (a destructive SUBCOMMAND like
+      // `note clear`, `groups deactivate`) - is only ever suggested, never auto-run from a guess.
+      // Checked AFTER the access/scope guards, so a command the caller could not run anyway reports
+      // that, not a misleading suggestion. Typing it takes the normal path below (no aiLine) and runs.
       if (aiLine) {
         const needsConfirm = typeof cmd.confirm === 'function' ? cmd.confirm(args) : !!cmd.confirm;
-        if (needsConfirm) return `I won't run a destructive command from a guess - type ${code(`${prefix} ${aiLine}`)} yourself to confirm.`;
+        if (needsConfirm) return `I won't auto-run a sensitive command from a guess - type ${code(`${prefix} ${aiLine}`)} yourself to confirm.`;
       }
 
       const replies = [];
@@ -397,27 +399,31 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     const known = registry.get(command);
     if (known) return runOne(known, command, args, rest); // a known command: run it directly
 
-    // Not a known command, but the user addressed Jarvis. If a translator is wired and allowed here,
-    // ask the model to map the natural-language request onto ONE OR MORE commands (a chain), then run
-    // each through runOne - the model only proposes; every guard still applies per step. AI is off by
-    // default and owner-gated; `jarvis ai on` opens it to others per chat. Best-effort: on no match it
-    // falls back to the normal unknown-command reply. The reply leads with the command(s) it
-    // understood, so the user sees (and learns) exactly what ran.
-    if (ai && (isOwner || aiEnabledIn(accessContext))) {
+    // Not a known command, but the user addressed Jarvis. Command TRANSLATION is always on (best-effort):
+    // map the natural-language request onto one or more commands (a chain) and run each through runOne -
+    // the model only proposes; every guard applies per step, and a sensitive command is suggested, not
+    // auto-run. The access gate above already silenced anyone not allowed here, so this never runs for
+    // them. When nothing maps and the owner has turned on chatbot mode (`jarvis ai on`), the model's own
+    // answer is returned; otherwise a friendly nudge toward `help`. The reply leads with the command(s)
+    // it understood, so the user sees (and learns) exactly what ran.
+    if (ai) {
       const request = rest ? `${command} ${rest}` : command;
-      const chain = await aiResolveChain(request, { level, isAdmin, isOwner });
+      const chatOn = aiEnabledIn(accessContext); // `ai on` => also answer general questions here
+      const { chain, answer } = await aiResolve(request, { level, isAdmin, isOwner }, chatOn);
       if (chain.length) {
         log.info('ai: translated a request', { to: chain.map((s) => s.line), sender });
         const understood = `${b('Understood:')} ${chain.map((s) => code(`${prefix} ${s.line}`)).join(' ; ')}`;
         const outs = [];
         for (const step of chain) {
-          // Pass step.line so runOne can apply the destructive-command guard (after its own access/
-          // scope checks) and, when it blocks, tell the user exactly what to type to confirm.
+          // Pass step.line so runOne can apply the sensitive-command guard (after its own access/scope
+          // checks) and, when it blocks, tell the user exactly what to type to run it.
           const out = await runOne(step.cmd, step.command, step.args, step.rest, step.line);
           if (out) outs.push(out);
         }
         return [understood, ...outs].join('\n');
       }
+      if (chatOn && answer) return esc(answer); // chatbot mode: a general, conversational reply
+      return `I didn't catch a command in that. Try ${code(`${prefix} help`)} to see what I can do.`;
     }
     return `Unknown command ${code(esc(command))}. Try ${code(`${prefix} help`)}.`;
   };

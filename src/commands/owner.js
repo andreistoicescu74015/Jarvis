@@ -16,6 +16,9 @@ export default {
     'Bare "jarvis owner" shows who owns the bot (or that no one does yet). "claim" takes ' +
     'a free owner slot; "resign" gives it up. The owner can also be set via OWNER_JID, in ' +
     'which case it cannot resign from chat.',
+  // Sensitive (it changes who controls the bot): the AI translator never auto-runs it from a guess -
+  // claiming or resigning ownership must be typed.
+  confirm: true,
   params: [{ name: 'action', enum: ['claim', 'resign'], desc: 'claim a free owner slot, resign ownership, or omit to show who owns the bot' }],
   run: (ctx) => {
     if (!ctx.owner) return 'Owner management is unavailable here.';
