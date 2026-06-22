@@ -135,6 +135,25 @@ test('adapter: send renders content and brackets it with presence updates', asyn
   assert.deepEqual(makeSocket.sockets[0].presence.map((p) => p.state), ['composing', 'paused']);
 });
 
+test('adapter: send reports delivery - true on success, false once it cannot go out', async () => {
+  const makeSocket = fakeSocketFactory();
+  const a = createWhatsAppAdapter(opts({ makeSocket }));
+  a.start({ onMessage: async () => {} });
+
+  assert.equal(await a.send('9@s.whatsapp.net', 'hi'), true); // delivered
+  await a.stop();
+  assert.equal(await a.send('9@s.whatsapp.net', 'hi'), false); // torn down -> not delivered (job stays pending)
+});
+
+test('adapter: a send that throws returns false (the scheduler keeps the job pending, not dropped)', async () => {
+  const makeSocket = fakeSocketFactory();
+  const a = createWhatsAppAdapter(opts({ makeSocket }));
+  a.start({ onMessage: async () => {} });
+  makeSocket.sockets[0].sendMessage = async () => { throw new Error('offline'); };
+
+  assert.equal(await a.send('9@s.whatsapp.net', 'hi'), false);
+});
+
 test('adapter: 515 restartRequired recreates the socket; 401 loggedOut wipes and stops', async () => {
   const makeSocket = fakeSocketFactory();
   const authState = fakeAuthState();
