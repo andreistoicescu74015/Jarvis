@@ -29,10 +29,11 @@ const authDb = createStore({ path: process.env.JARVIS_AUTH_DB ?? 'data/wa-auth.d
 const identity = createIdentityStore(store, { log });
 const scheduler = createScheduler(store);
 const activation = createActivation(store);
-// AI command translation (opt-in, owner-gated in the dispatcher). With GITHUB_MODELS_TOKEN set, the
-// owner can address Jarvis in natural language and have it mapped to one command (GitHub Models,
-// OpenAI-compatible). No token -> the client is null and AI is simply off. The provider is a config
-// triple, swappable to any OpenAI-compatible endpoint (Azure AI Foundry, ...) with no code change.
+// AI (GitHub Models, OpenAI-compatible). With GITHUB_MODELS_TOKEN set, an addressed message that is not
+// an exact command is mapped to one or more commands (always-on translation; each still re-checked by
+// the dispatcher's guards), and the owner can turn on a per-chat chatbot mode (`jarvis ai on`). No
+// token -> the client is null and AI is simply off. The provider is a config triple, swappable to any
+// OpenAI-compatible endpoint (Azure AI Foundry, ...) with no code change.
 const ai = createAiClient({
   token: process.env.GITHUB_MODELS_TOKEN ?? '',
   baseUrl: process.env.JARVIS_AI_BASE_URL ?? 'https://models.github.ai/inference',
