@@ -14,6 +14,9 @@ export default {
     'Notes are scoped to this conversation. Subcommands: add <text> (append a note), ' +
     'list (show all), get <n> (show one), del <n> (remove one), clear (remove all at once).',
   requires: ['store'],
+  // `clear` wipes every note here at once - destructive, so the AI translator never auto-runs it
+  // from a guess (the user must type it); `add`/`get`/`del`/`list` stay auto-runnable.
+  confirm: (args) => (args[0] ?? '').toLowerCase() === 'clear',
   params: [
     { name: 'action', enum: ['add', 'list', 'get', 'del', 'clear'], required: true, desc: 'what to do' },
     { name: 'text', variadic: true, desc: 'the note text (for add), or the note number (for get/del)' },
