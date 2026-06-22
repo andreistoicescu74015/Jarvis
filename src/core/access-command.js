@@ -32,16 +32,17 @@ export function makeAccessCommand(list) {
       list === 'whitelist'
         ? 'Allow-list a command for specific people (this chat).'
         : 'Block specific people from a command (this chat).',
-    usage: `jarvis ${list} <command|*> add|remove <@user|number|*> | enable | disable | clear`,
+    usage: `jarvis ${list} | ${list} <command|*> add|remove <@user|number|*> | enable | disable | clear`,
     man:
       `Manage the ${list} for a command - or the whole bot (*) - in THIS chat (your DM with Jarvis, ` +
-      `or this group). Verbs: add/remove <person>, enable, disable, clear. A person is an @mention, ` +
+      `or this group). Run "jarvis ${list}" with no command (or "${list} list") to see the current rules. ` +
+      `Verbs: add/remove <person>, enable, disable, clear. A person is an @mention, ` +
       `a phone number, or * (everyone). Whitelist and blacklist are exclusive per target; the owner ` +
       `is never affected; the owner command cannot be restricted, and the bot cannot be added.`,
     scope: { ownerOrAdmin: true },
     requires: ['access'],
     params: [
-      { name: 'target', desc: 'a command name, or * for the whole bot' },
+      { name: 'target', desc: 'a command name, or * for the whole bot; omit (or "list") to show the current rules' },
       { name: 'verb', enum: ['add', 'remove', 'enable', 'disable', 'clear'], desc: 'the action' },
       { name: 'person', desc: '@mention, phone number, or * for everyone (for add/remove)' },
     ],
@@ -54,7 +55,10 @@ function run(ctx, list) {
   const context = accessContextFor(ctx.level, ctx.chatId); // always the current context
 
   const target = (ctx.args[0] ?? '').toLowerCase(); // command names are lowercase; match case-insensitively
-  if (!target) return overview(ctx, list, context);
+  // No target - or an explicit "list"/"show"/"rules" word - gives the overview of THIS context's rules.
+  // Accepting the words too means both a person and the AI translator land on the overview naturally (the
+  // model reaches for "<list> list" for "what is active here"); none is a real command, so nothing is shadowed.
+  if (!target || target === 'list' || target === 'show' || target === 'rules') return overview(ctx, list, context);
 
   // Validate the target (a command name, or * for the whole bot) up front - before a show OR an action.
   // Otherwise a non-command target like "enable" (a user, or the AI translator, that dropped the command
