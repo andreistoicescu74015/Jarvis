@@ -16,8 +16,47 @@ for the branch / commit / PR flow.
 ## Status
 
 WhatsApp MVP: it connects to a dedicated account, handles `jarvis <command>` (and @mentions),
-persists data, and runs unattended in Docker. The owner can also phrase a command in natural
-language (opt-in AI translation; set `GITHUB_MODELS_TOKEN` - see `.env.example`).
+persists data, and runs unattended in Docker. With an AI provider configured (`GITHUB_MODELS_TOKEN` -
+see `.env.example`) anyone who may use it can also phrase a command in plain language, and the owner
+can switch on a chatbot mode for general questions. See [Commands](#commands).
+
+## Commands
+
+Address the bot as `jarvis <command>` or by @mentioning it, in a DM or a group. `jarvis help` lists
+what *you* can run where you are; `jarvis man <command>` explains one in detail.
+
+**Anyone**
+
+- `jarvis ping` - check the bot is alive.
+- `jarvis help` / `jarvis man <command>` - list commands / detailed help.
+- `jarvis note add <text> | list | get <n> | del <n> | clear` - notes scoped to this chat.
+
+**Group admins** (in an active group; the owner too, anywhere)
+
+- `jarvis whitelist ...` / `jarvis blacklist ...` - control who may use a command (or the whole bot, `*`) here; `jarvis whitelist` alone shows the rules.
+- `jarvis schedule in <2h> <msg> | at <date> <time> <msg> | every <1d> <msg> | list | cancel <id>` - post a message later.
+- `jarvis link | link new | link accept <code> | link remove` - share one data context with another group.
+
+**Owner**
+
+- `jarvis owner | owner claim | owner resign` - who owns the bot; claim or resign.
+- `jarvis whoami [<@user|number>]` - show who you are, or look a person up.
+- `jarvis groups [activate|deactivate [<id>]]` - list and authorize the groups the bot runs in.
+- `jarvis community [activate|deactivate [<id>]]` - show a community, or authorize all its groups at once.
+- `jarvis ai [on|off]` - turn chatbot mode on/off for this chat (see below).
+- `jarvis reset [all]` - clear this chat's data, or wipe everything.
+- `jarvis shutdown` / `jarvis restart` / `jarvis logout` - lifecycle (details under [Owner commands](#owner-commands-in-chat)).
+
+### Natural language
+
+With an AI provider configured (`GITHUB_MODELS_TOKEN`), an addressed message that isn't an exact
+command is mapped to one or more commands - for anyone who may use Jarvis there, each still subject to
+every permission check. Jarvis echoes what it understood (`Understood: jarvis ...`) and runs it. A
+**sensitive** command - one that affects the bot itself (`owner`, `reset`, `shutdown`, `restart`,
+`logout`) or destroys data (`note clear`, `schedule clear`, `link remove`, `groups deactivate`) - is
+never auto-run from a guess; Jarvis asks you to type it. The owner can turn on a **chatbot mode** per
+chat with `jarvis ai on`, so Jarvis also answers general questions when nothing maps to a command.
+Without a token, only exact commands work.
 
 ## Develop
 
