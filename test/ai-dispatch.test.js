@@ -191,3 +191,56 @@ test('ai dispatch: typing a destructive command directly runs it (typing is the 
   assert.equal(wiped, 1);
   store.close();
 });
+
+test('ai dispatch: a destructive SUBCOMMAND (note clear) is not auto-run from a translation', async () => {
+  const store = createStore({ path: ':memory:' });
+  store.scoped('private:dm').set('notes', ['keep me']); // a pre-existing note
+  const ai = fakeAi({ command: 'note', args: { action: 'clear' } });
+  const handle = createDispatcher(createRegistry([ping, note]), { owner: 'boss', store, ai });
+  const out = toPlain(await handle({ text: 'jarvis sterge toate notitele', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(out, /Understood: jarvis note clear/); // it shows what it understood
+  assert.match(out, /type .*jarvis note clear.* yourself to confirm/i); // but asks the user to type it
+  assert.deepEqual(store.scoped('private:dm').get('notes'), ['keep me']); // and does NOT wipe the notes
+  store.close();
+});
+
+test('ai dispatch: a non-destructive subcommand (note add) still runs from a translation', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi({ command: 'note', args: { action: 'add', text: 'from ai' } });
+  const handle = createDispatcher(createRegistry([ping, note]), { owner: 'boss', store, ai });
+  const out = toPlain(await handle({ text: 'jarvis noteaza from ai', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(out, /Understood: jarvis note add from ai/);
+  assert.match(out, /Added note #1/); // the benign verb is auto-run as before
+  assert.deepEqual(store.scoped('private:dm').get('notes'), ['from ai']);
+  store.close();
+});
+
+test('ai dispatch: groups deactivate is not auto-run from a translation even for the owner', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi({ command: 'groups', args: { action: 'deactivate' } });
+  const handle = createDispatcher(createRegistry([ping, groups]), {
+    owner: 'boss', store, ai, listGroups: async () => [{ id: 'g@g.us', name: 'G' }],
+  });
+  const out = toPlain(await handle({ text: 'jarvis opreste grupul asta', sender: 'boss', level: 'group', chatId: 'g@g.us' }));
+  assert.match(out, /Understood: jarvis groups deactivate/);
+  assert.match(out, /type .*jarvis groups deactivate.* yourself to confirm/i); // the full group reset must be typed
+  store.close();
+});
+
+test('ai dispatch: an over-long command chain is capped', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi(Array.from({ length: 12 }, () => ({ command: 'ping', args: {} })));
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai });
+  const out = toPlain(await handle({ text: 'jarvis fa ping de multe ori', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.equal((out.match(/pong/g) || []).length, 8); // only AI_MAX_CHAIN (8) steps execute, not all 12
+  store.close();
+});
+
+test('ai dispatch: a translator that throws falls back to the unknown-command reply (never crashes)', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = { translate: async () => { throw new Error('boom'); } };
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai });
+  const out = toPlain(await handle({ text: 'jarvis ceva ce arunca', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(out, /Unknown command/);
+  store.close();
+});

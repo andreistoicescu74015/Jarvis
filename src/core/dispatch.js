@@ -8,6 +8,11 @@ import { nullLogger } from './log.js';
 import { b, code, esc } from './format.js';
 import { toolCatalog, toCommandLine } from './tools.js';
 
+// Upper bound on how many commands one natural-language prompt may run. The model is the only
+// non-deterministic input; cap the fan-out so a single request can never spray an unbounded number
+// of state-changing commands (each still passes every guard, but the count itself is bounded).
+const AI_MAX_CHAIN = 8;
+
 /**
  * The capabilities a command receives. Grows over later issues (ai, scheduler, ...).
  *
@@ -123,7 +128,15 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
   async function aiResolveChain(request, scopeCtx) {
     const tools = toolCatalog(registry.all(), scopeCtx);
     if (!tools.length) return [];
-    const proposals = await ai.translate({ text: request, tools });
+    let proposals;
+    try {
+      // The translator is best-effort and must never crash the deterministic bot (ADR-0003): the
+      // production client swallows its own errors, but an injected/alternate one might throw - isolate it.
+      proposals = await ai.translate({ text: request, tools });
+    } catch (err) {
+      log.error('ai: translation threw', { error: err?.message ?? String(err) });
+      return [];
+    }
     if (!Array.isArray(proposals)) return [];
     const chain = [];
     for (const p of proposals) {
@@ -136,6 +149,10 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       const reparsed = parse(line, prefix, { addressed: true });
       const cmd = reparsed?.command ? registry.get(reparsed.command) : undefined;
       if (cmd) chain.push({ cmd, command: reparsed.command, args: reparsed.args, rest: reparsed.rest, line });
+    }
+    if (chain.length > AI_MAX_CHAIN) {
+      log.info('ai: truncating an over-long command chain', { proposed: chain.length, cap: AI_MAX_CHAIN });
+      return chain.slice(0, AI_MAX_CHAIN);
     }
     return chain;
   }
@@ -259,7 +276,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     // produced nothing. Shared by the typed path and EACH step of an AI-translated chain, so every
     // command - however it arrived - passes the same guards (the owner/admin/`owner`-command bypass
     // the lists; owner-only commands are governed by `scope`).
-    async function runOne(cmd, command, args, rest) {
+    async function runOne(cmd, command, args, rest, aiLine) {
       const exempt = isOwner || isAdmin || command === 'owner';
       if (access && !exempt && !cmd.scope?.owner && !access.passes(command, accessContext, sender)) {
         log.info('access deny (command)', { sender, chatId, command });
@@ -268,6 +285,15 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       const scoped = checkScope(cmd.scope, { level, isAdmin, isOwner });
       if (!scoped.ok) return `Not allowed: ${scoped.reason}.`;
       if (cmd.requires?.some((cap) => !capable[cap])) return 'That command is unavailable here.';
+
+      // From an AI translation (aiLine set): a destructive command - or a destructive SUBCOMMAND (e.g.
+      // `note clear`, `groups deactivate`) - is never auto-run from a guess. Checked AFTER the access/
+      // scope guards, so a command the caller could not run anyway reports that, not a misleading
+      // "type it". Typing the command takes the normal path below (no aiLine), where typing IS consent.
+      if (aiLine) {
+        const needsConfirm = typeof cmd.confirm === 'function' ? cmd.confirm(args) : !!cmd.confirm;
+        if (needsConfirm) return `I won't run a destructive command from a guess - type ${code(`${prefix} ${aiLine}`)} yourself to confirm.`;
+      }
 
       const replies = [];
       const ctx = {
@@ -385,13 +411,9 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
         const understood = `${b('Understood:')} ${chain.map((s) => code(`${prefix} ${s.line}`)).join(' ; ')}`;
         const outs = [];
         for (const step of chain) {
-          if (step.cmd.confirm) {
-            // A destructive command is never auto-run from a natural-language guess: the user has to
-            // type it, and typing it IS the confirmation (the typed path below runs it normally).
-            outs.push(`I won't run a destructive command from a guess - type ${code(`${prefix} ${step.line}`)} yourself to confirm.`);
-            continue;
-          }
-          const out = await runOne(step.cmd, step.command, step.args, step.rest);
+          // Pass step.line so runOne can apply the destructive-command guard (after its own access/
+          // scope checks) and, when it blocks, tell the user exactly what to type to confirm.
+          const out = await runOne(step.cmd, step.command, step.args, step.rest, step.line);
           if (out) outs.push(out);
         }
         return [understood, ...outs].join('\n');

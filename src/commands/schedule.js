@@ -56,6 +56,12 @@ export default {
     'do it), not in private chats - the owner excepted. Schedules survive restarts.',
   scope: { admin: true, proactive: true },
   requires: ['scheduler'],
+  // `clear` / `cancel all` delete every scheduled message here - destructive, so the AI translator
+  // never auto-runs them from a guess (the user must type them); scheduling a new one is fine.
+  confirm: (args) => {
+    const sub = (args[0] ?? '').toLowerCase();
+    return sub === 'clear' || (sub === 'cancel' && (args[1] ?? '').toLowerCase() === 'all');
+  },
   params: [
     { name: 'action', enum: ['in', 'at', 'every', 'list', 'cancel', 'clear', 'disable', 'enable'], required: true, desc: 'in/at/every to schedule; list/cancel/clear/disable/enable to manage' },
     { name: 'rest', variadic: true, desc: 'the remainder: for "in"/"every" it is "<duration> <message>" (e.g. "2h call mom", units m/h/d); for "at" it is "<YYYY-MM-DD> <HH:MM> <message>"; for cancel/disable/enable it is the id or "all"' },

@@ -36,6 +36,9 @@ export default {
     'own data. Access lists are NOT shared - only data. "link" alone shows the status.',
   scope: { admin: true },
   requires: ['links'],
+  // `remove` tears down the link and can dissolve the whole overlay (shared data discarded) -
+  // destructive, so the AI translator never auto-runs it from a guess (the user must type it).
+  confirm: (args) => (args[0] ?? '').toLowerCase() === 'remove',
   params: [
     { name: 'action', enum: ['new', 'accept', 'remove'], desc: 'create a link code, accept one, remove the link, or omit to show status' },
     { name: 'code', desc: 'the one-time link code (for accept)' },
