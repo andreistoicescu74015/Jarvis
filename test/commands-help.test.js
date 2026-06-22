@@ -7,6 +7,7 @@ import ping from '../src/commands/ping.js';
 import help from '../src/commands/help.js';
 import shutdown from '../src/commands/shutdown.js';
 import schedule from '../src/commands/schedule.js';
+import owner from '../src/commands/owner.js';
 
 const dispatch = createDispatcher(createRegistry([ping, help, shutdown, schedule]), { owner: 'boss' });
 const handle = async (msg) => toPlain(await dispatch(msg));
@@ -29,4 +30,38 @@ test('help: a proactive command is hidden in a private chat for a non-owner', as
   assert.doesNotMatch(inPrivate, /schedule: /); // proactive is group-only for non-owners
   const inGroupAsAdmin = await handle({ text: 'jarvis help', sender: 'rando', level: 'group', isAdmin: true });
   assert.match(inGroupAsAdmin, /schedule: /); // an admin in a group may schedule
+});
+
+test('help owner: lists only the owner-only commands (for the owner)', async () => {
+  const out = await handle({ text: 'jarvis help owner', sender: 'boss', level: 'group' });
+  assert.match(out, /Owner-only commands/);
+  assert.match(out, /shutdown: /); // owner-scoped
+  assert.doesNotMatch(out, /ping: /); // public command excluded from the owner filter
+  assert.doesNotMatch(out, /schedule: /); // admin-level, not owner-only
+});
+
+test('help admin: lists only the admin-level commands', async () => {
+  const out = await handle({ text: 'jarvis help admin', sender: 'boss', level: 'group' });
+  assert.match(out, /Admin commands/);
+  assert.match(out, /schedule: /); // admin/proactive
+  assert.doesNotMatch(out, /shutdown: /); // owner-only, not admin-level
+  assert.doesNotMatch(out, /ping: /);
+});
+
+test('help owner: a non-owner has none (privilege-aware, not advertised)', async () => {
+  const out = await handle({ text: 'jarvis help owner', sender: 'rando', level: 'group', isAdmin: false });
+  assert.match(out, /No owner commands available to you here/i);
+});
+
+test('help: the owner command is hidden once ownership is settled, listed while unclaimed', async () => {
+  // An env owner is set -> owner claim is taken and an env owner can't resign -> not actionable -> hidden.
+  const settled = createDispatcher(createRegistry([ping, help, owner]), { owner: 'boss' });
+  const out1 = toPlain(await settled({ text: 'jarvis help', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.doesNotMatch(out1, /owner: /); // hidden from the list...
+  assert.match(out1, /ping: /); // ...while the rest still shows
+
+  // No owner configured -> the command is the bootstrap, so it stays listed (claimable).
+  const fresh = createDispatcher(createRegistry([ping, help, owner]), {});
+  const out2 = toPlain(await fresh({ text: 'jarvis help', sender: 'rando', level: 'private', chatId: 'dm' }));
+  assert.match(out2, /owner: /);
 });

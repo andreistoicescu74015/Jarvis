@@ -19,6 +19,10 @@ export default {
   // Sensitive (it changes who controls the bot): the AI translator never auto-runs it from a guess -
   // claiming or resigning ownership must be typed.
   confirm: true,
+  // Hide from `help` once ownership is settled and the command is no longer actionable for the caller:
+  // an owner exists AND you are not a claimed owner who could resign (claim is taken; an env owner can't
+  // resign). At bootstrap (no owner) it stays listed so it can be claimed. It still runs and shows in `man`.
+  hidden: (ctx) => !!ctx.owner?.exists && !(ctx.owner?.isMe && !ctx.owner?.fromEnv),
   params: [{ name: 'action', enum: ['claim', 'resign'], desc: 'claim a free owner slot, resign ownership, or omit to show who owns the bot' }],
   run: (ctx) => {
     if (!ctx.owner) return 'Owner management is unavailable here.';
