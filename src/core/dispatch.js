@@ -7,6 +7,7 @@ import { createActivation } from './activation.js';
 import { nullLogger } from './log.js';
 import { b, code, esc } from './format.js';
 import { toolCatalog, toCommandLine } from './tools.js';
+import { isMisuse } from './reply.js';
 
 // Upper bound on how many commands one natural-language prompt may run. The model is the only
 // non-deterministic input; cap the fan-out so a single request can never spray an unbounded number
@@ -156,6 +157,16 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       return { chain: chain.slice(0, AI_MAX_CHAIN), answer: null };
     }
     return { chain, answer: result?.answer ?? null };
+  }
+
+  // A KNOWN command that could not interpret its arguments (a `misuse` reply) - ask the model what the
+  // user likely meant and return a one-line suggestion (never auto-run). Best-effort: null if AI is off
+  // or nothing maps. Reuses aiResolve, so the suggestion is scope-filtered and canonical.
+  async function aiSuggest(request, scopeCtx) {
+    const { chain } = await aiResolve(request, scopeCtx, false);
+    if (!chain.length) return null;
+    const lines = chain.map((s) => code(`${prefix} ${s.line}`)).join(' ; ');
+    return `Did you mean: ${lines}? Type it to run.`;
   }
 
   return async function handle(msg) {
@@ -386,6 +397,18 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
 
       try {
         const result = await cmd.run(ctx);
+        if (isMisuse(result)) {
+          // The command could not interpret the arguments. On the typed path, offer a best-effort AI
+          // suggestion of what the user likely meant (never auto-run); on an AI-chain step, or with no
+          // AI, just surface the usage text. The access/scope guards above already passed, so the
+          // suggestion is for someone who may run the command - it only clarifies the syntax.
+          if (!aiLine && ai) {
+            const request = rest ? `${command} ${rest}` : command;
+            const suggestion = await aiSuggest(request, { level, isAdmin, isOwner });
+            if (suggestion) return `${result.text}\n${suggestion}`;
+          }
+          return result.text;
+        }
         if (result != null && result !== '') replies.push(String(result));
       } catch (err) {
         // A command failure is logged internally and never surfaced in chat: it would be noise and

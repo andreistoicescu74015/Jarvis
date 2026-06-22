@@ -1,4 +1,5 @@
 import { accessContextFor } from './access.js';
+import { misuse } from './reply.js';
 
 /**
  * Shared implementation of the `whitelist` / `blacklist` commands. Both are the same UI
@@ -66,14 +67,14 @@ function run(ctx, list) {
   // `*` is always valid; owner-only commands and the bootstrap `owner` command can never be restricted.
   if (target !== '*') {
     const cmd = ctx.commands.find((c) => c.name === target);
-    if (!cmd) return `No such command: ${target}.`;
+    if (!cmd) return misuse(`No such command: ${target}.`); // unclear intent -> the dispatcher may suggest one
     if (target === 'owner') return 'The owner command cannot be restricted (it must stay reachable).';
     if (cmd.scope?.owner) return `${target} is owner-only; access lists do not apply to it.`;
   }
 
   const verb = (ctx.args[1] ?? '').toLowerCase();
   if (!verb) return show(ctx, list, target, context);
-  if (!VERBS.has(verb)) return usage(list);
+  if (!VERBS.has(verb)) return misuse(usage(list));
 
   switch (verb) {
     case 'enable': {
@@ -96,7 +97,7 @@ function run(ctx, list) {
     case 'add':
     case 'remove': {
       const person = resolvePerson(ctx, ctx.args.slice(2));
-      if (!person) return usage(list);
+      if (!person) return misuse(usage(list));
       if (verb === 'add' && person !== '*' && ctx.isSelf?.(person)) {
         return 'You cannot add the bot to a list.';
       }
@@ -111,7 +112,7 @@ function run(ctx, list) {
       return `Added ${display(person)} to the ${list} for ${label(target)}${note}.`;
     }
     default:
-      return usage(list);
+      return misuse(usage(list));
   }
 }
 

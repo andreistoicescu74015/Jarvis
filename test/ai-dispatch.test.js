@@ -257,3 +257,25 @@ test('ai dispatch: a translator that throws falls back to a friendly reply (neve
   assert.match(out, /didn't catch a command/i);
   store.close();
 });
+
+test('ai dispatch: a mis-used known command gets an AI suggestion of what was meant (not auto-run)', async () => {
+  const store = createStore({ path: ':memory:' });
+  // A known command (whitelist) typed with natural-language args it cannot parse - a "misuse". The
+  // dispatcher asks the AI what was likely meant and appends it as a suggestion; it does NOT run it.
+  const ai = fakeAi({ command: 'whitelist', args: { target: '*', verb: 'disable' } });
+  const handle = createDispatcher(createRegistry([ping, whitelist]), { owner: 'boss', store, ai });
+  const out = toPlain(await handle({ text: 'jarvis whitelist opreste lista asta', sender: 'boss', level: 'group', chatId: 'g@g.us' }));
+  assert.match(out, /No such command: opreste/i); // the original error is still shown
+  assert.match(out, /Did you mean: .*jarvis whitelist \* disable.*Type it to run/i); // plus a suggestion
+  assert.equal(store.scoped('access').get('*|g@g.us'), undefined); // nothing was applied (suggestion only)
+  store.close();
+});
+
+test('ai dispatch: a mis-used command with no AI wired just shows the usage (no suggestion)', async () => {
+  const store = createStore({ path: ':memory:' });
+  const handle = createDispatcher(createRegistry([ping, whitelist]), { owner: 'boss', store }); // no ai
+  const out = toPlain(await handle({ text: 'jarvis whitelist opreste lista asta', sender: 'boss', level: 'group', chatId: 'g@g.us' }));
+  assert.match(out, /No such command: opreste/i);
+  assert.doesNotMatch(out, /Did you mean/i);
+  store.close();
+});
