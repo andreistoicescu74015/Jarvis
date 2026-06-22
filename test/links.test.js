@@ -24,6 +24,20 @@ test('links: a solo group resolves to its own ns and lists only itself', () => {
   assert.deepEqual(links.chats('A'), ['A']);
 });
 
+test('links: propose sweeps codes past their TTL (no unbounded code growth)', () => {
+  const store = createStore({ path: ':memory:' });
+  let now = 0;
+  let n = 0;
+  const links = createLinks(store, { now: () => now, ttlMs: 1000, genCode: () => `C${++n}` });
+  const codes = store.scoped('link-codes');
+  links.propose('A'); // C1 at t=0
+  links.propose('A'); // C2 at t=0
+  assert.equal(codes.list().length, 2);
+  now = 2000; // both are now past the 1000ms redemption window
+  links.propose('A'); // C3 - sweeps the two expired codes before issuing
+  assert.deepEqual(codes.list().map((e) => e.key), ['C3']); // only the fresh code remains
+});
+
 test('links: accept joins two groups into one shared overlay (covering, not merging)', () => {
   const { store, links } = setup();
   store.scoped('own:A').set('note', 'a-secret'); // each group has its own data up front

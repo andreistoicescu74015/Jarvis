@@ -33,6 +33,13 @@ test('access: blacklist - listed blocked, others pass; an enabled empty blacklis
   assert.equal(a.passes('note', 'g1', 'alice'), true);
 });
 
+test('access: an unrecognized mode fails closed (deny) and never throws', () => {
+  const store = createStore({ path: ':memory:' });
+  const a = createAccessPolicy(store);
+  store.scoped('access').set('note|g1', { active: 'bogus', whitelist: [], blacklist: [] }); // corrupt record
+  assert.equal(a.passes('note', 'g1', 'alice'), false);
+});
+
 test('access: "*" as a member means everyone', () => {
   const a = policy();
   a.add('blacklist', 'note', 'g1', '*');

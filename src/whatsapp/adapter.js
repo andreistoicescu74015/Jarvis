@@ -101,9 +101,10 @@ export function createWhatsAppAdapter({
   const communityCache = new Map();
   // Message-id de-dup. Baileys can redeliver the same message (decryption / phone retries) and
   // WhatsApp can re-push a key.id, so without this a redelivered ADDRESSED command would run twice
-  // (activate, schedule, owner claim, an AI translation...). Track recently-seen ids in a bounded,
-  // insertion-ordered set, evicting the oldest past the cap. In-memory: it survives reconnects and
-  // resets on restart, where the offline-backlog filter already covers old messages.
+  // (activate, schedule, owner claim, an AI translation...). `firstSeen` is called only for addressed
+  // commands (see onUpsert), so ordinary chatter never fills this bounded, insertion-ordered set and
+  // can't evict a pending command's id. In-memory: it survives reconnects and resets on restart,
+  // where the offline-backlog filter already covers old messages.
   const seenIds = new Set();
   const SEEN_IDS_MAX = 1000;
   function firstSeen(id) {
@@ -310,17 +311,19 @@ export function createWhatsAppAdapter({
         const ts = timestampMs(wa);
         if (connectedAt && ts && ts < connectedAt - offlineGraceMs) continue;
 
-        // Drop a message we've already processed: Baileys/WhatsApp can redeliver the same key.id,
-        // and a redelivered command must never run twice.
-        if (!firstSeen(wa?.key?.id)) continue;
-
-        learn(wa.key); // lazily record LID <-> phone pairs from the key
+        learn(wa.key); // lazily record LID <-> phone pairs from the key (idempotent; runs for every inbound)
 
         const isGroup = String(wa?.key?.remoteJid || '').endsWith('@g.us');
         const inbound = toInbound(wa, { groupMetadata: isGroup ? await groupMetadata(wa.key.remoteJid) : undefined });
         if (!inbound) continue;
         const { handle, bare, text } = resolveAddressing(inbound, { selfId: selfIds, prefix });
         if (!handle) continue;
+
+        // Drop a command we've already processed: Baileys/WhatsApp can redeliver the same key.id, and a
+        // redelivered command must never run twice. Deduped HERE - only on ADDRESSED commands, not all
+        // traffic - so a busy group's chatter can't evict the bounded window before a redelivery arrives.
+        if (!firstSeen(wa?.key?.id)) continue;
+
         await markRead(wa.key); // read-before-reply: a person reads what they answer
         await onMessage({ ...inbound, text, addressed: bare, self: selfIds });
       } catch (err) {
@@ -336,9 +339,13 @@ export function createWhatsAppAdapter({
       connect();
     },
 
+    // Returns true when the message went out, false when it could not (no socket, a reconnect during
+    // the pacing wait, or a send error). The proactive scheduler relies on this: a false leaves the job
+    // pending (retried next tick) instead of being silently counted as delivered and dropped. The reply
+    // path ignores the return value, so reporting an outcome here is harmless to it.
     async send(chatId, message) {
       const s = sock; // capture: the pacing wait can span a reconnect; don't send on a new/dead socket
-      if (!s || stopped) return;
+      if (!s || stopped) return false;
       try {
         const content = toContent(message);
         // Look like a person composing: show "typing..." then send. The wait is the global
@@ -348,11 +355,13 @@ export function createWhatsAppAdapter({
         const typing = typingDelayMs((content?.text ?? '').length, { perCharMs: typingPerCharMs, maxMs: typingMaxMs });
         await s.sendPresenceUpdate('composing', chatId);
         await sleep(rateLimiter.nextWaitMs(typing + Math.floor(random() * sendJitterMs)));
-        if (stopped || sock !== s) return; // a reconnect/teardown happened during the pacing wait
+        if (stopped || sock !== s) return false; // a reconnect/teardown happened during the pacing wait
         await s.sendMessage(chatId, content);
         await s.sendPresenceUpdate('paused', chatId);
+        return true;
       } catch (err) {
         log.error('wa: send failed', { chatId, error: err?.message ?? String(err) });
+        return false;
       }
     },
 
