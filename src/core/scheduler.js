@@ -15,6 +15,12 @@
 
 const UNIT_MS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 
+// Bounds so scheduled jobs cannot grow the store without limit (mirrors the note caps): a per-message
+// length cap and a per-chat job count. Creating jobs is admin-gated, but a cap keeps a runaway or a
+// careless loop from filling the disk.
+const MAX_TEXT_LEN = 1000; // characters in one scheduled message
+const MAX_JOBS = 100; // scheduled jobs kept per chat
+
 /**
  * Parse a human "when" spec into an absolute fire time (and a repeat interval for
  * `every`). Times are server-local. Returns a reason on failure rather than throwing.
@@ -78,6 +84,8 @@ export function createScheduler(store, { now = () => Date.now() } = {}) {
     const w = parseWhen(when, now());
     if (!w.ok) return w;
     if (!String(text ?? '').trim()) return { ok: false, reason: 'empty-text' };
+    if (String(text).length > MAX_TEXT_LEN) return { ok: false, reason: 'too-long', max: MAX_TEXT_LEN };
+    if (list(chatId).length >= MAX_JOBS) return { ok: false, reason: 'too-many', max: MAX_JOBS };
     const id = nextId();
     jobs.set(id, { chatId, text, fireAt: w.fireAt, repeatMs: w.repeatMs, createdBy, createdAt: now() });
     return { ok: true, id, fireAt: w.fireAt, repeatMs: w.repeatMs };
