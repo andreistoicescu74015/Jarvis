@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createAiClient } from '../src/core/ai.js';
 
 const tools = [{ type: 'function', function: { name: 'whitelist', parameters: {} } }];
+const EMPTY = { commands: [], answer: null };
 
 /** A fetch stub returning a canned chat-completions response; optionally records the request. */
 function fakeFetch(response, { ok = true, status = 200, capture } = {}) {
@@ -25,42 +26,59 @@ test('ai: no token -> client is null (AI simply off)', () => {
   assert.equal(createAiClient({}), null);
 });
 
-test('ai: translate returns the tool call as { command, args } and sends a well-formed request', async () => {
+test('ai: translate returns the tool call as commands and sends a well-formed request', async () => {
   const capture = {};
   const ai = createAiClient({
     token: 't', model: 'm',
     fetchImpl: fakeFetch(toolCall('whitelist', { target: '*', verb: 'enable' }), { capture }),
   });
   const out = await ai.translate({ text: 'open up to everyone', tools });
-  assert.deepEqual(out, [{ command: 'whitelist', args: { target: '*', verb: 'enable' } }]);
+  assert.deepEqual(out, { commands: [{ command: 'whitelist', args: { target: '*', verb: 'enable' } }], answer: null });
   assert.match(capture.url, /\/chat\/completions$/);
   assert.equal(capture.init.headers.authorization, 'Bearer t');
   const body = JSON.parse(capture.init.body);
   assert.equal(body.model, 'm');
+  assert.equal(body.temperature, 0); // deterministic translation
+  assert.equal(body.tool_choice, 'auto'); // model may map to a tool, decline, or (in chat) answer
   assert.equal(body.tools.length, 1);
   assert.equal(body.messages.at(-1).content, 'open up to everyone');
 });
 
-test('ai: no tool call -> null (no command matched)', async () => {
+test('ai: no tool call (not in chat mode) -> no commands and no answer', async () => {
   const ai = createAiClient({ token: 't', fetchImpl: fakeFetch({ choices: [{ message: { content: 'hi' } }] }) });
-  assert.equal(await ai.translate({ text: 'how are you?', tools }), null);
+  assert.deepEqual(await ai.translate({ text: 'how are you?', tools }), EMPTY);
 });
 
-test('ai: a non-ok response -> null (best-effort, never throws)', async () => {
+test('ai: chat mode returns the model text as the answer when no tool is called', async () => {
+  const ai = createAiClient({ token: 't', fetchImpl: fakeFetch({ choices: [{ message: { content: 'A lemon is small.' } }] }) });
+  assert.deepEqual(await ai.translate({ text: 'how big is a lemon', tools, chat: true }), { commands: [], answer: 'A lemon is small.' });
+  // the same response, NOT in chat mode, yields no answer (translation-only)
+  assert.deepEqual(await ai.translate({ text: 'how big is a lemon', tools }), EMPTY);
+});
+
+test('ai: chat mode still prefers a tool call when the request maps to a command', async () => {
+  const ai = createAiClient({ token: 't', fetchImpl: fakeFetch(toolCall('whitelist', { target: '*', verb: 'enable' })) });
+  assert.deepEqual(await ai.translate({ text: 'open up to everyone', tools, chat: true }), {
+    commands: [{ command: 'whitelist', args: { target: '*', verb: 'enable' } }],
+    answer: null,
+  });
+});
+
+test('ai: a non-ok response -> empty (best-effort, never throws)', async () => {
   const ai = createAiClient({ token: 't', fetchImpl: fakeFetch({}, { ok: false, status: 429 }) });
-  assert.equal(await ai.translate({ text: 'x', tools }), null);
+  assert.deepEqual(await ai.translate({ text: 'x', tools }), EMPTY);
 });
 
-test('ai: a fetch error -> null', async () => {
+test('ai: a fetch error -> empty', async () => {
   const ai = createAiClient({ token: 't', fetchImpl: async () => { throw new Error('network down'); } });
-  assert.equal(await ai.translate({ text: 'x', tools }), null);
+  assert.deepEqual(await ai.translate({ text: 'x', tools }), EMPTY);
 });
 
-test('ai: empty text or empty tools -> null without calling out', async () => {
+test('ai: empty text or empty tools -> empty without calling out', async () => {
   let called = false;
   const ai = createAiClient({ token: 't', fetchImpl: async () => { called = true; return { ok: true, json: async () => ({}) }; } });
-  assert.equal(await ai.translate({ text: '', tools }), null);
-  assert.equal(await ai.translate({ text: 'x', tools: [] }), null);
+  assert.deepEqual(await ai.translate({ text: '', tools }), EMPTY);
+  assert.deepEqual(await ai.translate({ text: 'x', tools: [] }), EMPTY);
   assert.equal(called, false);
 });
 
@@ -69,7 +87,7 @@ test('ai: malformed tool arguments degrade to empty args, not a throw', async ()
     token: 't',
     fetchImpl: fakeFetch({ choices: [{ message: { tool_calls: [{ function: { name: 'ping', arguments: '{bad json' } }] } }] }),
   });
-  assert.deepEqual(await ai.translate({ text: 'x', tools }), [{ command: 'ping', args: {} }]);
+  assert.deepEqual(await ai.translate({ text: 'x', tools }), { commands: [{ command: 'ping', args: {} }], answer: null });
 });
 
 test('ai: multiple tool calls become an ordered chain', async () => {
@@ -80,8 +98,11 @@ test('ai: multiple tool calls become an ordered chain', async () => {
       ['blacklist', { target: 'note', verb: 'enable' }],
     )),
   });
-  assert.deepEqual(await ai.translate({ text: 'block everyone from notes then enable it', tools }), [
-    { command: 'blacklist', args: { target: 'note', verb: 'add', person: '*' } },
-    { command: 'blacklist', args: { target: 'note', verb: 'enable' } },
-  ]);
+  assert.deepEqual(await ai.translate({ text: 'block everyone from notes then enable it', tools }), {
+    commands: [
+      { command: 'blacklist', args: { target: 'note', verb: 'add', person: '*' } },
+      { command: 'blacklist', args: { target: 'note', verb: 'enable' } },
+    ],
+    answer: null,
+  });
 });
