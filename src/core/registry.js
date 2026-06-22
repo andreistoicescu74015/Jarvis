@@ -26,6 +26,7 @@
  * @property {string[]} [requires]               ctx capabilities the command needs (e.g. ['store']); the dispatcher reports it unavailable when one is missing.
  * @property {boolean | ((args: string[]) => boolean)} [confirm]  Destructive: the AI translator never auto-runs it - the user must type it (typing is the confirmation). `true` marks the whole command destructive; a predicate `(args) => boolean` marks only certain subcommands (e.g. only `note clear`, not `note add`).
  * @property {import('./scope.js').Scope} [scope] Optional permission requirements.
+ * @property {(ctx: import('./dispatch.js').Ctx) => boolean} [hidden]  Hide from the `help` listing when this returns true (runtime visibility, e.g. once ownership is settled); the command still runs and still shows in `man`.
  * @property {(ctx: import('./dispatch.js').Ctx) => unknown} run
  *
  * @typedef {Object} Registry
