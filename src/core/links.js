@@ -73,9 +73,17 @@ export function createLinks(store, {
 
   /** Create a one-time code (TTL) this group shares to invite another group to link. */
   function propose(from) {
-    const code = makeCode();
-    codes.set(code, { from, at: now() });
-    return code;
+    // Sweep codes past their redemption TTL before issuing a new one: a code is otherwise only deleted
+    // when someone redeems it, so proposed-but-never-redeemed codes would accumulate forever. Atomic
+    // with the new code's write (re-entrant), mirroring accept/unlink.
+    return store.transaction(() => {
+      for (const { key, value } of codes.list()) {
+        if (now() - value.at > ttlMs) codes.delete(key);
+      }
+      const code = makeCode();
+      codes.set(code, { from, at: now() });
+      return code;
+    });
   }
 
   /**
