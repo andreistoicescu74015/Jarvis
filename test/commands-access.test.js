@@ -101,6 +101,18 @@ test('access cmd: overview and show report state', async () => {
   assert.match(await boss('jarvis whitelist'), /No whitelist rules/);
 });
 
+test('access cmd: "list"/"show" (or no target) give the rules overview - where the AI lands for "what is active here"', async () => {
+  const { boss } = setup();
+  await boss('jarvis blacklist ping add bob');
+  await boss('jarvis blacklist ping enable');
+  // A bare command, or the natural words "list"/"show", all show the overview - never "No such command".
+  for (const text of ['jarvis blacklist', 'jarvis blacklist list', 'jarvis blacklist show']) {
+    const out = await boss(text);
+    assert.match(out, /"ping".*bob/s, `${text} should show the overview`);
+    assert.doesNotMatch(out, /No such command/i, `${text} must not be treated as a target`);
+  }
+});
+
 test('access cmd: "*" target gates the whole bot in this context; owner bypasses', async () => {
   const { boss, as } = setup();
   assert.match(await boss('jarvis whitelist * enable'), /Turned on the whitelist for the whole bot/i);
