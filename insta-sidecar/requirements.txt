@@ -1,0 +1,6 @@
+# Instagram bridge sidecar dependencies.
+# instagrapi is the unofficial Instagram private-API client (the IG analogue of Baileys). Pinned to
+# the version validated in insta/research.md; bump deliberately as upstream moves (it changes fast).
+instagrapi==2.16.24
+flask==3.0.3
+requests>=2.31,<3

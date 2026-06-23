@@ -23,5 +23,32 @@ services:
     volumes:
       - jarvis-data:/app/data # auth session + sqlite persist across restarts
 
+  # Optional Instagram DM bridge (opt-in: `docker compose --profile instagram up`). A Python instagrapi
+  # sidecar that drives a personal Instagram account and pushes inbound DMs to Jarvis (which relays them
+  # to the owner). UNOFFICIAL + ban-risky - see insta/. Needs IG_USERNAME/IG_PASSWORD (ideally IG_PROXY)
+  # and INSTAGRAM_SIDECAR_URL/TOKEN set in .env. Reaches Jarvis on the internal network (no host ports).
+  insta-sidecar:
+    build: ./insta-sidecar
+    image: jarvis-insta-sidecar
+    profiles: ["instagram"]
+    init: true
+    restart: on-failure
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - JARVIS_INGEST_URL=http://jarvis:8765/ig/inbound
+    mem_limit: 384m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    volumes:
+      - jarvis-insta-data:/data # IG session + device fingerprint persist across restarts
+    depends_on:
+      - jarvis
+
 volumes:
   jarvis-data:
+  jarvis-insta-data:
