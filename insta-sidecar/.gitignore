@@ -1,0 +1,9 @@
+# Python bytecode + local virtualenv
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Runtime session / device fingerprint (secret-ish; never commit a real session)
+ig-session.json
+*-session.json

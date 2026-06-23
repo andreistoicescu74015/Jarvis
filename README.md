@@ -20,6 +20,10 @@ persists data, and runs unattended in Docker. With an AI provider configured (`G
 see `.env.example`) anyone who may use it can also phrase a command in plain language, and the owner
 can switch on a chatbot mode for general questions. See [Commands](#commands).
 
+An **optional** Instagram bridge additionally lets the owner **manually** read and send Instagram DMs
+from WhatsApp (see [Instagram](#instagram-optional)) - a hand-operated remote, not an automated
+integration like the WhatsApp command system.
+
 ## Commands
 
 Address the bot as `jarvis <command>` or by @mentioning it, in a DM or a group. `jarvis help` lists
@@ -44,6 +48,7 @@ what *you* can run where you are; `jarvis man <command>` explains one in detail.
 - `jarvis groups [activate|deactivate [<id>]]` - list and authorize the groups the bot runs in.
 - `jarvis community [activate|deactivate [<id>]]` - show a community, or authorize all its groups at once.
 - `jarvis ai [on|off]` - turn chatbot mode on/off for this chat (see below).
+- `jarvis ig ...` - read and send Instagram DMs (and groups) from WhatsApp; needs the Instagram bridge (see [Instagram](#instagram-optional)).
 - `jarvis reset [all]` - clear this chat's data, or wipe everything.
 - `jarvis shutdown` / `jarvis restart` / `jarvis logout` - lifecycle (details under [Owner commands](#owner-commands-in-chat)).
 
@@ -57,6 +62,64 @@ every permission check. Jarvis echoes what it understood (`Understood: jarvis ..
 never auto-run from a guess; Jarvis asks you to type it. The owner can turn on a **chatbot mode** per
 chat with `jarvis ai on`, so Jarvis also answers general questions when nothing maps to a command.
 Without a token, only exact commands work.
+
+## Instagram (optional)
+
+Read and send your Instagram DMs - including group chats - from WhatsApp, so you can keep a
+conversation going without opening the Instagram app.
+
+**This is an optional, manual add-on - not an automated integration.** Unlike the rest of Jarvis (the
+command-driven WhatsApp bot, with access control, scheduling, and natural-language translation), the
+Instagram bridge is a hand-operated remote: *you* explicitly read and send each message. There is no
+automation, no AI on the Instagram side, and no background syncing of incoming DMs. It is entirely
+**off unless you configure it** - leave `IG_USERNAME` empty to skip it.
+
+Under the hood, a small Python "sidecar" (`insta-sidecar/`) logs into an Instagram account via the
+unofficial `instagrapi` library; Jarvis talks to it over the internal Docker network. It is part of the
+compose stack, so it starts with the normal `docker compose up`.
+
+> **Unofficial = against Instagram's Terms and at real ban risk. Use a test / dedicated account.**
+
+**Set up (once):**
+
+1. In `.env`, set your owner id and the Instagram values (leave `IG_USERNAME` empty to keep the bridge off):
+
+   ```bash
+   OWNER_JID=40712345678@s.whatsapp.net      # run `jarvis whoami` in a DM with the bot to get yours
+   INSTAGRAM_SIDECAR_URL=http://insta-sidecar:8099
+   INSTAGRAM_SIDECAR_TOKEN=<a long random secret>    # e.g. python -c "import secrets;print(secrets.token_hex(32))"
+   IG_USERNAME=your_test_account
+   IG_PASSWORD=your_password
+   # IG_PROXY=http://user:pass@host:port      # residential/mobile proxy - recommended
+   ```
+
+2. Build and start. **`--build` is required** so the image includes the `ig` command (without it,
+   Docker reuses an old image and `jarvis ig` is reported as an unknown command):
+
+   ```bash
+   docker compose up -d --build
+   ```
+
+   The sidecar logs into Instagram on its own; `docker ps` shows `insta-sidecar` as `healthy` once
+   logged in. If Instagram asks for a verification code, run `jarvis ig code <value>` in WhatsApp.
+
+**Use (in WhatsApp, as the owner):**
+
+- `jarvis ig list` - your recent conversations, numbered (groups are tagged).
+- `jarvis ig read <person|n> [count]` - the last messages of a conversation: an Instagram username, or a number from `jarvis ig list` (works for groups too). Default 10.
+- `jarvis ig send <person|n> <message>` - send a message to that username or numbered conversation.
+- `jarvis ig` - bridge status; `jarvis ig code <value>` - answer a login challenge (2FA / checkpoint).
+
+You can also just say it in **plain language** - you are the owner, so the AI translates it to the
+commands above (requires `GITHUB_MODELS_TOKEN`): *"show my Instagram chats"*, *"read my last messages
+with maria"*, *"reply to maria on Instagram: on my way"*.
+
+`jarvis ig` is **owner-only** (you must be the owner - set `OWNER_JID`, or run `jarvis owner claim` in a
+DM). Before trusting it, you can validate the sidecar against a test account on its own with the
+bundled `insta-sidecar/igctl.py` (e.g. `python igctl.py read <user> 10`, `python igctl.py send <user> <msg>`).
+
+**If `jarvis ig` says it is an unknown command**, the running image predates the command - rebuild it:
+`docker compose up -d --build`.
 
 ## Develop
 

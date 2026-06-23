@@ -16,6 +16,7 @@ import { socketLogger } from './whatsapp/socket-logger.js';
 import { commands } from './commands/index.js';
 import { num } from './core/env.js';
 import { createAiClient } from './core/ai.js';
+import { createInstagramClient } from './instagram/sidecar-client.js';
 
 /**
  * Composition root for the live WhatsApp bot. Mirrors `cli.js`, but wires the
@@ -129,6 +130,16 @@ const lifecycle = {
   },
 };
 
+// Instagram bridge (optional, OUTBOUND only). A separate Python `instagrapi` sidecar (see
+// `insta-sidecar/`) logs into an Instagram account; the owner sends DMs from WhatsApp via the
+// owner-only `ig` command. Off unless INSTAGRAM_SIDECAR_URL is set (like the AI client). UNOFFICIAL +
+// ban-risky - the sidecar carries the safety posture (session reuse, pacing, an hourly cap); see the README.
+const instagram = createInstagramClient({
+  baseUrl: process.env.INSTAGRAM_SIDECAR_URL ?? '',
+  token: process.env.INSTAGRAM_SIDECAR_TOKEN ?? '',
+  log,
+});
+
 const app = createApp(adapter, {
   // match is LID-aware so an owner set by phone number matches a LID sender.
   handle: createDispatcher(registry, {
@@ -148,6 +159,7 @@ const app = createApp(adapter, {
     send: (target, message) => adapter.send(target, message),
     community: adapter.community,
     scheduler,
+    instagram,
     ai,
     // Canonicalize a named person for the access lists: a JID (e.g. from an @mention)
     // is resolved toward its phone form; a bare number becomes a phone JID. Matching

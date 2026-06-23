@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.ps1
+README.md
+# never bake a real login session into the image
+ig-session.json
+*-session.json
