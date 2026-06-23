@@ -69,22 +69,17 @@ export IG_SESSION_FILE=./ig-session.json
 python app.py
 ```
 
-From another terminal:
+From another terminal, use the bundled `igctl.py` helper (it sends the right `Bearer` header for you,
+so you don't fight curl/PowerShell quoting). Set the SAME token in this shell first:
 
 ```bash
-curl localhost:8099/health
-curl -X POST localhost:8099/status -H 'authorization: Bearer dev-secret'    # watch for "logged_in"
-# send a DM to a second account you control:
-curl -X POST localhost:8099/send -H 'authorization: Bearer dev-secret' \
-     -H 'content-type: application/json' -d '{"username":"your_other_handle","text":"bridge test"}'
+export INSTAGRAM_SIDECAR_TOKEN=dev-secret          # (Windows PowerShell: $env:INSTAGRAM_SIDECAR_TOKEN="dev-secret")
+python igctl.py status                              # watch for "logged_in"
+python igctl.py send your_other_handle "bridge test"   # send a DM to a second account you control
+python igctl.py code 123456                         # only if status shows "challenge_required"
 ```
 
-If `/status` shows `challenge_required`, submit the code Instagram sent:
-
-```bash
-curl -X POST localhost:8099/challenge -H 'authorization: Bearer dev-secret' \
-     -H 'content-type: application/json' -d '{"code":"123456"}'
-```
+A send that returns `{"ok": true}` means the bridge works.
 
 Once a send lands, wire it to Jarvis (`docker compose --profile instagram up`) and use
 `jarvis ig <person> <message>`. After the first successful login you can remove `IG_PASSWORD` and rely

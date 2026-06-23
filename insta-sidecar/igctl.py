@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""
+igctl - a tiny CLI to drive a RUNNING insta-sidecar for Phase 1 testing, so you don't have to fight
+PowerShell quoting/headers. It sends the correct `Authorization: Bearer <token>` for you.
+
+Run it in a shell where INSTAGRAM_SIDECAR_TOKEN is set to the SAME value app.py uses:
+
+  python igctl.py status                       # is it logged in?
+  python igctl.py send <username> <message>    # send a test DM
+  python igctl.py code <value>                 # answer a login challenge
+
+Env: INSTAGRAM_SIDECAR_TOKEN (required), IG_SIDECAR_URL (default http://localhost:8099).
+"""
+import os
+import sys
+import json
+import urllib.request
+import urllib.error
+
+TOKEN = os.environ.get("INSTAGRAM_SIDECAR_TOKEN", "")
+URL = os.environ.get("IG_SIDECAR_URL", "http://localhost:8099").rstrip("/")
+
+
+def call(path, body):
+    req = urllib.request.Request(
+        URL + path,
+        data=json.dumps(body).encode(),
+        headers={"content-type": "application/json", "authorization": f"Bearer {TOKEN}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            print(resp.read().decode())
+    except urllib.error.HTTPError as err:
+        print(f"HTTP {err.code}: {err.read().decode()}")
+    except Exception as err:  # noqa: BLE001
+        print(f"could not reach the sidecar at {URL} ({err}) - is app.py running?")
+
+
+def main():
+    if not TOKEN:
+        print("Set INSTAGRAM_SIDECAR_TOKEN in this shell first (the same value app.py uses).")
+        return
+    args = sys.argv[1:]
+    cmd = args[0] if args else "status"
+    if cmd == "status":
+        call("/status", {})
+    elif cmd == "send" and len(args) >= 3:
+        call("/send", {"username": args[1], "text": " ".join(args[2:])})
+    elif cmd == "code" and len(args) >= 2:
+        call("/challenge", {"code": args[1]})
+    else:
+        print("usage: python igctl.py status | send <username> <message> | code <value>")
+
+
+if __name__ == "__main__":
+    main()
