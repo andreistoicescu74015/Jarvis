@@ -185,11 +185,14 @@ class InstagramClient:
 
     # ---- send ------------------------------------------------------------
 
-    def send(self, username, text):
-        if not username or not text:
+    def send(self, username=None, thread_id=None, text=None):
+        # Send to a 1:1 by `username`, or to an existing thread (a GROUP or a 1:1) by `thread_id`.
+        if not text:
             return {"ok": False, "status": "bad_args"}
         if len(text) > self.max_text_len:
             return {"ok": False, "status": "too_long"}
+        if not username and not thread_id:
+            return {"ok": False, "status": "bad_args"}
         if self.state != "logged_in":
             status = "challenge_required" if self.state == "challenge_required" else "not_logged_in"
             return {"ok": False, "status": status}
@@ -198,10 +201,13 @@ class InstagramClient:
                 return {"ok": False, "status": "rate_capped"}
             self._pace()
             try:
-                uid = self._resolve(username)
-                if not uid:
-                    return {"ok": False, "status": "unknown_user"}
-                self.cl.direct_send(text, user_ids=[uid])
+                if thread_id:
+                    self.cl.direct_send(text, thread_ids=[int(thread_id)])  # an existing thread (group or 1:1)
+                else:
+                    uid = self._resolve(username)
+                    if not uid:
+                        return {"ok": False, "status": "unknown_user"}
+                    self.cl.direct_send(text, user_ids=[uid])
                 self._record_send()
                 return {"ok": True}
             except Exception as err:  # noqa: BLE001 - keep the raw error in the log only (never leak to chat)
@@ -245,3 +251,28 @@ class InstagramClient:
         cutoff = time.time() - 3600
         recent = sum(1 for t in times if t >= cutoff)
         return {"state": self.state, "account": self.username, "detail": self.detail, "sent_last_hour": recent}
+
+    # ---- threads (read: list recent DMs + GROUPS so the owner can pick a thread to send to) ----
+
+    def threads(self, amount=20):
+        if self.state != "logged_in":
+            return {"ok": False, "status": self.state}
+        out = []
+        try:
+            for th in self.cl.direct_threads(amount=amount):
+                users = getattr(th, "users", []) or []
+                is_group = bool(getattr(th, "is_group", False)) or len(users) > 1
+                if is_group:
+                    title = getattr(th, "thread_title", None) or ", ".join(getattr(u, "username", "?") for u in users[:3])
+                else:
+                    title = getattr(users[0], "username", "(unknown)") if users else "(unknown)"
+                out.append({
+                    "thread_id": str(getattr(th, "id", "") or ""),
+                    "title": title,
+                    "is_group": is_group,
+                    "count": len(users),
+                })
+            return {"ok": True, "threads": out}
+        except Exception as err:  # noqa: BLE001
+            log.warning("threads failed: %s", err)
+            return {"ok": False, "status": "error"}

@@ -2,21 +2,24 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRegistry } from '../src/core/registry.js';
 import { createDispatcher } from '../src/core/dispatch.js';
+import { createStore } from '../src/store/index.js';
 import ig from '../src/commands/ig.js';
 import { toPlain } from '../src/core/format.js';
 
 /** A fake `ctx.instagram` capability that records the command's calls. */
 function fakeIg(overrides = {}) {
-  const calls = { send: [], code: [], status: 0 };
+  const calls = { send: [], sendThread: [], code: [], status: 0, threads: 0 };
   return {
     calls,
     send: async (person, text) => { calls.send.push({ person, text }); return overrides.send ?? { ok: true }; },
+    sendThread: async (threadId, text) => { calls.sendThread.push({ threadId, text }); return overrides.sendThread ?? { ok: true }; },
+    threads: async () => { calls.threads += 1; return overrides.threads ?? { ok: true, threads: [] }; },
     code: async (v) => { calls.code.push(v); return overrides.code ?? true; },
     status: async () => { calls.status += 1; return overrides.status ?? { ok: true, state: 'logged_in', account: 'me', sentLastHour: 2 }; },
   };
 }
 
-const handleFor = (instagram) => createDispatcher(createRegistry([ig]), { owner: 'boss', instagram });
+const handleFor = (instagram, store) => createDispatcher(createRegistry([ig]), { owner: 'boss', instagram, store });
 
 test('ig: shows bridge status', async () => {
   const instagram = fakeIg();
@@ -71,6 +74,32 @@ test('ig: submits a challenge code', async () => {
   const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig code 123456', sender: 'boss', level: 'private' }));
   assert.match(out, /Submitted the code/);
   assert.deepEqual(instagram.calls.code, ['123456']);
+});
+
+test('ig: list shows recent threads (groups tagged) and remembers them for `to`', async () => {
+  const store = createStore({ path: ':memory:' });
+  const instagram = fakeIg({ threads: { ok: true, threads: [
+    { threadId: 't1', title: 'maria', isGroup: false, count: 2 },
+    { threadId: 't2', title: 'Gasca mea', isGroup: true, count: 5 },
+  ] } });
+  const handle = handleFor(instagram, store);
+  const listed = toPlain(await handle({ text: 'jarvis ig list', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(listed, /1\. maria/);
+  assert.match(listed, /2\. Gasca mea \(group\)/);
+  // now send to thread #2 (the group) - resolved from the remembered list
+  const sent = toPlain(await handle({ text: 'jarvis ig to 2 salut grup', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(sent, /Sent to Gasca mea on Instagram/);
+  assert.deepEqual(instagram.calls.sendThread[0], { threadId: 't2', text: 'salut grup' });
+  store.close();
+});
+
+test('ig: `to` without a prior list reports no such thread', async () => {
+  const store = createStore({ path: ':memory:' });
+  const instagram = fakeIg();
+  const out = toPlain(await handleFor(instagram, store)({ text: 'jarvis ig to 1 hi', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(out, /No thread #1/);
+  assert.equal(instagram.calls.sendThread.length, 0);
+  store.close();
 });
 
 test('ig: is owner-only', async () => {

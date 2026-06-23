@@ -14,8 +14,10 @@ see the repo's `insta/` folder.
 All requests need `Authorization: Bearer <INSTAGRAM_SIDECAR_TOKEN>` (the token is **mandatory** - the
 sidecar refuses to drive an account without one). Internal network only; do not publish the port.
 
-- `POST /send`      `{ "username", "text" }` -> `{ "ok": bool, "status"?: str, "detail"?: str }`
-  - `status` on failure: `challenge_required`, `not_logged_in`, `rate_capped`, `unknown_user`, `error`.
+- `POST /send`      `{ "username"?, "thread_id"?, "text" }` -> `{ "ok": bool, "status"?, "detail"? }`
+  - target by `username` (a 1:1 DM) OR `thread_id` (an existing thread - a GROUP or a 1:1).
+  - `status` on failure: `challenge_required`, `not_logged_in`, `rate_capped`, `unknown_user`, `too_long`, `error`.
+- `POST /threads`   `{ "amount"?: 20 }` -> `{ "ok", "threads": [{ "thread_id", "title", "is_group", "count" }] }`
 - `POST /challenge` `{ "code": "123456" }` -> `{ "ok": bool }`  (answer a login challenge)
 - `POST /status`    `{}` -> `{ "state", "account", "detail", "sent_last_hour" }`
   - `state`: `starting | logged_in | challenge_required | login_failed | disabled`.
@@ -77,9 +79,13 @@ export INSTAGRAM_SIDECAR_TOKEN=dev-secret          # (Windows PowerShell: $env:I
 python igctl.py status                              # watch for "logged_in"
 python igctl.py send your_other_handle "bridge test"   # send a DM to a second account you control
 python igctl.py code 123456                         # only if status shows "challenge_required"
+
+# groups: list threads to find a group's thread_id, then send to it
+python igctl.py list                                # recent threads + GROUPS, each with its thread_id
+python igctl.py sendto 340282366000000000 "hi group"   # send to a thread/group by its thread_id
 ```
 
-A send that returns `{"ok": true}` means the bridge works.
+A send that returns `{"ok": true}` means the bridge works (for a 1:1 or a group).
 
 Once a send lands, wire it to Jarvis (`docker compose --profile instagram up`) and use
 `jarvis ig <person> <message>`. After the first successful login you can remove `IG_PASSWORD` and rely

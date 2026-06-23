@@ -69,5 +69,24 @@ export function createInstagramClient({ baseUrl = '', token = '', fetchImpl = fe
       if (!data) return { ok: false, state: 'offline' };
       return { ok: true, state: data.state, account: data.account, detail: data.detail, sentLastHour: data.sent_last_hour };
     },
+
+    /** Send to an existing thread (a GROUP or a 1:1) by its thread id. Resolves to { ok, reason?, detail? }. */
+    async sendThread(threadId, text) {
+      if (!threadId || !String(text ?? '').trim()) return { ok: false, reason: 'bad_args' };
+      const data = await call('/send', { thread_id: threadId, text });
+      if (!data) return { ok: false, reason: 'offline' };
+      return { ok: !!data.ok, reason: data.status, detail: data.detail };
+    },
+
+    /** Recent DM + group threads (so the owner can pick one). { ok, threads: [{ threadId, title, isGroup, count }] }. */
+    async threads() {
+      const data = await call('/threads', {});
+      if (!data || !data.ok) return { ok: false, threads: [] };
+      const list = Array.isArray(data.threads) ? data.threads : [];
+      return {
+        ok: true,
+        threads: list.map((t) => ({ threadId: String(t.thread_id ?? ''), title: String(t.title ?? ''), isGroup: !!t.is_group, count: Number(t.count ?? 0) })),
+      };
+    },
   };
 }

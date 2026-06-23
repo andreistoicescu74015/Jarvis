@@ -6,7 +6,9 @@ PowerShell quoting/headers. It sends the correct `Authorization: Bearer <token>`
 Run it in a shell where INSTAGRAM_SIDECAR_TOKEN is set to the SAME value app.py uses:
 
   python igctl.py status                       # is it logged in?
-  python igctl.py send <username> <message>    # send a test DM
+  python igctl.py list                         # recent threads (groups + DMs) WITH their thread_id
+  python igctl.py send <username> <message>    # send a test DM (1:1, by username)
+  python igctl.py sendto <thread_id> <message> # send to a thread by id (a GROUP, or a 1:1)
   python igctl.py code <value>                 # answer a login challenge
 
 Env: INSTAGRAM_SIDECAR_TOKEN (required), IG_SIDECAR_URL (default http://localhost:8099).
@@ -45,12 +47,16 @@ def main():
     cmd = args[0] if args else "status"
     if cmd == "status":
         call("/status", {})
+    elif cmd == "list":
+        call("/threads", {})
     elif cmd == "send" and len(args) >= 3:
         call("/send", {"username": args[1], "text": " ".join(args[2:])})
+    elif cmd == "sendto" and len(args) >= 3:
+        call("/send", {"thread_id": args[1], "text": " ".join(args[2:])})
     elif cmd == "code" and len(args) >= 2:
         call("/challenge", {"code": args[1]})
     else:
-        print("usage: python igctl.py status | send <username> <message> | code <value>")
+        print("usage: python igctl.py status | list | send <username> <message> | sendto <thread_id> <message> | code <value>")
 
 
 if __name__ == "__main__":
