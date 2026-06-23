@@ -20,6 +20,10 @@ persists data, and runs unattended in Docker. With an AI provider configured (`G
 see `.env.example`) anyone who may use it can also phrase a command in plain language, and the owner
 can switch on a chatbot mode for general questions. See [Commands](#commands).
 
+An **optional** Instagram bridge additionally lets the owner **manually** read and send Instagram DMs
+from WhatsApp (see [Instagram](#instagram-optional)) - a hand-operated remote, not an automated
+integration like the WhatsApp command system.
+
 ## Commands
 
 Address the bot as `jarvis <command>` or by @mentioning it, in a DM or a group. `jarvis help` lists
@@ -62,9 +66,17 @@ Without a token, only exact commands work.
 ## Instagram (optional)
 
 Read and send your Instagram DMs - including group chats - from WhatsApp, so you can keep a
-conversation going without opening the Instagram app. A small Python "sidecar" (`insta-sidecar/`) logs
-into an Instagram account via the unofficial `instagrapi` library; Jarvis talks to it over the internal
-Docker network. It is part of the compose stack, so it starts with the normal `docker compose up`.
+conversation going without opening the Instagram app.
+
+**This is an optional, manual add-on - not an automated integration.** Unlike the rest of Jarvis (the
+command-driven WhatsApp bot, with access control, scheduling, and natural-language translation), the
+Instagram bridge is a hand-operated remote: *you* explicitly read and send each message. There is no
+automation, no AI on the Instagram side, and no background syncing of incoming DMs. It is entirely
+**off unless you configure it** - leave `IG_USERNAME` empty to skip it.
+
+Under the hood, a small Python "sidecar" (`insta-sidecar/`) logs into an Instagram account via the
+unofficial `instagrapi` library; Jarvis talks to it over the internal Docker network. It is part of the
+compose stack, so it starts with the normal `docker compose up`.
 
 > **Unofficial = against Instagram's Terms and at real ban risk. Use a test / dedicated account.**
 

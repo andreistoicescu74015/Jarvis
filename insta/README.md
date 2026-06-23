@@ -4,7 +4,9 @@ A self-contained spike folder, kept OUTSIDE the formal `docs/` tree on purpose.
 
 **Scope (current): SEND + READ-ON-DEMAND.** The owner can **send** Instagram DMs/groups from WhatsApp
 (`jarvis ig <person> <message>`) and **read** a conversation on request (`jarvis ig read <person|n>`) -
-enough for back-and-forth without the Instagram app. What stays descoped is the BACKGROUND push/relay
+enough for back-and-forth without the Instagram app. It is **optional** (off unless configured) and
+**manual** - a hand-operated remote, with no automation or AI on the Instagram side, unlike the
+sophisticated WhatsApp command system. What stays descoped is the BACKGROUND push/relay
 of incoming DMs (the hard, risky half: message-loss on restart, an inbound socket on Jarvis,
 experimental realtime) - reading is a pull, on demand, so it avoids all of that. The earlier
 bidirectional/push design is preserved in git history (commit 75f505d) if it is ever wanted back.
