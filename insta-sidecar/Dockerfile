@@ -15,4 +15,8 @@ USER app
 VOLUME /data
 EXPOSE 8099
 
+# Healthy only once logged in to Instagram (the /health endpoint returns 200 only then), so `docker ps`
+# shows whether the auto-login succeeded. The start period covers the initial login / a one-time challenge.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 CMD ["python", "healthcheck.py"]
+
 CMD ["python", "app.py"]

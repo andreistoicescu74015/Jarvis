@@ -31,7 +31,10 @@ bidirectional design is preserved in git history (commit 75f505d) if it is ever 
 - `insta-sidecar/` - the Python instagrapi service: login + session reuse + `direct_send`, with the
   safety posture (pacing, hourly cap, proxy, truthful status, login retry). See its README.
 - Wired in `src/whatsapp-main.js` + `docker-compose.yml` (opt-in: `docker compose --profile instagram
-  up`); config in `.env.example`.
+  up`); config in `.env.example`. The sidecar **auto-logs-in on container start** (session persists in
+  the volume; `docker ps` shows `healthy` only once logged in); a first-boot login challenge is answered
+  from WhatsApp with `jarvis ig code <value>`. Optional `insta-sidecar/seed-session.ps1` reuses the
+  Phase-1 session for a challenge-free first boot.
 
 ## Safety (built in, our side)
 

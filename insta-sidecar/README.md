@@ -87,9 +87,41 @@ python igctl.py sendto 340282366000000000 "hi group"   # send to a thread/group 
 
 A send that returns `{"ok": true}` means the bridge works (for a 1:1 or a group).
 
-Once a send lands, wire it to Jarvis (`docker compose --profile instagram up`) and use
-`jarvis ig <person> <message>`. After the first successful login you can remove `IG_PASSWORD` and rely
-on the persisted session.
+Once a send lands, wire it to Jarvis (next section). After the first successful login you can remove
+`IG_PASSWORD` and rely on the persisted session.
+
+## Run under Docker (auto-login)
+
+In production you do NOT run igctl - the sidecar logs in **automatically** when the container starts.
+With `IG_USERNAME` / `IG_PASSWORD` and `INSTAGRAM_SIDECAR_TOKEN` in `.env`:
+
+```bash
+docker compose --profile instagram up -d --build
+```
+
+It logs in on boot and persists the session to the `jarvis-insta-data` volume, so every later restart
+reconnects with **no login**. Check it from WhatsApp with `jarvis ig`, or from `docker ps` (the
+container is `healthy` only once logged in). If Instagram asks for a code on the first boot, `jarvis ig`
+shows `challenge_required` - answer it with `jarvis ig code <value>`. A wrong password / unresolvable
+challenge shows `login_failed` and the sidecar stops retrying (it won't hammer Instagram); fix `.env`
+and `docker compose --profile instagram up -d` again.
+
+Tip: to drop the `--profile instagram` flag, set `COMPOSE_PROFILES=instagram` in `.env` - then plain
+`docker compose up` starts the sidecar too.
+
+### Optional: reuse your Phase-1 login (skip the first challenge, same device)
+
+A fresh login from the container is a new "device" to Instagram. To reuse the exact session + device
+from Phase 1 (challenge-free first boot, lower ban risk), seed it into the volume once - after a first
+`docker compose --profile instagram up -d` has created the volume:
+
+```powershell
+.\insta-sidecar\seed-session.ps1
+docker compose --profile instagram restart insta-sidecar
+```
+
+(Manual equivalent: copy `insta-sidecar/ig-session.json` to `/data/ig-session.json` inside the
+`*insta-data` volume.)
 
 ## Notes
 
