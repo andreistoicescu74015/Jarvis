@@ -105,11 +105,14 @@ compose stack, so it starts with the normal `docker compose up`.
 
 **Use (in WhatsApp, as the owner):**
 
-- `jarvis ig` - bridge status (logged in? a code needed? how many sent this hour).
-- `jarvis ig read <person> [count]` - show the last messages of a 1:1 (default 10), then reply.
-- `jarvis ig <person> <message>` - send a DM.
-- `jarvis ig list` then `jarvis ig read <n>` / `jarvis ig to <n> <message>` - read/send a **group** (or DM) by its number.
-- `jarvis ig code <value>` - answer a login challenge (2FA / checkpoint).
+- `jarvis ig list` - your recent conversations, numbered (groups are tagged).
+- `jarvis ig read <person|n> [count]` - the last messages of a conversation: an Instagram username, or a number from `jarvis ig list` (works for groups too). Default 10.
+- `jarvis ig send <person|n> <message>` - send a message to that username or numbered conversation.
+- `jarvis ig` - bridge status; `jarvis ig code <value>` - answer a login challenge (2FA / checkpoint).
+
+You can also just say it in **plain language** - you are the owner, so the AI translates it to the
+commands above (requires `GITHUB_MODELS_TOKEN`): *"show my Instagram chats"*, *"read my last messages
+with maria"*, *"reply to maria on Instagram: on my way"*.
 
 `jarvis ig` is **owner-only** (you must be the owner - set `OWNER_JID`, or run `jarvis owner claim` in a
 DM). Before trusting it, you can validate the sidecar against a test account on its own with the

@@ -31,42 +31,49 @@ test('ig: shows bridge status', async () => {
   assert.equal(instagram.calls.status, 1);
 });
 
-test('ig: sends a DM and confirms', async () => {
+test('ig: send <user> <message> sends a 1:1 DM and confirms', async () => {
   const instagram = fakeIg();
-  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig alice hey there', sender: 'boss', level: 'private' }));
+  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig send alice hey there', sender: 'boss', level: 'private' }));
   assert.match(out, /Sent to alice on Instagram/);
   assert.deepEqual(instagram.calls.send[0], { person: 'alice', text: 'hey there' });
 });
 
-test('ig: a send with no message is a mis-usage (usage text)', async () => {
+test('ig: send with no message is a mis-usage', async () => {
   const instagram = fakeIg();
-  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig alice', sender: 'boss', level: 'private' }));
-  assert.match(out, /Usage: jarvis ig <person> <message>/);
+  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig send alice', sender: 'boss', level: 'private' }));
+  assert.match(out, /Usage: jarvis ig send/);
+  assert.equal(instagram.calls.send.length, 0);
+});
+
+test('ig: an unknown action is a mis-usage', async () => {
+  const instagram = fakeIg();
+  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig frobnicate alice', sender: 'boss', level: 'private' }));
+  assert.match(out, /Usage: jarvis ig list/);
   assert.equal(instagram.calls.send.length, 0);
 });
 
 test('ig: a pending challenge tells the owner to submit a code', async () => {
   const instagram = fakeIg({ send: { ok: false, reason: 'challenge_required', detail: 'code sent' } });
-  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig alice yo', sender: 'boss', level: 'private' }));
+  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig send alice yo', sender: 'boss', level: 'private' }));
   assert.match(out, /needs a login code/i);
   assert.match(out, /jarvis ig code <value>/);
 });
 
 test('ig: a rate-cap is reported clearly', async () => {
   const instagram = fakeIg({ send: { ok: false, reason: 'rate_capped' } });
-  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig alice yo', sender: 'boss', level: 'private' }));
+  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig send alice yo', sender: 'boss', level: 'private' }));
   assert.match(out, /hourly send cap/i);
 });
 
 test('ig: an over-long message is reported', async () => {
   const instagram = fakeIg({ send: { ok: false, reason: 'too_long' } });
-  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig alice loooong', sender: 'boss', level: 'private' }));
+  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig send alice loooong', sender: 'boss', level: 'private' }));
   assert.match(out, /too long for an Instagram DM/);
 });
 
 test('ig: an unknown user is reported', async () => {
   const instagram = fakeIg({ send: { ok: false, reason: 'unknown_user' } });
-  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig nobody hi', sender: 'boss', level: 'private' }));
+  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig send nobody hi', sender: 'boss', level: 'private' }));
   assert.match(out, /Couldn't find Instagram user nobody/);
 });
 
@@ -77,7 +84,7 @@ test('ig: submits a challenge code', async () => {
   assert.deepEqual(instagram.calls.code, ['123456']);
 });
 
-test('ig: list shows recent threads (groups tagged) and remembers them for `to`', async () => {
+test('ig: list shows recent conversations (groups tagged) and remembers them by number', async () => {
   const store = createStore({ path: ':memory:' });
   const instagram = fakeIg({ threads: { ok: true, threads: [
     { threadId: 't1', title: 'maria', isGroup: false, count: 2 },
@@ -87,23 +94,23 @@ test('ig: list shows recent threads (groups tagged) and remembers them for `to`'
   const listed = toPlain(await handle({ text: 'jarvis ig list', sender: 'boss', level: 'private', chatId: 'dm' }));
   assert.match(listed, /1\. maria/);
   assert.match(listed, /2\. Gasca mea \(group\)/);
-  // now send to thread #2 (the group) - resolved from the remembered list
-  const sent = toPlain(await handle({ text: 'jarvis ig to 2 salut grup', sender: 'boss', level: 'private', chatId: 'dm' }));
+  // send to conversation #2 (the group), resolved from the remembered list
+  const sent = toPlain(await handle({ text: 'jarvis ig send 2 salut grup', sender: 'boss', level: 'private', chatId: 'dm' }));
   assert.match(sent, /Sent to Gasca mea on Instagram/);
   assert.deepEqual(instagram.calls.sendThread[0], { threadId: 't2', text: 'salut grup' });
   store.close();
 });
 
-test('ig: `to` without a prior list reports no such thread', async () => {
+test('ig: send to an unknown number reports no such conversation', async () => {
   const store = createStore({ path: ':memory:' });
   const instagram = fakeIg();
-  const out = toPlain(await handleFor(instagram, store)({ text: 'jarvis ig to 1 hi', sender: 'boss', level: 'private', chatId: 'dm' }));
-  assert.match(out, /No thread #1/);
+  const out = toPlain(await handleFor(instagram, store)({ text: 'jarvis ig send 9 hi', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(out, /No conversation #9/);
   assert.equal(instagram.calls.sendThread.length, 0);
   store.close();
 });
 
-test('ig: read shows the last messages of a 1:1 by username', async () => {
+test('ig: read <user> [count] shows the last messages of a 1:1', async () => {
   const instagram = fakeIg();
   const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig read maria 5', sender: 'boss', level: 'private' }));
   assert.match(out, /IG - maria/);
