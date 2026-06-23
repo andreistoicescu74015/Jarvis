@@ -11,6 +11,7 @@ answer a /challenge that login is blocked on (the owner submits the code from Wh
 code`, discovered through `jarvis ig` status).
 """
 import os
+import sys
 import logging
 
 from flask import Flask, request, jsonify
@@ -95,11 +96,15 @@ def health():
 
 
 if __name__ == "__main__":
+    # The sidecar is part of the compose stack, so it starts with a plain `docker compose up`. If
+    # Instagram isn't configured it exits cleanly (exit 0 -> `restart: on-failure` keeps it down), so it
+    # doesn't leave an idle container for people who don't use the bridge.
     if not IG_ENABLED:
-        log.warning("IG_USERNAME not set - the Instagram sidecar is idle (bridge disabled).")
-    elif not TOKEN:
-        log.error("INSTAGRAM_SIDECAR_TOKEN not set - refusing to run the bridge insecurely. Set a shared secret.")
-    else:
-        client.start()
+        log.warning("IG_USERNAME not set - Instagram bridge not configured; exiting (set IG_USERNAME in .env to enable).")
+        sys.exit(0)
+    if not TOKEN:
+        log.error("INSTAGRAM_SIDECAR_TOKEN not set - refusing to run insecurely; exiting. Set a shared secret in .env.")
+        sys.exit(0)
+    client.start()
     # threaded=True so a /challenge request is served while the login thread is blocked waiting for it.
     app.run(host="0.0.0.0", port=PORT, threaded=True)

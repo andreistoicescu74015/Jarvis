@@ -23,14 +23,14 @@ services:
     volumes:
       - jarvis-data:/app/data # auth session + sqlite persist across restarts
 
-  # Optional Instagram bridge (opt-in: `docker compose --profile instagram up`). A Python instagrapi
-  # sidecar that logs into an Instagram account so the owner can SEND DMs from WhatsApp (outbound only).
-  # UNOFFICIAL + ban-risky - see insta/. Needs IG_USERNAME (+ IG_PASSWORD for the first login, ideally
-  # IG_PROXY) and INSTAGRAM_SIDECAR_URL/TOKEN in .env. Reached by Jarvis on the internal network only.
+  # Instagram bridge sidecar - a Python instagrapi service so the owner can read/send Instagram DMs
+  # (and groups) from WhatsApp. Part of the stack, so a plain `docker compose up` starts it too and it
+  # auto-logs-in. If IG_USERNAME isn't set in .env it exits cleanly (no idle container). Enable it by
+  # setting IG_USERNAME/IG_PASSWORD + INSTAGRAM_SIDECAR_URL/TOKEN (ideally IG_PROXY) in .env. UNOFFICIAL
+  # + ban-risky - see insta/. Reached by Jarvis on the internal network only.
   insta-sidecar:
     build: ./insta-sidecar
     image: jarvis-insta-sidecar
-    profiles: ["instagram"]
     init: true
     restart: on-failure
     env_file:

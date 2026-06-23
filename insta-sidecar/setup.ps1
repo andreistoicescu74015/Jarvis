@@ -22,21 +22,21 @@ Write-Host "[1/4] .env looks complete."
 Push-Location $root
 try {
     # 2) Build + start. The sidecar auto-logs-in on boot and persists the session in the volume.
-    Write-Host "[2/4] docker compose --profile instagram up -d --build ..."
-    docker compose --profile instagram up -d --build
+    Write-Host "[2/4] docker compose up -d --build ..."
+    docker compose up -d --build
 
     # 3) Optional: reuse the Phase-1 session (same device, avoids a login challenge).
     if ($Seed) {
         Write-Host "[3/4] Seeding the local Phase-1 session ..."
         & (Join-Path $PSScriptRoot "seed-session.ps1")
-        docker compose --profile instagram restart insta-sidecar
+        docker compose restart insta-sidecar
     } else {
         Write-Host "[3/4] Fresh login from IG_USERNAME / IG_PASSWORD (use -Seed to reuse a Phase-1 session)."
     }
 
     # 4) Wait for the Instagram login (healthy), or report that a code is needed.
     Write-Host "[4/4] Waiting for the Instagram login (up to ~2 min) ..."
-    $cid = docker compose --profile instagram ps -q insta-sidecar
+    $cid = docker compose ps -q insta-sidecar
     if ($cid) { $cid = $cid.Trim() }
     for ($i = 0; $i -lt 24; $i++) {
         Start-Sleep -Seconds 5
