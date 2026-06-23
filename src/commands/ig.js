@@ -61,6 +61,8 @@ function sendError(person, r) {
       return `The Instagram bridge isn't logged in yet - check ${code('jarvis ig')}.`;
     case 'rate_capped':
       return 'Holding off to stay safe - the hourly send cap is reached. Try again later.';
+    case 'too_long':
+      return 'That message is too long for an Instagram DM - shorten it.';
     case 'unknown_user':
       return `Couldn't find Instagram user ${b(esc(person))}.`;
     case 'disabled':

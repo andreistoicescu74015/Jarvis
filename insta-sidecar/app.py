@@ -28,6 +28,7 @@ PORT = int(os.environ.get("IG_SIDECAR_PORT", "8099"))
 IG_ENABLED = bool(os.environ.get("IG_USERNAME"))
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024  # refuse oversized request bodies (a DM payload is tiny)
 # Only create/drive the account when BOTH an account and a token are configured - never run insecurely.
 client = InstagramClient() if (IG_ENABLED and TOKEN) else None
 

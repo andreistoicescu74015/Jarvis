@@ -45,6 +45,12 @@ sidecar refuses to drive an account without one). Internal network only; do not 
 | `INSTAGRAM_SIDECAR_TOKEN` | shared secret - **required** |
 | `IG_SIDECAR_PORT` | HTTP port (default 8099) |
 
+Advanced (sensible defaults; rarely changed): `IG_LOGIN_RETRY_S` (base login backoff, 120),
+`IG_LOGIN_MAX_BACKOFF_S` (max login backoff, 1800), `IG_UID_CACHE_TTL_S` (username->id cache TTL,
+21600), `IG_MAX_TEXT_LEN` (max DM length, 2000), `IG_LOG_LEVEL` (INFO). A wrong password or an
+unresolvable challenge is **terminal** - the sidecar stops retrying (it will not hammer Instagram) and
+shows `login_failed` / `challenge_required` via `jarvis ig`; fix the account and restart.
+
 ## Phase 1 - validate standalone first (on a test account)
 
 The Node side is unit-tested, but this sidecar talks to the real Instagram private API, which cannot be

@@ -54,6 +54,12 @@ test('ig: a rate-cap is reported clearly', async () => {
   assert.match(out, /hourly send cap/i);
 });
 
+test('ig: an over-long message is reported', async () => {
+  const instagram = fakeIg({ send: { ok: false, reason: 'too_long' } });
+  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig alice loooong', sender: 'boss', level: 'private' }));
+  assert.match(out, /too long for an Instagram DM/);
+});
+
 test('ig: an unknown user is reported', async () => {
   const instagram = fakeIg({ send: { ok: false, reason: 'unknown_user' } });
   const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig nobody hi', sender: 'boss', level: 'private' }));
