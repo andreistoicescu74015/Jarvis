@@ -133,7 +133,7 @@ const lifecycle = {
 // Instagram bridge (optional, OUTBOUND only). A separate Python `instagrapi` sidecar (see
 // `insta-sidecar/`) logs into an Instagram account; the owner sends DMs from WhatsApp via the
 // owner-only `ig` command. Off unless INSTAGRAM_SIDECAR_URL is set (like the AI client). UNOFFICIAL +
-// ban-risky - the sidecar carries the safety posture (session reuse, pacing, an hourly cap); see insta/.
+// ban-risky - the sidecar carries the safety posture (session reuse, pacing, an hourly cap); see the README.
 const instagram = createInstagramClient({
   baseUrl: process.env.INSTAGRAM_SIDECAR_URL ?? '',
   token: process.env.INSTAGRAM_SIDECAR_TOKEN ?? '',

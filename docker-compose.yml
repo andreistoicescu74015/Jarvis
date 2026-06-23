@@ -27,7 +27,7 @@ services:
   # (and groups) from WhatsApp. Part of the stack, so a plain `docker compose up` starts it too and it
   # auto-logs-in. If IG_USERNAME isn't set in .env it exits cleanly (no idle container). Enable it by
   # setting IG_USERNAME/IG_PASSWORD + INSTAGRAM_SIDECAR_URL/TOKEN (ideally IG_PROXY) in .env. UNOFFICIAL
-  # + ban-risky - see insta/. Reached by Jarvis on the internal network only.
+  # + ban-risky - see the README. Reached by Jarvis on the internal network only.
   insta-sidecar:
     build: ./insta-sidecar
     image: jarvis-insta-sidecar

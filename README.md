@@ -112,8 +112,8 @@ compose stack, so it starts with the normal `docker compose up`.
 - `jarvis ig code <value>` - answer a login challenge (2FA / checkpoint).
 
 `jarvis ig` is **owner-only** (you must be the owner - set `OWNER_JID`, or run `jarvis owner claim` in a
-DM). The full design, safety posture, and standalone testing steps are in [`insta/`](insta/) and
-[`insta-sidecar/README.md`](insta-sidecar/README.md).
+DM). Before trusting it, you can validate the sidecar against a test account on its own with the
+bundled `insta-sidecar/igctl.py` (e.g. `python igctl.py read <user> 10`, `python igctl.py send <user> <msg>`).
 
 **If `jarvis ig` says it is an unknown command**, the running image predates the command - rebuild it:
 `docker compose up -d --build`.

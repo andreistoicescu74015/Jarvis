@@ -2,7 +2,7 @@ import { b, i, code, esc } from '../core/format.js';
 import { misuse } from '../core/reply.js';
 
 /**
- * Owner: use Instagram DMs from WhatsApp (the outbound + read-on-demand bridge; see `insta/`).
+ * Owner: use Instagram DMs from WhatsApp (the outbound + read-on-demand bridge; see the README).
  * Read a conversation, then reply - back and forth, without the Instagram app:
  *   jarvis ig read <person|n> [count]  - last messages of a 1:1 (by username) or a thread (by number)
  *   jarvis ig <person> <message>       - DM a username
