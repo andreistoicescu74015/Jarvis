@@ -2,7 +2,7 @@
 Instagram bridge client - OUTBOUND ONLY (unofficial private API via instagrapi).
 
 Logs into an Instagram account and SENDS DMs on request. It does NOT receive - there is no poll/MQTT
-loop and no inbound channel back to Jarvis. The owner sends with `jarvis ig <person> <message>`.
+loop and no inbound channel back to Jarvis. The owner sends with `jarvis ig send <person> <message>`.
 
 SAFETY (this is the whole point of the sidecar - it carries the anti-ban posture):
   - Session reuse: persist device fingerprint + cookies; validate WITHOUT a full re-login, and only

@@ -47,7 +47,7 @@ try {
             Write-Host "`nDONE - logged in to Instagram. In WhatsApp:"
             Write-Host "  jarvis ig                 (status)"
             Write-Host "  jarvis ig read <user>     (read a conversation)"
-            Write-Host "  jarvis ig <user> <msg>    (send a DM)"
+            Write-Host "  jarvis ig send <user> <msg>  (send a DM)"
             exit 0
         }
     }
