@@ -2,5 +2,5 @@
 # instagrapi is the unofficial Instagram private-API client (the IG analogue of Baileys). Pinned to
 # pinned to a version validated against a test account; bump deliberately as upstream moves (it changes fast).
 instagrapi==2.16.24
-flask==3.0.3
+flask==3.1.3
 requests>=2.31,<3
