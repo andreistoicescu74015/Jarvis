@@ -60,6 +60,14 @@ def threads():
     return jsonify(client.threads(amount=int(body.get("amount", 20))))
 
 
+@app.post("/messages")
+def messages():
+    if not client:
+        return jsonify({"ok": False, "status": "disabled"})
+    body = request.get_json(silent=True) or {}
+    return jsonify(client.messages(username=body.get("username"), thread_id=body.get("thread_id"), amount=body.get("amount", 10)))
+
+
 @app.post("/challenge")
 def challenge():
     if not client:

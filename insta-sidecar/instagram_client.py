@@ -276,3 +276,61 @@ class InstagramClient:
         except Exception as err:  # noqa: BLE001
             log.warning("threads failed: %s", err)
             return {"ok": False, "status": "error"}
+
+    # ---- read (on-demand: the last N messages of a conversation, for back-and-forth) ----
+
+    def messages(self, username=None, thread_id=None, amount=10):
+        if self.state != "logged_in":
+            return {"ok": False, "status": self.state}
+        try:
+            amount = max(1, min(int(amount), 50))
+        except (TypeError, ValueError):
+            amount = 10
+        tid = thread_id
+        if not tid and username:
+            tid = self._thread_for_username(username)
+            if not tid:
+                return {"ok": False, "status": "unknown_user"}
+        if not tid:
+            return {"ok": False, "status": "bad_args"}
+        try:
+            names, title = {}, ""
+            try:
+                th = self.cl.direct_thread(int(tid), amount=amount)  # messages + users + title in one call
+                for u in (getattr(th, "users", []) or []):
+                    names[str(getattr(u, "pk", ""))] = getattr(u, "username", "")
+                title = getattr(th, "thread_title", "") or ""
+                msgs = getattr(th, "messages", []) or []
+            except Exception:  # noqa: BLE001 - fall back to a plain message fetch
+                msgs = self.cl.direct_messages(int(tid), amount=amount)
+            me = str(self.cl.user_id)
+            out = []
+            for m in reversed(msgs):  # API is newest-first; reverse to oldest-first for reading
+                uid = str(getattr(m, "user_id", "") or "")
+                itype = getattr(m, "item_type", "text")
+                text = (getattr(m, "text", "") or "") if itype == "text" else f"[{itype}]"
+                out.append({"from_me": uid == me, "username": names.get(uid, ""), "text": text})
+            return {"ok": True, "title": title, "messages": out}
+        except Exception as err:  # noqa: BLE001
+            log.warning("messages failed: %s", err)
+            return {"ok": False, "status": "error"}
+
+    def _thread_for_username(self, username):
+        uid = self._resolve(username)
+        if not uid:
+            return None
+        try:
+            th = self.cl.direct_thread_by_participants([int(uid)])
+            tid = th.get("thread_id") if isinstance(th, dict) else getattr(th, "id", None)
+            if tid:
+                return str(tid)
+        except Exception as err:  # noqa: BLE001 - method may be absent / no thread; fall back to a scan
+            log.debug("direct_thread_by_participants failed: %s", err)
+        try:
+            for th in self.cl.direct_threads(amount=50):
+                users = getattr(th, "users", []) or []
+                if not bool(getattr(th, "is_group", False)) and len(users) == 1 and str(getattr(users[0], "pk", "")) == str(uid):
+                    return str(getattr(th, "id", "") or "")
+        except Exception:  # noqa: BLE001
+            pass
+        return None

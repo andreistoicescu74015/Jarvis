@@ -2,10 +2,12 @@
 
 A self-contained spike folder, kept OUTSIDE the formal `docs/` tree on purpose.
 
-**Scope (current): OUTBOUND ONLY.** Goal narrowed to: the owner can **send** Instagram DMs from
-WhatsApp (`jarvis ig <person> <message>`). Receiving DMs into WhatsApp was descoped - it was the hard,
-risky half (message-loss on restart, an inbound socket on Jarvis, experimental realtime). The earlier
-bidirectional design is preserved in git history (commit 75f505d) if it is ever wanted back.
+**Scope (current): SEND + READ-ON-DEMAND.** The owner can **send** Instagram DMs/groups from WhatsApp
+(`jarvis ig <person> <message>`) and **read** a conversation on request (`jarvis ig read <person|n>`) -
+enough for back-and-forth without the Instagram app. What stays descoped is the BACKGROUND push/relay
+of incoming DMs (the hard, risky half: message-loss on restart, an inbound socket on Jarvis,
+experimental realtime) - reading is a pull, on demand, so it avoids all of that. The earlier
+bidirectional/push design is preserved in git history (commit 75f505d) if it is ever wanted back.
 
 ## What's in here
 
@@ -26,8 +28,9 @@ bidirectional design is preserved in git history (commit 75f505d) if it is ever 
 
 - `src/instagram/sidecar-client.js` - the owner-only `ctx.instagram` capability: `send` / `code` /
   `status` over HTTP to the sidecar; best-effort, null when unconfigured.
-- `src/commands/ig.js` - `jarvis ig` (status) / `jarvis ig <person> <message>` (send) / `jarvis ig code
-  <value>` (answer a login challenge). Owner-only.
+- `src/commands/ig.js` - `jarvis ig` (status) / `jarvis ig read <person|n> [count]` (read a
+  conversation, on demand) / `jarvis ig <person> <message>` (DM) / `jarvis ig list` + `jarvis ig to <n>
+  <message>` (groups + DMs by number) / `jarvis ig code <value>` (login challenge). Owner-only.
 - `insta-sidecar/` - the Python instagrapi service: login + session reuse + `direct_send`, with the
   safety posture (pacing, hourly cap, proxy, truthful status, login retry). See its README.
 - Wired in `src/whatsapp-main.js` + `docker-compose.yml` (opt-in: `docker compose --profile instagram

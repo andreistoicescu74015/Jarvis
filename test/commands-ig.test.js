@@ -8,12 +8,13 @@ import { toPlain } from '../src/core/format.js';
 
 /** A fake `ctx.instagram` capability that records the command's calls. */
 function fakeIg(overrides = {}) {
-  const calls = { send: [], sendThread: [], code: [], status: 0, threads: 0 };
+  const calls = { send: [], sendThread: [], code: [], status: 0, threads: 0, messages: [] };
   return {
     calls,
     send: async (person, text) => { calls.send.push({ person, text }); return overrides.send ?? { ok: true }; },
     sendThread: async (threadId, text) => { calls.sendThread.push({ threadId, text }); return overrides.sendThread ?? { ok: true }; },
     threads: async () => { calls.threads += 1; return overrides.threads ?? { ok: true, threads: [] }; },
+    messages: async (opts) => { calls.messages.push(opts); return overrides.messages ?? { ok: true, title: 'maria', messages: [{ fromMe: false, username: 'maria', text: 'hey' }, { fromMe: true, username: '', text: 'salut' }] }; },
     code: async (v) => { calls.code.push(v); return overrides.code ?? true; },
     status: async () => { calls.status += 1; return overrides.status ?? { ok: true, state: 'logged_in', account: 'me', sentLastHour: 2 }; },
   };
@@ -100,6 +101,41 @@ test('ig: `to` without a prior list reports no such thread', async () => {
   assert.match(out, /No thread #1/);
   assert.equal(instagram.calls.sendThread.length, 0);
   store.close();
+});
+
+test('ig: read shows the last messages of a 1:1 by username', async () => {
+  const instagram = fakeIg();
+  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig read maria 5', sender: 'boss', level: 'private' }));
+  assert.match(out, /IG - maria/);
+  assert.match(out, /maria: hey/);
+  assert.match(out, /me: salut/);
+  assert.deepEqual(instagram.calls.messages[0], { username: 'maria', amount: 5 });
+});
+
+test('ig: read by number uses the thread from the last list', async () => {
+  const store = createStore({ path: ':memory:' });
+  const instagram = fakeIg({ threads: { ok: true, threads: [
+    { threadId: 't1', title: 'maria', isGroup: false, count: 2 },
+    { threadId: 't2', title: 'Gasca', isGroup: true, count: 4 },
+  ] } });
+  const handle = handleFor(instagram, store);
+  await handle({ text: 'jarvis ig list', sender: 'boss', level: 'private', chatId: 'dm' });
+  await handle({ text: 'jarvis ig read 2', sender: 'boss', level: 'private', chatId: 'dm' });
+  assert.deepEqual(instagram.calls.messages[0], { threadId: 't2', amount: 10 });
+  store.close();
+});
+
+test('ig: read with no target is a mis-usage', async () => {
+  const instagram = fakeIg();
+  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig read', sender: 'boss', level: 'private' }));
+  assert.match(out, /Usage: jarvis ig read/);
+  assert.equal(instagram.calls.messages.length, 0);
+});
+
+test('ig: read of an unknown conversation is reported', async () => {
+  const instagram = fakeIg({ messages: { ok: false, reason: 'unknown_user', messages: [] } });
+  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig read nobody', sender: 'boss', level: 'private' }));
+  assert.match(out, /Couldn't find a conversation with nobody/);
 });
 
 test('ig: is owner-only', async () => {

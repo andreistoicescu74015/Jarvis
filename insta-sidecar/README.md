@@ -93,9 +93,12 @@ Once a send lands, wire it to Jarvis (next section). After the first successful 
 ## Run under Docker (auto-login)
 
 In production you do NOT run igctl - the sidecar logs in **automatically** when the container starts.
-With `IG_USERNAME` / `IG_PASSWORD` and `INSTAGRAM_SIDECAR_TOKEN` in `.env`:
+With `IG_USERNAME` / `IG_PASSWORD` and `INSTAGRAM_SIDECAR_TOKEN` in `.env`, run the helper (it checks
+`.env`, builds, starts, and waits until logged in) - or the single command it wraps:
 
-```bash
+```powershell
+.\insta-sidecar\setup.ps1          # one command; add -Seed to reuse your Phase-1 session (no challenge)
+# equivalently:
 docker compose --profile instagram up -d --build
 ```
 

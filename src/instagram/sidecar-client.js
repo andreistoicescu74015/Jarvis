@@ -88,5 +88,18 @@ export function createInstagramClient({ baseUrl = '', token = '', fetchImpl = fe
         threads: list.map((t) => ({ threadId: String(t.thread_id ?? ''), title: String(t.title ?? ''), isGroup: !!t.is_group, count: Number(t.count ?? 0) })),
       };
     },
+
+    /** Read the last `amount` messages of a conversation (by `username` 1:1, or by `threadId`).
+     *  { ok, title, messages: [{ fromMe, username, text }] } (oldest -> newest); reason on failure. */
+    async messages({ username, threadId, amount = 10 } = {}) {
+      const data = await call('/messages', { username, thread_id: threadId, amount });
+      if (!data || !data.ok) return { ok: false, reason: data?.status, messages: [] };
+      const list = Array.isArray(data.messages) ? data.messages : [];
+      return {
+        ok: true,
+        title: String(data.title ?? ''),
+        messages: list.map((m) => ({ fromMe: !!m.from_me, username: String(m.username ?? ''), text: String(m.text ?? '') })),
+      };
+    },
   };
 }
