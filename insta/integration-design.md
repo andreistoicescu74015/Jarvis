@@ -4,6 +4,14 @@ How an Instagram DM bridge would slot into Jarvis. This is a DESIGN, not built. 
 research conclusion: an unofficial private API via a **Python `instagrapi` sidecar**, with Jarvis
 (Node 24) as the bridge. See [`research.md`](research.md).
 
+> **SCOPE UPDATE (2026-06-23) - what was actually built is OUTBOUND ONLY.** The sections below that
+> describe RECEIVING DMs (the inbound relay, the ingest server, the thread map, quote-reply routing,
+> the poll/realtime receive loop) are **SUPERSEDED** - they were descoped as the hard, risky half.
+> The built feature only SENDS: `jarvis ig <person> <message>` -> sidecar -> `direct_send`. The
+> sidecar carries the safety posture (session reuse, pacing under a lock, an hourly send cap, mandatory
+> token, login retry, truthful status). Keep the rest below as the record of the fuller design if
+> receiving is ever wanted back. See [`README.md`](README.md) for the as-built wiring.
+
 ## 1. What we are building (and what we are not)
 
 This is a **personal relay**, owner-only - not a second command bot. Jarvis sits between *your*

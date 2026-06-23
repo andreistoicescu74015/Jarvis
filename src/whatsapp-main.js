@@ -16,9 +16,7 @@ import { socketLogger } from './whatsapp/socket-logger.js';
 import { commands } from './commands/index.js';
 import { num } from './core/env.js';
 import { createAiClient } from './core/ai.js';
-import { createSidecarClient } from './instagram/sidecar-client.js';
-import { createBridge } from './instagram/bridge.js';
-import { createIngestServer } from './instagram/ingest-server.js';
+import { createInstagramClient } from './instagram/sidecar-client.js';
 
 /**
  * Composition root for the live WhatsApp bot. Mirrors `cli.js`, but wires the
@@ -132,35 +130,15 @@ const lifecycle = {
   },
 };
 
-// Instagram DM bridge (optional). A separate Python `instagrapi` sidecar (see `insta-sidecar/`) drives
-// a personal Instagram account and PUSHES inbound DMs to our ingest server; we relay them into the
-// owner's WhatsApp and send replies back via the owner-only `ig` command. Off unless
-// INSTAGRAM_SIDECAR_URL is set (like the AI client). It is a personal relay, so it needs OWNER_JID as
-// the delivery target. UNOFFICIAL + ban-risky - see insta/ for the safety posture.
-const igOwner = process.env.OWNER_JID ?? '';
-const igToken = process.env.INSTAGRAM_SIDECAR_TOKEN ?? '';
-const igClient = createSidecarClient({ baseUrl: process.env.INSTAGRAM_SIDECAR_URL ?? '', token: igToken, log });
-let igServer;
-let igCapability;
-if (igClient) {
-  if (!igOwner) log.warn('ig: INSTAGRAM_SIDECAR_URL is set but OWNER_JID is not - inbound DMs have no relay target');
-  const bridge = createBridge({
-    store,
-    send: (target, message) => adapter.send(target, message),
-    owner: igOwner,
-    client: igClient,
-    prefix: process.env.JARVIS_PREFIX ?? 'jarvis',
-    log,
-  });
-  igCapability = bridge.capability;
-  igServer = createIngestServer({
-    bridge,
-    token: igToken,
-    host: process.env.INSTAGRAM_INGEST_HOST ?? '0.0.0.0',
-    port: num(process.env.INSTAGRAM_INGEST_PORT, 8765),
-    log,
-  });
-}
+// Instagram bridge (optional, OUTBOUND only). A separate Python `instagrapi` sidecar (see
+// `insta-sidecar/`) logs into an Instagram account; the owner sends DMs from WhatsApp via the
+// owner-only `ig` command. Off unless INSTAGRAM_SIDECAR_URL is set (like the AI client). UNOFFICIAL +
+// ban-risky - the sidecar carries the safety posture (session reuse, pacing, an hourly cap); see insta/.
+const instagram = createInstagramClient({
+  baseUrl: process.env.INSTAGRAM_SIDECAR_URL ?? '',
+  token: process.env.INSTAGRAM_SIDECAR_TOKEN ?? '',
+  log,
+});
 
 const app = createApp(adapter, {
   // match is LID-aware so an owner set by phone number matches a LID sender.
@@ -181,7 +159,7 @@ const app = createApp(adapter, {
     send: (target, message) => adapter.send(target, message),
     community: adapter.community,
     scheduler,
-    instagram: igCapability,
+    instagram,
     ai,
     // Canonicalize a named person for the access lists: a JID (e.g. from an @mention)
     // is resolved toward its phone form; a bare number becomes a phone JID. Matching
@@ -237,7 +215,6 @@ const quit = async (code = 0) => {
   try {
     await proactiveRunner.stop();
     await adapter.stop();
-    if (igServer) await igServer.stop();
   } catch (err) {
     log.error('error during shutdown', { error: err?.message ?? String(err) });
   } finally {
@@ -252,11 +229,6 @@ process.on('SIGTERM', () => quit(0));
 // supervisor restarts a clean one (better than limping on in an unknown state).
 process.on('uncaughtException', (err) => { log.error('uncaught exception', { error: err?.message ?? String(err) }); quit(1); });
 process.on('unhandledRejection', (reason) => { log.error('unhandled rejection', { error: reason?.message ?? String(reason) }); quit(1); });
-
-if (igServer) {
-  await igServer.start();
-  log.info('ig: Instagram bridge inbound listener started', { port: num(process.env.INSTAGRAM_INGEST_PORT, 8765) });
-}
 
 log.info('Jarvis starting on WhatsApp - scan the QR on first run to pair.');
 await app.start();

@@ -1,70 +1,55 @@
-# insta/ - Instagram DM bridge (research + design)
+# insta/ - Instagram bridge (research + design)
 
-A self-contained spike folder, kept OUTSIDE the formal `docs/` tree on purpose. Goal: let the
-owner read and answer Instagram DMs from inside WhatsApp via Jarvis, so the Instagram app can be
-dropped for messaging. Nothing here is built yet - this is a decision record + a forward design.
+A self-contained spike folder, kept OUTSIDE the formal `docs/` tree on purpose.
+
+**Scope (current): OUTBOUND ONLY.** Goal narrowed to: the owner can **send** Instagram DMs from
+WhatsApp (`jarvis ig <person> <message>`). Receiving DMs into WhatsApp was descoped - it was the hard,
+risky half (message-loss on restart, an inbound socket on Jarvis, experimental realtime). The earlier
+bidirectional design is preserved in git history (commit 75f505d) if it is ever wanted back.
 
 ## What's in here
 
 | File | What it is |
 |------|------------|
-| [`research.md`](research.md) | Deep-research findings (2026-06-23), multi-source, adversarially fact-checked, with citations. Answers: official vs unofficial, which library, Node vs Python, ban risk. |
-| [`integration-design.md`](integration-design.md) | How a bridge would slot into Jarvis - the sidecar, the Node client, the `ig` command, thread routing, anti-ban reuse, env wiring. Mirrors the existing WhatsApp adapter patterns. |
+| [`research.md`](research.md) | Deep-research findings (2026-06-23): official vs unofficial, which library, Node vs Python, ban risk. Still fully valid. |
+| [`integration-design.md`](integration-design.md) | The original (bidirectional) design sketch. Its inbound/relay/quote-reply sections are SUPERSEDED by the outbound-only build - see the banner at its top. |
 
-## Headline (read this first)
+## Headline
 
-1. **The official Meta Instagram API cannot do this.** Every official path needs an Instagram
-   *professional* account, *cannot* start a conversation (the other person must message you first),
-   and confines replies to a 24-hour window. It is a customer-care tool, not free friend-to-friend
-   chat. Converting your account to professional does not rescue it. (See research.md, findings 1-2.)
+1. **The official Meta Instagram API cannot do this** (personal P2P): professional account required,
+   cannot initiate, 24h window. So the route is the **unofficial** private API. (research.md.)
+2. **Base: Python `instagrapi`** (the Node libraries are stale), run as a **sidecar** Jarvis talks to.
+3. **Outbound only** keeps it simple and far safer: no inbound socket on Jarvis, no message-loss
+   surface, no experimental realtime. The whole anti-ban posture lives in the sidecar.
 
-2. **The only realistic route is the unofficial private API** - the Instagram analogue of how Jarvis
-   already drives WhatsApp via Baileys.
+## How it is wired (as built)
 
-3. **Best base: Python `instagrapi`** (actively maintained, full DM read+send, built-in realtime
-   receive). The Node libraries are stale. So the clean shape is a **Python `instagrapi` sidecar**
-   process that Jarvis (Node 24) talks to over local HTTP - not in-process Node. (Findings 3-6.)
+- `src/instagram/sidecar-client.js` - the owner-only `ctx.instagram` capability: `send` / `code` /
+  `status` over HTTP to the sidecar; best-effort, null when unconfigured.
+- `src/commands/ig.js` - `jarvis ig` (status) / `jarvis ig <person> <message>` (send) / `jarvis ig code
+  <value>` (answer a login challenge). Owner-only.
+- `insta-sidecar/` - the Python instagrapi service: login + session reuse + `direct_send`, with the
+  safety posture (pacing, hourly cap, proxy, truthful status, login retry). See its README.
+- Wired in `src/whatsapp-main.js` + `docker-compose.yml` (opt-in: `docker compose --profile instagram
+  up`); config in `.env.example`.
 
-4. **Ban risk is real and tightening.** This is the crux decision for you - see below.
+## Safety (built in, our side)
 
-## The one decision only you can make: which Instagram account
-
-Your stated goal ("drop the app, keep my real conversations") points at your **main** account - a
-dedicated account would not have your existing threads with friends. But the safest technical advice
-is a **dedicated** account, because a private-API login can trigger `challenge_required` (captcha /
-phone / password reset) and, if Instagram escalates, a ban.
-
-These two pull against each other. The honest framing:
-
-- **Main account** = achieves the actual goal, but you are risking your real account. Mitigate hard
-  (2FA, stable device fingerprint, residential/mobile proxy, human pacing, slow warm-up) and accept
-  residual risk.
-- **Dedicated account** = much safer, but it is a different inbox - only useful if you are willing to
-  migrate the people you chat with, or only bridge a subset.
-
-There is no free lunch here. research.md lays out the mitigations either way; the choice is yours.
+- **No inbound socket on Jarvis** (outbound-only) - the smallest possible surface.
+- **Mandatory token** - the sidecar refuses to drive an account without `INSTAGRAM_SIDECAR_TOKEN`.
+- **Session reuse + optional password-drop** after first login (fewer logins = fewer challenges).
+- **Send pacing (under lock) + hourly cap** - anti-ban; **proxy** support.
+- **Challenge/2FA** surfaced via `jarvis ig` status and answered with `jarvis ig code` (never auto-bypassed).
+- **Owner-only** command.
 
 ## Status
 
-- [x] Decision: official vs unofficial -> **unofficial** (official is structurally impossible; see research)
-- [x] Decision: library + runtime -> **Python instagrapi sidecar** (see research)
-- [ ] Decision: which account (main vs dedicated) - **OPEN, your call** (set it in `.env` at deploy time)
-- [x] Build: **IMPLEMENTED.** Node bridge (`src/instagram/`, the `ig` command) + Python sidecar
-  (`insta-sidecar/`) + Docker wiring. The Node side is unit-tested green (`npm test`); the Python
-  sidecar talks to the real Instagram API and **must be validated against a throwaway account first**
-  (Phase 1 in `insta-sidecar/README.md`) before pointing it at any account you care about.
+- [x] Scope: **outbound-only** (send WhatsApp -> Instagram)
+- [x] Route/library: unofficial -> **Python instagrapi sidecar**
+- [x] Build: **IMPLEMENTED.** Node side unit-tested green (`npm test`). The Python sidecar talks to the
+  real Instagram API and **must be validated standalone first** (Phase 1 in `insta-sidecar/README.md`).
+- [ ] Account: a **test account** for now (your call to move to another later; set in `.env`).
 
-### How it is wired (as built)
+## Caveat
 
-- `src/instagram/sidecar-client.js` - Node HTTP client to the sidecar (send / threads / challenge); best-effort, null when unconfigured.
-- `src/instagram/bridge.js` - relays inbound DMs into the owner's WhatsApp; the owner-only `ctx.instagram` capability.
-- `src/instagram/ingest-server.js` - the loopback endpoint the sidecar pushes inbound events to.
-- `src/commands/ig.js` - `jarvis ig` (list) / `jarvis ig <person> <message>` (send) / `jarvis ig code <value>` (challenge).
-- `insta-sidecar/` - the Python instagrapi service (poll by default; experimental realtime opt-in).
-- Wired in `src/whatsapp-main.js` and `docker-compose.yml` (opt-in: `docker compose --profile instagram up`); config in `.env.example`.
-
-## Caveat on freshness
-
-`instagrapi`'s realtime receive (MQTT) and push (FBNS) are only weeks old as of the research date and
-flagged *experimental*; Meta's surface moves fast. Re-verify library state and permission rules at
-build time. Full time-sensitivity notes in research.md.
+`instagrapi` is pinned; the private API drifts and the library moves fast - re-verify at build time.

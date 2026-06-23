@@ -1,21 +1,20 @@
 import { nullLogger } from '../core/log.js';
 
 /**
- * HTTP client for the Instagram sidecar (a Python `instagrapi` microservice; see `insta-sidecar/`).
- * It is the ONLY thing that speaks the sidecar's wire shapes - everything it returns is a clean
- * value-object, so the bridge and the `ig` command never see raw Instagram/instagrapi primitives
- * (the "translate, not pass-through" rule). Deliberately thin and best-effort: any failure - no
- * sidecar configured, a network error, a timeout, a non-ok response - resolves to a falsy/empty
- * value, so the deterministic bot is never blocked when the Instagram leg is down (mirrors the AI
- * client).
+ * Client for the Instagram sidecar (a Python `instagrapi` microservice; see `insta-sidecar/`). This
+ * IS the owner-only `ctx.instagram` capability: an OUTBOUND-only bridge - send a DM, submit a login
+ * challenge code, read the bridge status. It is the only thing that speaks the sidecar's wire shapes,
+ * so the `ig` command sees clean value-objects ("translate, not pass-through"). Thin and best-effort:
+ * any failure resolves to a clear, non-throwing result, so the deterministic bot is never blocked
+ * when the Instagram leg is down (mirrors the AI client).
  *
- * Returns null when no `baseUrl` is configured - the Instagram bridge is then simply off and the
- * caller stays WhatsApp-only. `fetchImpl` is injectable so tests stay offline.
+ * Returns null when no `baseUrl` is configured - the bridge is then simply off and the caller stays
+ * WhatsApp-only. `fetchImpl` is injectable so tests stay offline.
  *
  * @param {{ baseUrl?: string, token?: string, fetchImpl?: typeof fetch, log?: import('../core/log.js').Logger, timeoutMs?: number }} [opts]
- * @returns {{ send: (m: object) => Promise<boolean>, threads: () => Promise<object[]>, challenge: (value: string) => Promise<boolean> } | null}
+ * @returns {{ send: (person: string, text: string) => Promise<{ ok: boolean, reason?: string, detail?: string }>, code: (value: string) => Promise<boolean>, status: () => Promise<object> } | null}
  */
-export function createSidecarClient({ baseUrl = '', token = '', fetchImpl = fetch, log = nullLogger, timeoutMs = 8000 } = {}) {
+export function createInstagramClient({ baseUrl = '', token = '', fetchImpl = fetch, log = nullLogger, timeoutMs = 8000 } = {}) {
   if (!baseUrl) return null;
   const root = baseUrl.replace(/\/+$/, '');
 
@@ -42,32 +41,33 @@ export function createSidecarClient({ baseUrl = '', token = '', fetchImpl = fetc
     }
   }
 
+  const handleOf = (person) => String(person ?? '').trim().replace(/^@/, '');
+
   return {
     /**
-     * Send a DM. The sidecar resolves the target in order: threadId, then userId, then username.
-     * @returns {Promise<boolean>} delivered?
+     * Send a DM to an Instagram username. Resolves to { ok, reason?, detail? } - never throws.
+     * `reason` carries the sidecar's status on failure (challenge_required / not_logged_in /
+     * rate_capped / unknown_user / ...), so the command can tell the owner exactly what happened.
      */
-    async send({ username, threadId, userId, text } = {}) {
-      const data = await call('/send', { username, thread_id: threadId, user_id: userId, text });
-      return !!data?.ok;
+    async send(person, text) {
+      const username = handleOf(person);
+      if (!username || !String(text ?? '').trim()) return { ok: false, reason: 'bad_args' };
+      const data = await call('/send', { username, text });
+      if (!data) return { ok: false, reason: 'offline' };
+      return { ok: !!data.ok, reason: data.status, detail: data.detail };
     },
 
-    /** Recent DM threads as clean value-objects. Empty array on any failure. */
-    async threads() {
-      const data = await call('/threads', {});
-      const list = Array.isArray(data?.threads) ? data.threads : [];
-      return list.map((t) => ({
-        username: String(t?.username ?? ''),
-        name: String(t?.name ?? t?.username ?? ''),
-        unread: !!t?.unread,
-        lastText: String(t?.last_text ?? ''),
-      }));
-    },
-
-    /** Submit a login-challenge code (2FA / checkpoint) the bridge asked the owner about. @returns accepted? */
-    async challenge(value) {
+    /** Submit a login-challenge code (2FA / checkpoint) the owner read from `jarvis ig`. @returns accepted? */
+    async code(value) {
       const data = await call('/challenge', { code: String(value ?? '') });
       return !!data?.ok;
+    },
+
+    /** Bridge status: { ok, state, account?, detail?, sentLastHour? }. `ok:false` / state 'offline' when unreachable. */
+    async status() {
+      const data = await call('/status', {});
+      if (!data) return { ok: false, state: 'offline' };
+      return { ok: true, state: data.state, account: data.account, detail: data.detail, sentLastHour: data.sent_last_hour };
     },
   };
 }

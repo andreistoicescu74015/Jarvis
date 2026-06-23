@@ -7,23 +7,24 @@ import { toPlain } from '../src/core/format.js';
 
 /** A fake `ctx.instagram` capability that records the command's calls. */
 function fakeIg(overrides = {}) {
-  const calls = { send: [], threads: 0, code: [] };
+  const calls = { send: [], code: [], status: 0 };
   return {
     calls,
-    send: async (person, text) => { calls.send.push({ person, text }); return overrides.send ?? true; },
-    threads: async () => { calls.threads += 1; return overrides.threads ?? [{ username: 'alice', name: 'Alice', unread: true, lastText: 'hi' }]; },
+    send: async (person, text) => { calls.send.push({ person, text }); return overrides.send ?? { ok: true }; },
     code: async (v) => { calls.code.push(v); return overrides.code ?? true; },
+    status: async () => { calls.status += 1; return overrides.status ?? { ok: true, state: 'logged_in', account: 'me', sentLastHour: 2 }; },
   };
 }
 
 const handleFor = (instagram) => createDispatcher(createRegistry([ig]), { owner: 'boss', instagram });
 
-test('ig: lists recent threads', async () => {
+test('ig: shows bridge status', async () => {
   const instagram = fakeIg();
   const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig', sender: 'boss', level: 'private' }));
-  assert.match(out, /Instagram - recent threads/);
-  assert.match(out, /Alice \(unread\): hi/);
-  assert.equal(instagram.calls.threads, 1);
+  assert.match(out, /Instagram bridge/);
+  assert.match(out, /State: logged_in \(me\)/);
+  assert.match(out, /2 sent in the last hour/);
+  assert.equal(instagram.calls.status, 1);
 });
 
 test('ig: sends a DM and confirms', async () => {
@@ -40,10 +41,23 @@ test('ig: a send with no message is a mis-usage (usage text)', async () => {
   assert.equal(instagram.calls.send.length, 0);
 });
 
-test('ig: reports when the bridge could not send', async () => {
-  const instagram = fakeIg({ send: false });
+test('ig: a pending challenge tells the owner to submit a code', async () => {
+  const instagram = fakeIg({ send: { ok: false, reason: 'challenge_required', detail: 'code sent' } });
   const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig alice yo', sender: 'boss', level: 'private' }));
-  assert.match(out, /Could not send to alice/);
+  assert.match(out, /needs a login code/i);
+  assert.match(out, /jarvis ig code <value>/);
+});
+
+test('ig: a rate-cap is reported clearly', async () => {
+  const instagram = fakeIg({ send: { ok: false, reason: 'rate_capped' } });
+  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig alice yo', sender: 'boss', level: 'private' }));
+  assert.match(out, /hourly send cap/i);
+});
+
+test('ig: an unknown user is reported', async () => {
+  const instagram = fakeIg({ send: { ok: false, reason: 'unknown_user' } });
+  const out = toPlain(await handleFor(instagram)({ text: 'jarvis ig nobody hi', sender: 'boss', level: 'private' }));
+  assert.match(out, /Couldn't find Instagram user nobody/);
 });
 
 test('ig: submits a challenge code', async () => {
@@ -57,11 +71,10 @@ test('ig: is owner-only', async () => {
   const instagram = fakeIg();
   const denied = await handleFor(instagram)({ text: 'jarvis ig', sender: 'rando', level: 'private' });
   assert.match(toPlain(denied), /Not allowed: owner only/);
-  assert.equal(instagram.calls.threads, 0); // never reached the handler
+  assert.equal(instagram.calls.status, 0); // never reached the handler
 });
 
-test('ig: reports unavailable where no Instagram bridge is configured (e.g. CLI)', async () => {
+test('ig: reports unavailable where no bridge is configured (e.g. CLI)', async () => {
   const handle = createDispatcher(createRegistry([ig]), { owner: 'boss' }); // no instagram capability
-  const out = await handle({ text: 'jarvis ig', sender: 'boss', level: 'private' });
-  assert.match(toPlain(out), /unavailable here/);
+  assert.match(toPlain(await handle({ text: 'jarvis ig', sender: 'boss', level: 'private' })), /unavailable here/);
 });

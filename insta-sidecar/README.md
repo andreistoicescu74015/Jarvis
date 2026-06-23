@@ -1,60 +1,61 @@
-# insta-sidecar
+# insta-sidecar (outbound only)
 
-A small Python service that drives a personal Instagram account via the unofficial **instagrapi**
-library and bridges its DMs to Jarvis. It receives inbound DMs and pushes them to Jarvis, and sends
-replies Jarvis asks it to. Jarvis relays inbound DMs into the owner's WhatsApp and sends replies via
-the owner-only `jarvis ig` command. Design + research: see the repo's `insta/` folder.
+A small Python service that logs into an Instagram account via the unofficial **instagrapi** library
+and **sends DMs** on Jarvis's behalf. It is OUTBOUND only - it does not receive DMs and has no channel
+back into Jarvis. The owner sends with the owner-only `jarvis ig <person> <message>`. Design + research:
+see the repo's `insta/` folder.
 
-> **UNOFFICIAL + ban risk.** This automates a personal account against Instagram's ToS. Enforcement is
-> account-level (challenge, then suspension/ban), not lawsuits. Use a **dedicated** account, enable
-> **2FA**, route through a **residential/mobile proxy**, and keep pacing conservative. You accept the
-> risk to the configured account.
+> **UNOFFICIAL + ban risk.** This automates an account against Instagram's ToS. Enforcement is
+> account-level (challenge, then suspension), not lawsuits. Use a **test/dedicated** account while
+> trying it. The sidecar carries the safety posture below; you accept the residual risk.
 
-## Wire protocol
+## Wire protocol (Jarvis -> sidecar; token-gated)
 
-Jarvis -> sidecar (token-gated, `Authorization: Bearer <INSTAGRAM_SIDECAR_TOKEN>`):
-- `POST /send`      `{ "username"?, "thread_id"?, "user_id"?, "text" }` -> `{ "ok": bool }`
-- `POST /threads`   `{}` -> `{ "threads": [{ "username", "name", "unread", "last_text" }] }`
+All requests need `Authorization: Bearer <INSTAGRAM_SIDECAR_TOKEN>` (the token is **mandatory** - the
+sidecar refuses to drive an account without one). Internal network only; do not publish the port.
+
+- `POST /send`      `{ "username", "text" }` -> `{ "ok": bool, "status"?: str, "detail"?: str }`
+  - `status` on failure: `challenge_required`, `not_logged_in`, `rate_capped`, `unknown_user`, `error`.
 - `POST /challenge` `{ "code": "123456" }` -> `{ "ok": bool }`  (answer a login challenge)
-- `GET  /health`    -> `{ "ok": true }`  (unauthenticated)
+- `POST /status`    `{}` -> `{ "state", "account", "detail", "sent_last_hour" }`
+  - `state`: `starting | logged_in | challenge_required | login_failed | disabled`.
+- `GET  /health`    -> `{ "ok": bool, "state" }`  (unauthenticated; `ok:true` only once logged in)
 
-sidecar -> Jarvis (`POST $JARVIS_INGEST_URL`, same bearer token):
-- inbound DM:    `{ "type": "message", "threadId", "userId", "username", "name", "text" }`
-- login prompt:  `{ "type": "challenge", "detail": "..." }`
+## Safety posture (what the sidecar enforces)
+
+- **Session reuse** - persists the device fingerprint + cookies to `IG_SESSION_FILE`, so it re-auths
+  rarely (a fresh login is the main challenge/ban trigger). After the first login you can drop the
+  password (below) and run on the session alone.
+- **Send pacing** - a minimum spacing + jitter between sends, applied under a lock so concurrent
+  sends can never under-space.
+- **Hourly cap** - a hard backstop (`IG_MAX_SENDS_PER_HOUR`) so a bug or a loop can't spray DMs.
+- **Proxy** - routes HTTP through `IG_PROXY` (use a residential/mobile proxy).
+- **Mandatory token** + no inbound socket on Jarvis at all (outbound-only design = tiny surface).
+- **Login retry** with backoff; truthful `/status` + `/health` (no false-healthy).
 
 ## Configuration (env)
 
 | Var | Meaning |
 |-----|---------|
-| `IG_USERNAME` / `IG_PASSWORD` | the account it drives (use a DEDICATED account) |
+| `IG_USERNAME` / `IG_PASSWORD` | the account it drives. After first login you can REMOVE the password and run on the session. |
 | `IG_PROXY` | residential/mobile proxy, e.g. `http://user:pass@host:port` (recommended) |
-| `IG_SESSION_FILE` | where the session + device fingerprint persist (default `/data/ig-session.json`) |
-| `IG_RECEIVE_MODE` | `poll` (default, reliable) or `realtime` (experimental MQTT push) |
-| `IG_POLL_INTERVAL_S` | poll cadence in poll mode (default 20) |
-| `IG_MIN_SEND_INTERVAL_MS` / `IG_SEND_JITTER_MS` | human-like send pacing (anti-ban) |
-| `INSTAGRAM_SIDECAR_TOKEN` | shared secret for both directions |
-| `JARVIS_INGEST_URL` | where to push inbound events (compose: `http://jarvis:8765/ig/inbound`) |
-| `IG_SIDECAR_PORT` | HTTP port to listen on (default 8099) |
+| `IG_SESSION_FILE` | session + device fingerprint path (default `/data/ig-session.json`) |
+| `IG_MIN_SEND_INTERVAL_MS` / `IG_SEND_JITTER_MS` | send pacing |
+| `IG_MAX_SENDS_PER_HOUR` | rolling-hour send cap (default 60) |
+| `INSTAGRAM_SIDECAR_TOKEN` | shared secret - **required** |
+| `IG_SIDECAR_PORT` | HTTP port (default 8099) |
 
-## Receive: polling vs realtime
+## Phase 1 - validate standalone first (on a test account)
 
-Default is **polling** - it pulls recent threads every `IG_POLL_INTERVAL_S` and relays new inbound
-text, deduped by message id. It is reliable and version-proof. **Realtime** (`IG_RECEIVE_MODE=realtime`)
-uses instagrapi's MQTT push for instant delivery, but that API is new/experimental (see `insta/`); the
-code falls back to polling if it is unavailable. Start on polling; switch to realtime only after you
-have confirmed it on your account.
-
-## Phase 1 - validate before trusting it (do this on a throwaway account)
-
-The Node side of the bridge is unit-tested, but this sidecar talks to the real Instagram private API,
-which cannot be tested offline. Validate it standalone first:
+The Node side is unit-tested, but this sidecar talks to the real Instagram private API, which cannot be
+tested offline. Validate it before wiring it to Jarvis:
 
 ```bash
 cd insta-sidecar
 python -m venv .venv && . .venv/bin/activate     # (Windows: .venv\Scripts\activate)
 pip install -r requirements.txt
 
-export IG_USERNAME=throwaway_account              # NOT your main account
+export IG_USERNAME=test_account
 export IG_PASSWORD=...
 export INSTAGRAM_SIDECAR_TOKEN=dev-secret
 export IG_SESSION_FILE=./ig-session.json
@@ -62,26 +63,28 @@ export IG_SESSION_FILE=./ig-session.json
 python app.py
 ```
 
-Then, from another terminal, confirm send + receive:
+From another terminal:
 
 ```bash
-# health
 curl localhost:8099/health
-# send a DM to someone (use a second account you control)
+curl -X POST localhost:8099/status -H 'authorization: Bearer dev-secret'    # watch for "logged_in"
+# send a DM to a second account you control:
 curl -X POST localhost:8099/send -H 'authorization: Bearer dev-secret' \
      -H 'content-type: application/json' -d '{"username":"your_other_handle","text":"bridge test"}'
-# reply to that DM from the other account, then within ~20s you should see the sidecar log a relayed
-# "message" event (set JARVIS_INGEST_URL to a local listener, e.g. a `nc -l 8765`, to see the payload).
 ```
 
-If a login challenge appears, the sidecar emits a `challenge` event and waits up to 5 minutes; submit
-the code with `curl -X POST localhost:8099/challenge -H 'authorization: Bearer dev-secret' -H
-'content-type: application/json' -d '{"code":"123456"}'`. Once this works, wire it to Jarvis via Docker
-(`docker compose --profile instagram up`) and the bridge is live: inbound DMs land in your WhatsApp and
-`jarvis ig <person> <message>` sends.
+If `/status` shows `challenge_required`, submit the code Instagram sent:
+
+```bash
+curl -X POST localhost:8099/challenge -H 'authorization: Bearer dev-secret' \
+     -H 'content-type: application/json' -d '{"code":"123456"}'
+```
+
+Once a send lands, wire it to Jarvis (`docker compose --profile instagram up`) and use
+`jarvis ig <person> <message>`. After the first successful login you can remove `IG_PASSWORD` and rely
+on the persisted session.
 
 ## Notes
 
 - Flask's built-in server is fine for a single-user personal bridge; it is internal-network only.
-- `instagrapi` is pinned in `requirements.txt`; bump deliberately - the private API drifts and the
-  library moves fast.
+- `instagrapi` is pinned in `requirements.txt`; bump deliberately - the private API drifts.
