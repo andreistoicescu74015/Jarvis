@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createAiClient } from '../src/core/ai.js';
+import { createAiClient, buildChatSystem } from '../src/core/ai.js';
 
 const tools = [{ type: 'function', function: { name: 'whitelist', parameters: {} } }];
 const EMPTY = { commands: [], answer: null };
@@ -123,4 +123,25 @@ test('ai: translate surfaces the provider token usage when the response reports 
 test('ai: a response without usage omits the key (unchanged shape for callers that ignore it)', async () => {
   const ai = createAiClient({ token: 't', fetchImpl: fakeFetch(toolCall('ping', {})) });
   assert.deepEqual(await ai.translate({ text: 'ping', tools }), { commands: [{ command: 'ping', args: {} }], answer: null });
+});
+
+test('ai: buildChatSystem keeps the functional rules and lets a persona replace only the voice', () => {
+  const def = buildChatSystem();
+  assert.match(def, /^You are Jarvis, a helpful WhatsApp assistant\./);
+  assert.match(def, /Use ONLY the tools offered for commands/); // functional rules retained
+  const custom = buildChatSystem('You are Jarvis. Be terse and formal. Reply in Romanian.');
+  assert.match(custom, /^You are Jarvis\. Be terse and formal\. Reply in Romanian\./);
+  assert.match(custom, /Use ONLY the tools offered for commands/); // same rules still appended
+  assert.doesNotMatch(custom, /a helpful WhatsApp assistant/); // default voice replaced
+  assert.equal(buildChatSystem('   '), def); // a blank persona falls back to the default voice
+});
+
+test('ai: a custom chatSystem is sent as the system prompt in chat mode', async () => {
+  const capture = {};
+  const ai = createAiClient({
+    token: 't', chatSystem: 'CUSTOM VOICE\nrules...',
+    fetchImpl: fakeFetch({ choices: [{ message: { content: 'hi' } }] }, { capture }),
+  });
+  await ai.translate({ text: 'hello', tools, chat: true });
+  assert.equal(JSON.parse(capture.init.body).messages[0].content, 'CUSTOM VOICE\nrules...');
 });

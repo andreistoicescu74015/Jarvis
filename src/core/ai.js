@@ -26,14 +26,30 @@ const SYSTEM_PROMPT = [
 
 // Chat mode (the owner enabled it with `jarvis ai on`): same tool-mapping, but when nothing maps the
 // model answers the user directly, so Jarvis behaves like a normal assistant for general questions.
-const CHAT_SYSTEM_PROMPT = [
-  'You are Jarvis, a helpful WhatsApp assistant.',
+// The PERSONA (first line - Jarvis's voice) is owner-overridable via a file; the functional RULES
+// below always apply, so a custom persona can change the tone but never loosen the tool discipline.
+const CHAT_PERSONA = 'You are Jarvis, a helpful WhatsApp assistant.';
+const CHAT_RULES = [
   'A user has addressed you in natural language (any language, including Romanian).',
   'If their request matches one of the available command tools, call it (one or more, in the order they should run) and do not also write a message.',
   'Otherwise, answer the user yourself - briefly and helpfully, in their language, as plain text (no markdown).',
   '- Use ONLY the tools offered for commands; do not invent commands or arguments the user did not imply.',
   '- "everyone" / "all" / "toata lumea" means the literal "*". Keep names, phone numbers, mentions and ids verbatim.',
-].join('\n');
+];
+
+/**
+ * The chat-mode system prompt = a persona (Jarvis's voice) followed by the fixed functional rules. A
+ * blank/whitespace persona falls back to the default voice. The rules are always appended, so an
+ * owner-supplied persona changes only the tone, never the tool-use discipline.
+ *
+ * @param {string} [persona]
+ * @returns {string}
+ */
+export function buildChatSystem(persona) {
+  return [String(persona ?? '').trim() || CHAT_PERSONA, ...CHAT_RULES].join('\n');
+}
+
+const CHAT_SYSTEM_PROMPT = buildChatSystem();
 
 /** Attach the provider's token usage to a translate result when the response reports it. */
 const withUsage = (out, usage) => (usage ? { ...out, usage } : out);
@@ -47,6 +63,7 @@ const withUsage = (out, usage) => (usage ? { ...out, usage } : out);
  *   log?: import('./log.js').Logger,
  *   timeoutMs?: number,
  *   system?: string,
+ *   chatSystem?: string,
  * }} [opts]
  * @returns {{ translate: (input: { text: string, tools: object[], chat?: boolean }) => Promise<{ commands: Array<{ command: string, args: object }>, answer: string | null }> } | null}
  *   The client is null when no token is configured - AI is simply off and the caller stays
