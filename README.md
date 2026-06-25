@@ -80,6 +80,13 @@ compose stack, so it starts with the normal `docker compose up`.
 
 > **Unofficial = against Instagram's Terms and at real ban risk. Use a test / dedicated account.**
 
+The single biggest checkpoint/ban trigger is a **geo mismatch**: the sidecar's virtual device must look
+like it lives where you actually log in from. instagrapi defaults to a US phone, so a US-looking device
+on a non-US IP gets flagged fast. Set `IG_LOCALE` / `IG_COUNTRY` / `IG_COUNTRY_CODE` /
+`IG_TIMEZONE_OFFSET` to your country (below), keep running from **one** location, and after the first
+login **remove `IG_PASSWORD`** so the bridge runs on the saved session - one stable device - instead of
+re-logging in.
+
 **Set up (once):**
 
 1. In `.env`, set your owner id and the Instagram values (leave `IG_USERNAME` empty to keep the bridge off):
@@ -89,8 +96,13 @@ compose stack, so it starts with the normal `docker compose up`.
    INSTAGRAM_SIDECAR_URL=http://insta-sidecar:8099
    INSTAGRAM_SIDECAR_TOKEN=<a long random secret>    # e.g. python -c "import secrets;print(secrets.token_hex(32))"
    IG_USERNAME=your_test_account
-   IG_PASSWORD=your_password
-   # IG_PROXY=http://user:pass@host:port      # residential/mobile proxy - recommended
+   IG_PASSWORD=your_password                  # remove after the first login; run on the saved session
+   # Geo-align the device to your real egress (e.g. Romania) - a US-looking device on a non-US IP is flagged:
+   IG_LOCALE=ro_RO
+   IG_COUNTRY=RO
+   IG_COUNTRY_CODE=40
+   IG_TIMEZONE_OFFSET=10800                   # Bucharest, EEST (seconds east of UTC; winter 7200)
+   # IG_PROXY=http://user:pass@host:port      # only if you run OFF your home network - a residential proxy IN your country (a datacenter proxy makes bans worse)
    ```
 
 2. Build and start. **`--build` is required** so the image includes the `ig` command (without it,

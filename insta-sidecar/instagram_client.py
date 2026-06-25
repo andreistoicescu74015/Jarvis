@@ -14,6 +14,9 @@ SAFETY (this is the whole point of the sidecar - it carries the anti-ban posture
     sends can never under-space. A challenge raised mid-send never blocks the lock (it aborts the send
     and re-logs-in in the background).
   - Hourly cap: a hard backstop (IG_MAX_SENDS_PER_HOUR) so a bug or a loop can't spray DMs.
+  - Device geo: instagrapi defaults to a US/en_US/US-Eastern phone, so a US-looking device logging in
+    from a non-US IP is a top checkpoint trigger. Align the FRESH device to where we actually egress
+    (IG_LOCALE/IG_COUNTRY/IG_COUNTRY_CODE/IG_TIMEZONE_OFFSET) - a loaded session keeps its own device.
   - Proxy: route HTTP through a residential/mobile proxy (IG_PROXY).
   - Challenge/2FA: surfaced via status (pull) and answered with `jarvis ig code` - never auto-bypassed,
     and the account password is never auto-rotated.
@@ -59,6 +62,19 @@ class InstagramClient:
         self.uid_cache_ttl = _env_int("IG_UID_CACHE_TTL_S", 21600)
 
         self.cl = Client()
+        # Geo-align a FRESH device to where we actually log in from. instagrapi defaults to a US/en_US/
+        # US-Eastern phone; a US-looking device authenticating from a non-US IP is a top checkpoint/ban
+        # trigger. Only when there's no saved session - a loaded session keeps its own baked-in device
+        # (changing a live fingerprint is itself a flag). Unset env => no-op (instagrapi defaults stand).
+        if not os.path.exists(self.session_file):
+            if _env("IG_LOCALE"):
+                self.cl.set_locale(_env("IG_LOCALE"))            # also sets country from the locale suffix
+            if _env("IG_COUNTRY"):
+                self.cl.set_country(_env("IG_COUNTRY"))          # explicit, so it wins over the locale's
+            if _env("IG_COUNTRY_CODE"):
+                self.cl.set_country_code(_env_int("IG_COUNTRY_CODE", 1))
+            if _env("IG_TIMEZONE_OFFSET"):
+                self.cl.set_timezone_offset(_env_int("IG_TIMEZONE_OFFSET", 0))  # seconds east of UTC
         if self.proxy:
             self.cl.set_proxy(self.proxy)
         self.cl.challenge_code_handler = self._on_challenge_code
