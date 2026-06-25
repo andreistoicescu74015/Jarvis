@@ -106,3 +106,21 @@ test('ai: multiple tool calls become an ordered chain', async () => {
     answer: null,
   });
 });
+
+test('ai: translate surfaces the provider token usage when the response reports it', async () => {
+  const withTokens = {
+    choices: [{ message: { tool_calls: [{ function: { name: 'ping', arguments: '{}' } }] } }],
+    usage: { prompt_tokens: 30, completion_tokens: 12, total_tokens: 42 },
+  };
+  const ai = createAiClient({ token: 't', fetchImpl: fakeFetch(withTokens) });
+  assert.deepEqual(await ai.translate({ text: 'ping please', tools }), {
+    commands: [{ command: 'ping', args: {} }],
+    answer: null,
+    usage: { prompt_tokens: 30, completion_tokens: 12, total_tokens: 42 },
+  });
+});
+
+test('ai: a response without usage omits the key (unchanged shape for callers that ignore it)', async () => {
+  const ai = createAiClient({ token: 't', fetchImpl: fakeFetch(toolCall('ping', {})) });
+  assert.deepEqual(await ai.translate({ text: 'ping', tools }), { commands: [{ command: 'ping', args: {} }], answer: null });
+});

@@ -35,6 +35,9 @@ const CHAT_SYSTEM_PROMPT = [
   '- "everyone" / "all" / "toata lumea" means the literal "*". Keep names, phone numbers, mentions and ids verbatim.',
 ].join('\n');
 
+/** Attach the provider's token usage to a translate result when the response reports it. */
+const withUsage = (out, usage) => (usage ? { ...out, usage } : out);
+
 /**
  * @param {{
  *   token?: string,
@@ -104,11 +107,11 @@ export function createAiClient({
           }
           commands.push({ command: name, args });
         }
-        return { commands, answer: null };
+        return withUsage({ commands, answer: null }, data?.usage);
       }
       // No tool call: in chat mode the model's own text is the conversational answer; otherwise none.
       const content = typeof message?.content === 'string' ? message.content.trim() : '';
-      return { commands: [], answer: chat && content ? content : null };
+      return withUsage({ commands: [], answer: chat && content ? content : null }, data?.usage);
     } catch (err) {
       log.warn('ai: request error', { error: err?.message ?? String(err) });
       return EMPTY;

@@ -18,7 +18,7 @@ const ping = { name: 'ping', summary: 'p', run: () => 'pong' };
  * A fake AI client returning a canned chain (or a function of the input) and an optional chat answer.
  * Records every call (incl. the `chat` flag) so tests can assert what was requested.
  */
-function fakeAi(proposal, answer = null) {
+function fakeAi(proposal, answer = null, usage = null) {
   const calls = [];
   return {
     calls,
@@ -26,7 +26,9 @@ function fakeAi(proposal, answer = null) {
       calls.push({ text, tools, chat });
       const p = typeof proposal === 'function' ? proposal(text, tools) : proposal;
       const commands = p == null ? [] : Array.isArray(p) ? p : [p];
-      return { commands, answer: typeof answer === 'function' ? answer(text) : answer };
+      const out = { commands, answer: typeof answer === 'function' ? answer(text) : answer };
+      if (usage) out.usage = usage;
+      return out;
     },
   };
 }
@@ -277,5 +279,25 @@ test('ai dispatch: a mis-used command with no AI wired just shows the usage (no 
   const out = toPlain(await handle({ text: 'jarvis whitelist opreste lista asta', sender: 'boss', level: 'group', chatId: 'g@g.us' }));
   assert.match(out, /No such command: opreste/i);
   assert.doesNotMatch(out, /Did you mean/i);
+  store.close();
+});
+
+test('ai dispatch: token usage reported by the model is recorded per-context and globally', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi({ command: 'ping', args: {} }, null, { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 });
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai });
+  await handle({ text: 'jarvis fa un ping', sender: 'u', level: 'group', chatId: 'g@g.us' });
+  assert.equal(store.scoped('ai-usage').get('g@g.us').total, 30); // per-context (the chat id)
+  assert.equal(store.scoped('ai-usage').get('g@g.us').calls, 1);
+  assert.equal(store.scoped('ai-usage').get('*').total, 30); // and the running global total
+  store.close();
+});
+
+test('ai dispatch: a deterministic command records no AI usage (the model is never called)', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi({ command: 'ping', args: {} }, null, { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 });
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai });
+  await handle({ text: 'jarvis ping', sender: 'boss', level: 'private', chatId: 'dm' });
+  assert.equal(store.scoped('ai-usage').get('*'), undefined); // a known command short-circuits before any AI call
   store.close();
 });

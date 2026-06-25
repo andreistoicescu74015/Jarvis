@@ -4,6 +4,7 @@ import { createOwnerResolver } from './owner.js';
 import { createAccessPolicy, accessContextFor } from './access.js';
 import { createLinks } from './links.js';
 import { createActivation } from './activation.js';
+import { createAiUsage } from './ai-usage.js';
 import { nullLogger } from './log.js';
 import { b, code, esc } from './format.js';
 import { toolCatalog, toCommandLine } from './tools.js';
@@ -67,6 +68,9 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
         clearNamespace: (ns) => store.clearNamespace(ns), // drop a dissolved overlay's shared data
       })
     : null;
+  // Token accounting for every model call (per access-context + global), so the owner can see what the
+  // AI layer costs. Storage-only; a safe no-op without a store.
+  const aiUsage = store ? createAiUsage(store) : null;
   // Per-context CHATBOT mode (the `ai` command). Command translation is ALWAYS on; this gate only
   // controls whether Jarvis also answers general questions conversationally when nothing maps to a
   // command. Off by default; the owner opens it per chat with `jarvis ai on`.
@@ -127,7 +131,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
   // a plain-text ANSWER the model wrote when nothing mapped. Either may be empty/null; both are when AI
   // is off or the call fails. Each resolved command still runs through every guard below, so AI can
   // never reach a command the caller could not have typed by hand.
-  async function aiResolve(request, scopeCtx, chat) {
+  async function aiResolve(request, scopeCtx, chat, context) {
     const tools = toolCatalog(registry.all(), scopeCtx);
     if (!tools.length) return { chain: [], answer: null };
     let result;
@@ -139,6 +143,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       log.error('ai: translation threw', { error: err?.message ?? String(err) });
       return { chain: [], answer: null };
     }
+    if (aiUsage && result?.usage) aiUsage.record(context, result.usage); // account the tokens this call cost
     const proposals = Array.isArray(result?.commands) ? result.commands : [];
     const chain = [];
     for (const p of proposals) {
@@ -162,8 +167,8 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
   // A KNOWN command that could not interpret its arguments (a `misuse` reply) - ask the model what the
   // user likely meant and return a one-line suggestion (never auto-run). Best-effort: null if AI is off
   // or nothing maps. Reuses aiResolve, so the suggestion is scope-filtered and canonical.
-  async function aiSuggest(request, scopeCtx) {
-    const { chain } = await aiResolve(request, scopeCtx, false);
+  async function aiSuggest(request, scopeCtx, context) {
+    const { chain } = await aiResolve(request, scopeCtx, false, context);
     if (!chain.length) return null;
     const lines = chain.map((s) => code(`${prefix} ${s.line}`)).join(' ; ');
     return `Did you mean: ${lines}? Type it to run.`;
@@ -350,6 +355,8 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
               available: !!ai,
             }
           : undefined,
+        // AI token accounting for this context (read-only summary for the owner's `ai` command).
+        aiUsage: aiUsage ? { summary: () => aiUsage.summary(accessContext) } : undefined,
         links: links
           ? {
               propose: () => links.propose(chatId),
@@ -407,7 +414,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
           // suggestion is for someone who may run the command - it only clarifies the syntax.
           if (!aiLine && ai) {
             const request = rest ? `${command} ${rest}` : command;
-            const suggestion = await aiSuggest(request, { level, isAdmin, isOwner });
+            const suggestion = await aiSuggest(request, { level, isAdmin, isOwner }, accessContext);
             if (suggestion) return `${result.text}\n${suggestion}`;
           }
           return result.text;
@@ -435,7 +442,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     if (ai) {
       const request = rest ? `${command} ${rest}` : command;
       const chatOn = aiEnabledIn(accessContext); // `ai on` => also answer general questions here
-      const { chain, answer } = await aiResolve(request, { level, isAdmin, isOwner }, chatOn);
+      const { chain, answer } = await aiResolve(request, { level, isAdmin, isOwner }, chatOn, accessContext);
       if (chain.length) {
         log.info('ai: translated a request', { to: chain.map((s) => s.line), sender });
         const understood = `${b('Understood:')} ${chain.map((s) => code(`${prefix} ${s.line}`)).join(' ; ')}`;
