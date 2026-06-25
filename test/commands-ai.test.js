@@ -45,3 +45,20 @@ test('ai command: the per-chat chatbot opt-in is isolated to its own context', a
   assert.match(toPlain(await handle({ text: 'jarvis ai', sender: 'boss', level: 'group', chatId: 'gB@g.us' })), /off here/i);
   store.close();
 });
+
+test('ai command: the status shows token usage once the AI has been used here', async () => {
+  const ai = {
+    translate: async () => ({
+      commands: [{ command: 'ping', args: {} }],
+      usage: { prompt_tokens: 40, completion_tokens: 20, total_tokens: 60 },
+    }),
+  };
+  const { store, handle } = setup({ ai });
+  const chat = { sender: 'boss', level: 'group', chatId: 'g@g.us' };
+  assert.doesNotMatch(toPlain(await handle({ ...chat, text: 'jarvis ai' })), /Tokens used/i); // none yet
+  await handle({ ...chat, text: 'jarvis fa un ping' }); // unknown -> translated -> records usage
+  const out = toPlain(await handle({ ...chat, text: 'jarvis ai' }));
+  assert.match(out, /Tokens used - here: 60 \(1 call\)/i);
+  assert.match(out, /all chats: 60 \(1 call\)/i);
+  store.close();
+});
