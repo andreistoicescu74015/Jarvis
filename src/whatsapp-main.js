@@ -15,7 +15,8 @@ import { createIdentityStore } from './whatsapp/identity-store.js';
 import { socketLogger } from './whatsapp/socket-logger.js';
 import { commands } from './commands/index.js';
 import { num } from './core/env.js';
-import { createAiClient } from './core/ai.js';
+import { createAiClient, buildChatSystem } from './core/ai.js';
+import { loadPersona } from './core/persona.js';
 import { createInstagramClient } from './instagram/sidecar-client.js';
 
 /**
@@ -35,10 +36,16 @@ const activation = createActivation(store);
 // the dispatcher's guards), and the owner can turn on a per-chat chatbot mode (`jarvis ai on`). No
 // token -> the client is null and AI is simply off. The provider is a config triple, swappable to any
 // OpenAI-compatible endpoint (Azure AI Foundry, ...) with no code change.
+// The chatbot persona (Jarvis's voice in `ai on` mode) is owner-editable via a file: point
+// JARVIS_PERSONA_FILE at a file in the data volume and edit it with no rebuild. Empty/missing -> the
+// built-in voice. The functional rules are always kept (buildChatSystem), so a persona only sets tone.
+const persona = loadPersona(process.env.JARVIS_PERSONA_FILE);
+if (persona) log.info('ai: using a custom chatbot persona', { chars: persona.length });
 const ai = createAiClient({
   token: process.env.GITHUB_MODELS_TOKEN ?? '',
   baseUrl: process.env.JARVIS_AI_BASE_URL ?? 'https://models.github.ai/inference',
   model: process.env.JARVIS_AI_MODEL ?? 'openai/gpt-4o-mini',
+  chatSystem: buildChatSystem(persona),
   log,
 });
 // Per-group activation gate is opt-in (default on); shared by the dispatcher (inbound) and the
