@@ -301,3 +301,52 @@ test('ai dispatch: a deterministic command records no AI usage (the model is nev
   assert.equal(store.scoped('ai-usage').get('*'), undefined); // a known command short-circuits before any AI call
   store.close();
 });
+
+test('ai dispatch: a scheduled message forces chat mode (composes an answer even when chat is off here)', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi(null, 'Weekly summary: nothing due.'); // nothing maps; the model composes
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai });
+  const out = toPlain(await handle({ text: 'summarize the week', sender: 'boss', level: 'group', chatId: 'g@g.us', addressed: true, scheduled: true }));
+  assert.match(out, /Weekly summary/); // answered despite chatbot mode being off in this chat
+  assert.equal(ai.calls[0].chat, true); // chat mode was forced for the scheduled job
+  store.close();
+});
+
+test('ai dispatch: a scheduled message that maps to nothing posts NOTHING (not the nudge)', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi(null, null); // nothing maps, no answer
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai });
+  const out = await handle({ text: 'do something vague', sender: 'boss', level: 'group', chatId: 'g@g.us', addressed: true, scheduled: true });
+  assert.equal(out, undefined); // a timer stays silent rather than posting "I didn't catch a command"
+  store.close();
+});
+
+test('ai dispatch: a scheduled command posts only the result, with no "Understood:" preamble', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi({ command: 'ping', args: {} });
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai });
+  const out = toPlain(await handle({ text: 'do a ping', sender: 'boss', level: 'group', chatId: 'g@g.us', addressed: true, scheduled: true }));
+  assert.equal(out, 'pong'); // just the output - the "Understood:" preamble is for live users
+  store.close();
+});
+
+test('ai dispatch: a scheduled job skips a sensitive command proposed by the model (never auto-runs)', async () => {
+  const store = createStore({ path: ':memory:' });
+  let wiped = 0;
+  const ai = fakeAi({ command: 'reset', args: { scope: 'all' } });
+  const handle = createDispatcher(createRegistry([ping, reset]), { owner: 'boss', store, ai, lifecycle: { wipe: () => { wiped += 1; } } });
+  const out = await handle({ text: 'wipe everything', sender: 'boss', level: 'private', chatId: 'dm', addressed: true, scheduled: true });
+  assert.equal(wiped, 0); // not run
+  assert.equal(out, undefined); // and not suggested either - a timer just skips it
+  store.close();
+});
+
+test('ai dispatch: a scheduled job skips a sensitive command even typed directly (no consenting human)', async () => {
+  const store = createStore({ path: ':memory:' });
+  let wiped = 0;
+  const handle = createDispatcher(createRegistry([ping, reset]), { owner: 'boss', store, lifecycle: { wipe: () => { wiped += 1; } } });
+  const out = await handle({ text: 'reset all', sender: 'boss', level: 'private', chatId: 'dm', addressed: true, scheduled: true });
+  assert.equal(wiped, 0); // a directly-named sensitive command is still skipped on a timer
+  assert.equal(out, undefined);
+  store.close();
+});

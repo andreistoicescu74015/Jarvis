@@ -48,7 +48,7 @@ const whenError = (r) =>
 export default {
   name: 'schedule',
   summary: 'Schedule a message to post later (once or repeating).',
-  usage: 'jarvis schedule in <2h> <msg> | at <YYYY-MM-DD> <HH:MM> <msg> | every <1d> <msg> | list | cancel <id|all> | disable|enable <id|all>',
+  usage: 'jarvis schedule in <2h> <msg> | at <YYYY-MM-DD> <HH:MM> <msg> | every <1d> <msg> | ai <when> <instruction> | list | cancel <id|all> | disable|enable <id|all>',
   man:
     'Post a message to this chat later, with no one sending a command at that moment. ' +
     '"schedule in 2h <msg>" posts once in two hours; "schedule at 2026-06-18 09:00 <msg>" posts once at ' +
@@ -57,7 +57,10 @@ export default {
     'with ids; "schedule cancel <id>" removes one, "schedule clear" (or "cancel all") removes them all; ' +
     '"schedule disable <id|all>" pauses without deleting (it is kept and skipped), "enable" resumes. ' +
     'Scheduling works only in groups (where an admin can ' +
-    'do it), not in private chats - the owner excepted. Schedules survive restarts.',
+    'do it), not in private chats - the owner excepted. Schedules survive restarts. ' +
+    '"schedule ai <when> <instruction>" (owner only) schedules a natural-language instruction Jarvis ' +
+    'runs at that time - it can run commands and/or compose a reply, e.g. "schedule ai every 1d list ' +
+    'the schedule".',
   scope: { admin: true, proactive: true },
   requires: ['scheduler'],
   // `clear` / `cancel all` delete every scheduled message here - destructive, so the AI translator
@@ -67,7 +70,7 @@ export default {
     return sub === 'clear' || (sub === 'cancel' && (args[1] ?? '').toLowerCase() === 'all');
   },
   params: [
-    { name: 'action', enum: ['in', 'at', 'every', 'list', 'cancel', 'clear', 'disable', 'enable'], required: true, desc: 'in/at/every to schedule; list/cancel/clear/disable/enable to manage' },
+    { name: 'action', enum: ['in', 'at', 'every', 'ai', 'list', 'cancel', 'clear', 'disable', 'enable'], required: true, desc: 'in/at/every to schedule a message; ai to schedule an AI instruction (owner); list/cancel/clear/disable/enable to manage' },
     { name: 'rest', variadic: true, desc: 'the remainder: for "in"/"every" it is "<duration> <message>" (e.g. "2h call mom", units m/h/d); for "at" it is "<YYYY-MM-DD> <HH:MM> <message>"; for cancel/disable/enable it is the id or "all"' },
   ],
   run: (ctx) => {
@@ -103,6 +106,32 @@ export default {
       }
       if (!id) return `Usage: ${code('jarvis schedule cancel <id|all>')}`;
       return ctx.scheduler.cancel(id).ok ? `Cancelled ${code(id)}.` : `No scheduled message "${esc(id)}" here.`;
+    }
+
+    if (sub === 'ai') {
+      // Owner-only: schedule a natural-language INSTRUCTION that Jarvis runs through its AI pipeline at
+      // fire time (it may run commands and/or compose a reply), not a fixed message. The when-spec is the
+      // same in/at/every; the remainder is the instruction.
+      if (!ctx.isOwner) return 'Only the owner can schedule an AI action.';
+      const spec = (ctx.args[1] ?? '').toLowerCase();
+      let when;
+      let prompt;
+      if (spec === 'in' || spec === 'every') {
+        const dur = ctx.args[2];
+        prompt = ctx.args.slice(3).join(' ').trim();
+        if (!dur || !prompt) return `Usage: ${code(`jarvis schedule ai ${spec} <${spec === 'every' ? '1d' : '2h'}> <instruction>`)}`;
+        when = `${spec} ${dur}`;
+      } else if (spec === 'at') {
+        const date = ctx.args[2];
+        const time = ctx.args[3];
+        prompt = ctx.args.slice(4).join(' ').trim();
+        if (!date || !time || !prompt) return `Usage: ${code('jarvis schedule ai at <YYYY-MM-DD> <HH:MM> <instruction>')}`;
+        when = `at ${date} ${time}`;
+      } else {
+        return `Usage: ${code('jarvis schedule ai in <2h> <instruction> | at <YYYY-MM-DD> <HH:MM> <instruction> | every <1d> <instruction>')}`;
+      }
+      const r = ctx.scheduler.add(when, prompt, 'ai');
+      return r.ok ? confirm(r) : whenError(r);
     }
 
     if (sub === 'in' || sub === 'every') {
