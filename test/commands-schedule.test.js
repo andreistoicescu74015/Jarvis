@@ -99,3 +99,32 @@ test('schedule: disable pauses without deleting; list tags it; enable resumes', 
   assert.match(await handle(msg('jarvis schedule enable s1')), /Resumed s1/i);
   assert.match(await handle(msg('jarvis schedule disable all')), /Paused all 1/i);
 });
+
+test('schedule ai: the owner schedules an AI instruction, stored as an ai job', async () => {
+  const { scheduler, handle } = setup(0, { owner: 'boss' });
+  const out = await handle({ text: 'jarvis schedule ai every 1d list the schedule', sender: 'boss', chatId: 'A', level: 'group' });
+  assert.match(out, /Scheduled s1/);
+  const job = scheduler.list('A')[0];
+  assert.equal(job.kind, 'ai');
+  assert.equal(job.text, 'list the schedule');
+  assert.ok(job.repeatMs > 0); // "every 1d" repeats
+});
+
+test('schedule ai: a non-owner admin cannot schedule an AI action', async () => {
+  const { handle } = setup(); // no owner; the default msg is a group admin
+  assert.match(await handle(msg('jarvis schedule ai every 1d do stuff')), /Only the owner/i);
+});
+
+test('schedule ai: "at" schedules an AI instruction at an absolute time (owner)', async () => {
+  const { scheduler, handle } = setup(new Date('2026-06-17T08:00').getTime(), { owner: 'boss' });
+  const out = await handle({ text: 'jarvis schedule ai at 2026-06-18 09:00 post the agenda', sender: 'boss', chatId: 'A', level: 'group' });
+  assert.match(out, /Scheduled s1 for 2026-06-18 09:00/);
+  assert.equal(scheduler.list('A')[0].kind, 'ai');
+});
+
+test('schedule ai: a missing instruction or bad when-spec shows usage', async () => {
+  const { handle } = setup(0, { owner: 'boss' });
+  const m = (text) => ({ text, sender: 'boss', chatId: 'A', level: 'group' });
+  assert.match(await handle(m('jarvis schedule ai every 1d')), /Usage:.*schedule ai every/i); // no instruction
+  assert.match(await handle(m('jarvis schedule ai bogus stuff')), /Usage:.*schedule ai in/i); // bad when-spec
+});

@@ -224,9 +224,11 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       (level === 'group' || level === 'community') &&
       !activeHere
     ) {
-      if (!isOwner) {
-        log.info('inactive group: not activated', { chatId, command, sender });
-        return undefined; // a non-owner stays silent until the owner activates the group
+      if (!isOwner || msg.scheduled) {
+        // A non-owner stays silent until the owner activates the group; a SCHEDULED job never
+        // auto-activates a group from a timer (it just yields nothing for an inactive destination).
+        log.info('inactive group: not activated', { chatId, command, sender, scheduled: !!msg.scheduled });
+        return undefined;
       }
       // The owner's mere address authorizes the group: any message (even a bare "jarvis") activates
       // it, then proceeds. `groups`/`community` are the exception - they activate explicitly, so their
@@ -308,9 +310,15 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       // `note clear`, `groups deactivate`) - is only ever suggested, never auto-run from a guess.
       // Checked AFTER the access/scope guards, so a command the caller could not run anyway reports
       // that, not a misleading suggestion. Typing it takes the normal path below (no aiLine) and runs.
-      if (aiLine) {
+      // A SENSITIVE command (cmd.confirm) is never run without a human's explicit consent: from an AI
+      // guess (aiLine) it is suggested, not run; on a timer (scheduled) it is skipped entirely (no one to
+      // confirm); typed directly by a human it runs below (the typing IS the consent).
+      if (aiLine || msg.scheduled) {
         const needsConfirm = typeof cmd.confirm === 'function' ? cmd.confirm(args) : !!cmd.confirm;
-        if (needsConfirm) return `I won't auto-run a sensitive command from a guess - type ${code(`${prefix} ${aiLine}`)} yourself to confirm.`;
+        if (needsConfirm) {
+          if (msg.scheduled) { log.info('scheduled: skipped a sensitive command', { command }); return undefined; }
+          return `I won't auto-run a sensitive command from a guess - type ${code(`${prefix} ${aiLine}`)} yourself to confirm.`;
+        }
       }
 
       const replies = [];
@@ -384,7 +392,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
         instagram: instagram ?? undefined,
         scheduler: scheduler
           ? {
-              add: (when, text) => scheduler.add({ chatId, createdBy: sender, when, text }),
+              add: (when, text, kind) => scheduler.add({ chatId, createdBy: sender, when, text, kind }),
               list: () => scheduler.list(chatId),
               cancel: (id) => scheduler.cancel(id, chatId),
               clear: () => scheduler.clearChat(chatId),
@@ -441,7 +449,9 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     // it understood, so the user sees (and learns) exactly what ran.
     if (ai) {
       const request = rest ? `${command} ${rest}` : command;
-      const chatOn = aiEnabledIn(accessContext); // `ai on` => also answer general questions here
+      // `ai on` => also answer general questions here. A SCHEDULED job forces it on (the owner
+      // authorized this output), so a non-command instruction still gets a composed answer.
+      const chatOn = aiEnabledIn(accessContext) || !!msg.scheduled;
       const { chain, answer } = await aiResolve(request, { level, isAdmin, isOwner }, chatOn, accessContext);
       if (chain.length) {
         log.info('ai: translated a request', { to: chain.map((s) => s.line), sender });
@@ -453,9 +463,13 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
           const out = await runOne(step.cmd, step.command, step.args, step.rest, step.line);
           if (out) outs.push(out);
         }
+        // A scheduled job posts only the command results (no "Understood:" preamble - no human to teach);
+        // if every step was skipped (e.g. all sensitive), it posts nothing.
+        if (msg.scheduled) return outs.length ? outs.join('\n') : undefined;
         return [understood, ...outs].join('\n');
       }
-      if (chatOn && answer) return esc(answer); // chatbot mode: a general, conversational reply
+      if (chatOn && answer) return esc(answer); // chatbot mode (or a scheduled job): a composed reply
+      if (msg.scheduled) return undefined; // a timer posts nothing rather than the friendly nudge
       return `I didn't catch a command in that. Try ${code(`${prefix} help`)} to see what I can do.`;
     }
     return `Unknown command ${code(esc(command))}. Try ${code(`${prefix} help`)}.`;

@@ -80,14 +80,16 @@ export function createScheduler(store, { now = () => Date.now() } = {}) {
    *
    * @returns {{ ok: true, id: string, fireAt: number, repeatMs: number } | { ok: false, reason: string }}
    */
-  function add({ chatId, createdBy = '', when, text }) {
+  function add({ chatId, createdBy = '', when, text, kind }) {
     const w = parseWhen(when, now());
     if (!w.ok) return w;
     if (!String(text ?? '').trim()) return { ok: false, reason: 'empty-text' };
     if (String(text).length > MAX_TEXT_LEN) return { ok: false, reason: 'too-long', max: MAX_TEXT_LEN };
     if (list(chatId).length >= MAX_JOBS) return { ok: false, reason: 'too-many', max: MAX_JOBS };
     const id = nextId();
-    jobs.set(id, { chatId, text, fireAt: w.fireAt, repeatMs: w.repeatMs, createdBy, createdAt: now() });
+    // `kind: 'ai'` marks a job whose `text` is an INSTRUCTION to run through the AI pipeline at fire
+    // time, not a literal message. Stored only when set, so plain jobs keep their original shape.
+    jobs.set(id, { chatId, text, fireAt: w.fireAt, repeatMs: w.repeatMs, createdBy, createdAt: now(), ...(kind ? { kind } : {}) });
     return { ok: true, id, fireAt: w.fireAt, repeatMs: w.repeatMs };
   }
 
@@ -131,7 +133,7 @@ export function createScheduler(store, { now = () => Date.now() } = {}) {
    * storm. The actual sends are paced downstream (the platform's global spacing limiter), so
    * the scheduler just fires everything due. Returns fired / failed.
    *
-   * @param {(chatId: string, text: string) => unknown} deliver
+   * @param {(chatId: string, text: string, job: object) => unknown} deliver
    * @param {number} [at]
    * @returns {Promise<{ fired: number, failed: number }>}
    */
@@ -147,7 +149,7 @@ export function createScheduler(store, { now = () => Date.now() } = {}) {
         // success nor a failure. The job is left pending and untouched - never counted as
         // fired, never advanced or dropped (which would silently lose or zombie it) - so it
         // delivers later if the destination becomes eligible again.
-        const r = await deliver(j.chatId, j.text);
+        const r = await deliver(j.chatId, j.text, j);
         if (r === false) declined = true;
         else fired++;
       } catch {

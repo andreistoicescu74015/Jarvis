@@ -195,3 +195,19 @@ test('scheduler: setEnabledAll pauses/resumes a whole chat; another chat is unto
   assert.ok(s.list('B').every((j) => !j.disabled)); // B untouched
   assert.equal(s.setEnabled('nope', 'A', true).ok, false); // unknown id
 });
+
+test('scheduler: an ai job stores its kind and tick hands the whole job to deliver', async () => {
+  const s = createScheduler(createStore({ path: ':memory:' }), { now: () => 0 });
+  const r = s.add({ chatId: 'A', createdBy: 'boss', when: 'in 1h', text: 'do a thing', kind: 'ai' });
+  assert.ok(r.ok);
+  assert.equal(s.list('A')[0].kind, 'ai'); // stored
+  const got = [];
+  await s.tick((chatId, text, job) => { got.push({ chatId, text, kind: job?.kind, by: job?.createdBy }); return true; }, H);
+  assert.deepEqual(got, [{ chatId: 'A', text: 'do a thing', kind: 'ai', by: 'boss' }]);
+});
+
+test('scheduler: a plain job carries no kind (shape unchanged)', () => {
+  const s = createScheduler(createStore({ path: ':memory:' }), { now: () => 0 });
+  s.add({ chatId: 'A', when: 'in 1h', text: 'hi' });
+  assert.ok(!('kind' in s.list('A')[0])); // no kind key on a normal job
+});

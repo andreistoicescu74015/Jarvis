@@ -147,9 +147,9 @@ const instagram = createInstagramClient({
   log,
 });
 
-const app = createApp(adapter, {
-  // match is LID-aware so an owner set by phone number matches a LID sender.
-  handle: createDispatcher(registry, {
+// match is LID-aware so an owner set by phone number matches a LID sender. Captured (not inlined) so the
+// scheduled-AI deliver path below can re-enter it with a synthetic message.
+const handle = createDispatcher(registry, {
     owner: process.env.OWNER_JID ?? '',
     // Dormant until an owner exists: silent in groups, private only `owner`, until OWNER_JID is set
     // or someone runs `owner claim`. Disable with JARVIS_REQUIRE_OWNER=off.
@@ -178,14 +178,14 @@ const app = createApp(adapter, {
       const digits = t.replace(/[^0-9]/g, '');
       return digits ? identity.resolve(`${digits}@s.whatsapp.net`) : t;
     },
-  }),
-});
+  });
+const app = createApp(adapter, { handle });
 
 // Proactive output (scheduled messages) runs in the background. Delivery reuses the adapter's
 // send, which paces every message through the global spacing limiter, so output never bursts.
 // Started before the (blocking) start() so the timer is live; the first tick is after one
 // interval, so we never deliver before the socket connects.
-const deliver = async (chatId, text) => {
+const deliver = async (chatId, text, job) => {
   // Proactive sends must respect the same activation gate as inbound commands: never post into a
   // group the owner has not authorized (or has deactivated, or removed the bot from). A group also
   // counts as active under its community umbrella (a community activated -> all its groups are on).
@@ -196,6 +196,15 @@ const deliver = async (chatId, text) => {
       log.info('skip scheduled send to an inactive group', { chatId });
       return false; // DECLINE: signal the scheduler this was not delivered, so it leaves the job pending
     }
+  }
+  // An AI job carries an INSTRUCTION, not fixed text: run it as the owner who scheduled it, through the
+  // SAME dispatcher a live message uses (a synthetic addressed message flagged `scheduled`), then post
+  // whatever it produced. All guards re-run; chat mode is forced on; sensitive commands are skipped.
+  if (job?.kind === 'ai') {
+    const level = isJidGroup(chatId) ? 'group' : 'private';
+    const reply = await handle({ text, sender: job.createdBy, chatId, level, addressed: true, scheduled: true });
+    if (!reply) return true; // it fired but produced nothing to post - advance the job (don't retry)
+    return adapter.send(chatId, reply);
   }
   return adapter.send(chatId, text);
 };
