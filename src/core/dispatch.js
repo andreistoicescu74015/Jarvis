@@ -60,7 +60,7 @@ const AI_MAX_CHAIN = 8;
  * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, send?: (target: string, text: string) => unknown, community?: { info: (id?: string) => Promise<object | undefined>, groups: (id?: string) => Promise<object[]>, all: () => Promise<object[]> }, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object }, ai?: { translate: (input: { text: string, tools: object[] }) => Promise<Array<{ command: string, args: object }> | null> }, requireOwner?: boolean, requireActivation?: boolean }} [opts]
  * @returns {(msg: import('./app.js').InboundMessage) => Promise<string | undefined>}
  */
-export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, community, scheduler, ai, aiDailyCap = 0, requireOwner = false, requireActivation = false } = {}) {
+export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, community, scheduler, feeds, ai, aiDailyCap = 0, requireOwner = false, requireActivation = false } = {}) {
   const ownerResolver = createOwnerResolver({ owner, match });
   const access = store ? createAccessPolicy(store, { match }) : null;
   const activation = store ? createActivation(store) : null;
@@ -275,7 +275,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
 
     // `capable` / `ownerCap` are message-scoped but command-independent, so they are built once and
     // shared by every command run below (a single typed command, or each step of an AI chain).
-    const capable = { store, access, links, activation, scheduler, lifecycle, send, community, aliases, aiGate: aiGateStore };
+    const capable = { store, access, links, activation, scheduler, feeds, lifecycle, send, community, aliases, aiGate: aiGateStore };
     const ownerCap = {
       exists: !!ownerResolver.current,
       isMe: isOwner,
@@ -400,6 +400,14 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
               info: (id = communityId) => community.info(id),
               groups: (id = communityId) => community.groups(id),
               all: () => community.all(),
+            }
+          : undefined,
+        // Feed subscriptions for this chat (the `feed` command); the proactive runner posts new entries.
+        feeds: feeds
+          ? {
+              add: (url) => feeds.add({ chatId, url }),
+              list: () => feeds.list(chatId),
+              remove: (id) => feeds.remove(id, chatId),
             }
           : undefined,
         scheduler: scheduler

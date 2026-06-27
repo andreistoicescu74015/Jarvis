@@ -35,6 +35,7 @@ what *you* can run where you are; `jarvis man <command>` explains one in detail.
 
 - `jarvis whitelist ...` / `jarvis blacklist ...` - control who may use a command (or the whole bot, `*`) here; `jarvis whitelist` alone shows the rules.
 - `jarvis schedule in <2h> <msg> | at <date> <time> <msg> | every <1d> <msg> | list | cancel <id>` - post a message later.
+- `jarvis feed add <url> | list | remove <n>` - subscribe this chat to an RSS/Atom feed; new entries are posted here.
 - `jarvis link | link new | link accept <code> | link remove` - share one data context with another group.
 
 **Owner**
