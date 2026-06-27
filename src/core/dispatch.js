@@ -390,6 +390,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
         scheduler: scheduler
           ? {
               add: (when, text, kind) => scheduler.add({ chatId, createdBy: sender, when, text, kind }),
+              addNatural: (input, kind) => scheduler.addNatural({ chatId, createdBy: sender, input, kind }),
               list: () => scheduler.list(chatId),
               cancel: (id) => scheduler.cancel(id, chatId),
               clear: () => scheduler.clearChat(chatId),
