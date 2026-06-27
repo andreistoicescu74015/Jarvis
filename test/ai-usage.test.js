@@ -48,3 +48,33 @@ test('ai-usage: totals persist on the same store and keep their original `since`
   assert.equal(reopened.summary('private').here.since, 1); // preserved, not reset to the new clock
   store.close();
 });
+
+test('ai-usage: today() accumulates within a day and allows() gates on a cap', () => {
+  const store = createStore({ path: ':memory:' });
+  let now = new Date('2026-06-27T10:00').getTime();
+  const acct = createAiUsage(store, { now: () => now });
+  assert.equal(acct.today(), 0);
+  assert.equal(acct.allows(100), true); // nothing spent yet
+  assert.equal(acct.allows(0), true); // 0 = no cap, always allowed
+  acct.record('private', usage(40, 20)); // 60 today
+  assert.equal(acct.today(), 60);
+  assert.equal(acct.allows(100), true); // under the cap
+  assert.equal(acct.allows(60), false); // at the cap blocks (today() < cap is false)
+  assert.equal(acct.allows(0), true); // still no-cap regardless of spend
+  store.close();
+});
+
+test('ai-usage: the daily bucket resets on a new calendar day; cumulative totals do not', () => {
+  const store = createStore({ path: ':memory:' });
+  let now = new Date('2026-06-27T23:00').getTime();
+  const acct = createAiUsage(store, { now: () => now });
+  acct.record('private', usage(50, 50)); // 100 today
+  assert.equal(acct.today(), 100);
+  now = new Date('2026-06-28T01:00').getTime(); // a new day
+  assert.equal(acct.today(), 0); // daily bucket auto-resets
+  assert.equal(acct.allows(100), true); // budget refreshed
+  acct.record('private', usage(5, 0)); // 5 on the new day
+  assert.equal(acct.today(), 5); // not 105
+  assert.equal(acct.summary('private').here.total, 105); // cumulative is untouched by the daily reset
+  store.close();
+});

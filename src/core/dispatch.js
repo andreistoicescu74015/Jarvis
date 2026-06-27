@@ -59,7 +59,7 @@ const AI_MAX_CHAIN = 8;
  * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, send?: (target: string, text: string) => unknown, community?: { info: (id?: string) => Promise<object | undefined>, groups: (id?: string) => Promise<object[]>, all: () => Promise<object[]> }, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object }, ai?: { translate: (input: { text: string, tools: object[] }) => Promise<Array<{ command: string, args: object }> | null> }, requireOwner?: boolean, requireActivation?: boolean }} [opts]
  * @returns {(msg: import('./app.js').InboundMessage) => Promise<string | undefined>}
  */
-export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, community, scheduler, ai, requireOwner = false, requireActivation = false } = {}) {
+export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, community, scheduler, ai, aiDailyCap = 0, requireOwner = false, requireActivation = false } = {}) {
   const ownerResolver = createOwnerResolver({ owner, match });
   const access = store ? createAccessPolicy(store, { match }) : null;
   const activation = store ? createActivation(store) : null;
@@ -135,6 +135,13 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
   async function aiResolve(request, scopeCtx, chat, context) {
     const tools = toolCatalog(registry.all(), scopeCtx);
     if (!tools.length) return { chain: [], answer: null };
+    // Daily AI budget (hard cap): once the day's tokens reach the cap, stop calling the model until the
+    // next server-local day - the deterministic bot keeps working, the AI layer just goes quiet. Off
+    // when aiDailyCap <= 0. One chokepoint, so it bounds translation, chatbot answers, and timer jobs alike.
+    if (aiUsage && !aiUsage.allows(aiDailyCap)) {
+      log.info('ai: daily token cap reached - skipping the model call', { context, cap: aiDailyCap });
+      return { chain: [], answer: null };
+    }
     let result;
     try {
       // The translator is best-effort and must never crash the deterministic bot (ADR-0003): the
@@ -364,8 +371,9 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
               available: !!ai,
             }
           : undefined,
-        // AI token accounting for this context (read-only summary for the owner's `ai` command).
-        aiUsage: aiUsage ? { summary: () => aiUsage.summary(accessContext) } : undefined,
+        // AI token accounting for this context (read-only, for the owner's `ai` command): the cumulative
+        // summary plus today's spend and the configured daily cap (so the command can show the budget).
+        aiUsage: aiUsage ? { summary: () => aiUsage.summary(accessContext), today: () => aiUsage.today(), cap: aiDailyCap } : undefined,
         links: links
           ? {
               propose: () => links.propose(chatId),

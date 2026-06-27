@@ -62,3 +62,20 @@ test('ai command: the status shows token usage once the AI has been used here', 
   assert.match(out, /all chats: 60 \(1 call\)/i);
   store.close();
 });
+
+test('ai command: with a daily cap set, the status shows the budget and flags when it is reached', async () => {
+  const ai = {
+    translate: async () => ({
+      commands: [{ command: 'ping', args: {} }],
+      usage: { prompt_tokens: 60, completion_tokens: 40, total_tokens: 100 },
+    }),
+  };
+  const { store, handle } = setup({ ai, aiDailyCap: 80 });
+  const chat = { sender: 'boss', level: 'group', chatId: 'g@g.us' };
+  assert.match(toPlain(await handle({ ...chat, text: 'jarvis ai' })), /0 \/ 80 daily cap/i); // shown even at zero spend
+  await handle({ ...chat, text: 'jarvis fa un ping' }); // unknown -> translated -> spends 100, over the 80 cap
+  const out = toPlain(await handle({ ...chat, text: 'jarvis ai' }));
+  assert.match(out, /100 \/ 80 daily cap/i);
+  assert.match(out, /paused until tomorrow/i);
+  store.close();
+});

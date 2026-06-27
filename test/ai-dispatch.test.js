@@ -350,3 +350,28 @@ test('ai dispatch: a scheduled job skips a sensitive command even typed directly
   assert.equal(out, undefined);
   store.close();
 });
+
+test('ai dispatch: once the daily token cap is reached, the model is not called again', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi({ command: 'ping', args: {} }, null, { prompt_tokens: 60, completion_tokens: 0, total_tokens: 60 });
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai, aiDailyCap: 50 });
+  // First NL request: under the cap -> translated, run, records 60 tokens (crossing the 50 cap).
+  assert.match(toPlain(await handle({ text: 'jarvis fa un ping', sender: 'boss', level: 'private', chatId: 'dm' })), /pong/);
+  assert.equal(ai.calls.length, 1);
+  // Second NL request: today's spend (60) is over the cap -> the model is skipped, deterministic nudge.
+  const second = toPlain(await handle({ text: 'jarvis alt ceva acum', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(second, /didn't catch a command/i);
+  assert.equal(ai.calls.length, 1); // NOT called again - the budget held
+  store.close();
+});
+
+test('ai dispatch: a deterministic command still works after the AI cap is hit', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi({ command: 'ping', args: {} }, null, { prompt_tokens: 100, completion_tokens: 0, total_tokens: 100 });
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai, aiDailyCap: 10 });
+  await handle({ text: 'jarvis fa un ping', sender: 'boss', level: 'private', chatId: 'dm' }); // spends 100, over the 10 cap
+  const out = toPlain(await handle({ text: 'jarvis ping', sender: 'boss', level: 'private', chatId: 'dm' })); // a typed command
+  assert.equal(out, 'pong'); // deterministic commands are unaffected by the AI budget
+  assert.equal(ai.calls.length, 1); // the typed command ran without touching the model
+  store.close();
+});
