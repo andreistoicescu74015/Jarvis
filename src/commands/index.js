@@ -9,6 +9,7 @@ import blacklist from './blacklist.js';
 import groups from './groups.js';
 import community from './community.js';
 import ai from './ai.js';
+import alias from './alias.js';
 import link from './link.js';
 import schedule from './schedule.js';
 import reset from './reset.js';
@@ -33,6 +34,7 @@ export const commands = [
   groups,
   community,
   ai,
+  alias,
   link,
   schedule,
   reset,

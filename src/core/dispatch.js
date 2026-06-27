@@ -5,6 +5,7 @@ import { createAccessPolicy, accessContextFor } from './access.js';
 import { createLinks } from './links.js';
 import { createActivation } from './activation.js';
 import { createAiUsage } from './ai-usage.js';
+import { createAliases } from './aliases.js';
 import { nullLogger } from './log.js';
 import { b, code, esc } from './format.js';
 import { toolCatalog, toCommandLine } from './tools.js';
@@ -72,6 +73,9 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
   // Token accounting for every model call (per access-context + global), so the owner can see what the
   // AI layer costs. Storage-only; a safe no-op without a store.
   const aiUsage = store ? createAiUsage(store) : null;
+  // Owner-defined command aliases (the `alias` command): short names that expand to a full command line,
+  // run deterministically before the AI branch. Global, store-backed; a safe no-op without a store.
+  const aliases = store ? createAliases(store) : null;
   // Per-context CHATBOT mode (the `ai` command). Command translation is ALWAYS on; this gate only
   // controls whether Jarvis also answers general questions conversationally when nothing maps to a
   // command. Off by default; the owner opens it per chat with `jarvis ai on`.
@@ -271,7 +275,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
 
     // `capable` / `ownerCap` are message-scoped but command-independent, so they are built once and
     // shared by every command run below (a single typed command, or each step of an AI chain).
-    const capable = { store, access, links, activation, scheduler, lifecycle, send, community, aiGate: aiGateStore };
+    const capable = { store, access, links, activation, scheduler, lifecycle, send, community, aliases, aiGate: aiGateStore };
     const ownerCap = {
       exists: !!ownerResolver.current,
       isMe: isOwner,
@@ -374,6 +378,8 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
         // AI token accounting for this context (read-only, for the owner's `ai` command): the cumulative
         // summary plus today's spend and the configured daily cap (so the command can show the budget).
         aiUsage: aiUsage ? { summary: () => aiUsage.summary(accessContext), today: () => aiUsage.today(), cap: aiDailyCap } : undefined,
+        // Owner-defined command aliases (the `alias` command manages them; the dispatcher expands them above).
+        aliases: aliases ?? undefined,
         links: links
           ? {
               propose: () => links.propose(chatId),
@@ -446,6 +452,21 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
 
     const known = registry.get(command);
     if (known) return runOne(known, command, args, rest); // a known command: run it directly
+
+    // Owner-defined alias: an exact match on a shortcut name expands to its command line and runs through
+    // the SAME guards via runOne (deterministic, no AI - and it pre-empts the fuzzy/AI branches below, so a
+    // shortcut never costs a model call). Checked AFTER real commands (so it can't shadow one) and expanded
+    // ONE level (the target is a literal command, never re-aliased), so aliases cannot loop. Text typed
+    // after the alias name is appended. The target is still scope/access-checked in runOne, so an alias can
+    // never run a command the caller could not type by hand.
+    const aliasTarget = aliases?.get(command);
+    if (aliasTarget) {
+      const reparsed = parse(rest ? `${aliasTarget} ${rest}` : aliasTarget, prefix, { addressed: true });
+      const target = reparsed?.command ? registry.get(reparsed.command) : undefined;
+      if (target) return runOne(target, reparsed.command, reparsed.args, reparsed.rest);
+      log.info('alias: target is not a known command', { alias: command, target: reparsed?.command });
+      return `Alias ${code(esc(command))} points to an unknown command.`;
+    }
 
     // A near-miss of a real command (a typo): suggest the correction deterministically - no LLM, and it
     // pre-empts the AI translation branch below (so a typo never costs a model call). Suggest, never

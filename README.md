@@ -44,6 +44,7 @@ what *you* can run where you are; `jarvis man <command>` explains one in detail.
 - `jarvis groups [activate|deactivate [<id>]]` - list and authorize the groups the bot runs in.
 - `jarvis community [activate|deactivate [<id>]]` - show a community, or authorize all its groups at once.
 - `jarvis ai [on|off]` - turn chatbot mode on/off for this chat (see below).
+- `jarvis alias add <name> <command...> | list | remove <name>` - define command shortcuts that expand and run with no AI.
 - `jarvis reset [all]` - clear this chat's data, or wipe everything.
 - `jarvis shutdown` / `jarvis restart` / `jarvis logout` - lifecycle (details under [Owner commands](#owner-commands-in-chat)).
 
