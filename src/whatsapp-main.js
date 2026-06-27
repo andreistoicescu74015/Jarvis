@@ -6,6 +6,7 @@ import { createDispatcher } from './core/dispatch.js';
 import { createLogger } from './core/log.js';
 import { createStore } from './store/index.js';
 import { createScheduler } from './core/scheduler.js';
+import { createFeeds } from './core/feeds.js';
 import { createActivation } from './core/activation.js';
 import { startProactive } from './core/proactive.js';
 import { createSqliteAuthState } from './whatsapp/auth-store.js';
@@ -29,6 +30,7 @@ const store = createStore({ path: process.env.JARVIS_DB ?? 'data/jarvis.db' });
 const authDb = createStore({ path: process.env.JARVIS_AUTH_DB ?? 'data/wa-auth.db' });
 const identity = createIdentityStore(store, { log });
 const scheduler = createScheduler(store);
+const feeds = createFeeds(store);
 const activation = createActivation(store);
 // AI (GitHub Models, OpenAI-compatible). With GITHUB_MODELS_TOKEN set, an addressed message that is not
 // an exact command is mapped to one or more commands (always-on translation; each still re-checked by
@@ -111,6 +113,7 @@ const adapter = createWhatsAppAdapter({
     activation.deactivate(chatId);
     const cleared = scheduler.clearChat(chatId);
     if (cleared) log.info('cleared scheduled jobs for a removed group', { chatId, cleared });
+    feeds.clearChat(chatId); // drop the group's feed subscriptions too
   },
   // Track connection liveness for the heartbeat: stamp it immediately on connect, and the interval
   // below keeps it fresh while connected (so a disconnect lets it go stale -> unhealthy).
@@ -155,6 +158,7 @@ const handle = createDispatcher(registry, {
     send: (target, message) => adapter.send(target, message),
     community: adapter.community,
     scheduler,
+    feeds,
     ai,
     // Hard daily token budget for the AI layer: once the day's tokens reach it, Jarvis stops calling
     // the model until the next server-local day (deterministic commands keep working). 0 = no cap.
@@ -206,6 +210,28 @@ const proactiveRunner = startProactive(
   { intervalMs: num(process.env.JARVIS_TICK_MS, 30_000), log },
 );
 
+// RSS/Atom feed digests run on their own, slower loop so feed servers are never hit often. The fetch is
+// OUTBOUND-only with a timeout (the `feed` command only ever stores http/https URLs); delivery reuses
+// `deliver`, so new entries respect the same activation gate and global send pacing as everything else.
+const fetchFeed = async (url) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), num(process.env.JARVIS_FEED_TIMEOUT_MS, 10_000));
+  try {
+    const res = await fetch(url, { signal: controller.signal, redirect: 'follow', headers: { 'user-agent': 'Jarvis-feed' } });
+    return res.ok ? await res.text() : '';
+  } catch {
+    return ''; // network error / timeout -> no items this round, retry next interval
+  } finally {
+    clearTimeout(timer);
+  }
+};
+const feedRunner = startProactive(
+  async () => {
+    await feeds.tick(fetchFeed, deliver);
+  },
+  { intervalMs: num(process.env.JARVIS_FEED_INTERVAL_MS, 600_000), log },
+);
+
 // Keep the liveness heartbeat fresh while connected (unref'd so it never holds the process open).
 const heartbeat = setInterval(() => { if (connected) writeHeartbeat(); }, num(process.env.JARVIS_HEALTH_INTERVAL_MS, 20_000));
 heartbeat.unref();
@@ -221,6 +247,7 @@ const quit = async (code = 0) => {
   // leave the process wedged (no exit, no restart). Each close is guarded so a late write can't abort it.
   try {
     await proactiveRunner.stop();
+    await feedRunner.stop();
     await adapter.stop();
   } catch (err) {
     log.error('error during shutdown', { error: err?.message ?? String(err) });

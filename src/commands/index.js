@@ -12,6 +12,7 @@ import ai from './ai.js';
 import alias from './alias.js';
 import link from './link.js';
 import schedule from './schedule.js';
+import feed from './feed.js';
 import reset from './reset.js';
 import shutdown from './shutdown.js';
 import restart from './restart.js';
@@ -37,6 +38,7 @@ export const commands = [
   alias,
   link,
   schedule,
+  feed,
   reset,
   shutdown,
   restart,
