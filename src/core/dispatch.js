@@ -9,6 +9,7 @@ import { nullLogger } from './log.js';
 import { b, code, esc } from './format.js';
 import { toolCatalog, toCommandLine } from './tools.js';
 import { isMisuse } from './reply.js';
+import { closest } from './closest.js';
 
 // Upper bound on how many commands one natural-language prompt may run. The model is the only
 // non-deterministic input; cap the fan-out so a single request can never spray an unbounded number
@@ -437,6 +438,13 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
 
     const known = registry.get(command);
     if (known) return runOne(known, command, args, rest); // a known command: run it directly
+
+    // A near-miss of a real command (a typo): suggest the correction deterministically - no LLM, and it
+    // pre-empts the AI translation branch below (so a typo never costs a model call). Suggest, never
+    // auto-run: a mistyped sensitive command (e.g. `logout`) must not fire, and the line is rebuilt with
+    // the corrected name plus the original args, so it is ready to send.
+    const guess = closest(command, registry.all().map((c) => c.name));
+    if (guess) return `Did you mean ${code(`${prefix} ${guess}${rest ? ` ${rest}` : ''}`)}? Type it to run.`;
 
     // Not a known command, but the user addressed Jarvis. Command TRANSLATION is always on (best-effort):
     // map the natural-language request onto one or more commands (a chain) and run each through runOne -

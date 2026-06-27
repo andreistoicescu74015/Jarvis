@@ -69,6 +69,18 @@ test('dispatch: unknown command returns a hint', async () => {
   assert.match(sent[0].text, /Unknown command frobnicate/);
 });
 
+test('dispatch: a mistyped command is suggested (corrected line), never auto-run', async () => {
+  const sent = await run('jarvis pingg');
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /Did you mean .*jarvis ping.*Type it to run/);
+  assert.doesNotMatch(sent[0].text, /pong/); // a suggestion, not an execution
+});
+
+test('dispatch: a mistyped command keeps the original arguments in the suggestion', async () => {
+  const sent = await run('jarvis halp me now'); // halp -> help, args preserved
+  assert.match(sent[0].text, /Did you mean .*jarvis help me now/);
+});
+
 test('dispatch: a non-prefixed message is ignored', async () => {
   assert.deepEqual(await run('just chatting'), []);
 });
