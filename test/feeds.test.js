@@ -102,3 +102,30 @@ test("feeds: clearChat removes only that chat's subscriptions", () => {
   assert.equal(f.list('B').length, 1);
   store.close();
 });
+
+test('parseFeed: decodes named, decimal, and hex entities in titles', () => {
+  const xml = '<rss><channel><item><title>caf&#233; &amp; t&#xe9;a &quot;x&quot;</title><guid>g1</guid></item></channel></rss>';
+  assert.equal(parseFeed(xml)[0].title, 'café & téa "x"');
+});
+
+test('parseFeed: an Atom entry with multiple links prefers rel="alternate" over rel="self"', () => {
+  const xml = '<feed><entry><title>Post</title><link rel="self" href="https://ex.com/feed.atom"/><link rel="alternate" href="https://ex.com/post/1"/><id>a1</id></entry></feed>';
+  assert.equal(parseFeed(xml)[0].link, 'https://ex.com/post/1');
+});
+
+test('feeds: a feed with more than MAX_SEEN (200) items never re-posts old entries', async () => {
+  const store = createStore({ path: ':memory:' });
+  const f = createFeeds(store, { now: () => 1 });
+  f.add({ chatId: 'A', url: 'https://ex.com/big' });
+  const big = (extra = '') => `<rss><channel>${extra}${Array.from({ length: 250 }, (_, i) => `<item><title>T${i}</title><guid>g${i}</guid></item>`).join('')}</channel></rss>`;
+  assert.equal(await f.tick(async () => big(), () => true), 0); // baseline records the window, posts nothing
+  // The bug re-posted ~5 stale items every tick; the snapshot fix must post NOTHING for an unchanged feed.
+  assert.equal(await f.tick(async () => big(), () => true), 0);
+  assert.equal(await f.tick(async () => big(), () => true), 0);
+  // A genuinely new entry at the top posts exactly once, then never again.
+  const sent = [];
+  assert.equal(await f.tick(async () => big('<item><title>NEW</title><guid>gnew</guid></item>'), (_c, t) => { sent.push(t); return true; }), 1);
+  assert.match(sent[0], /NEW/);
+  assert.equal(await f.tick(async () => big('<item><title>NEW</title><guid>gnew</guid></item>'), () => true), 0);
+  store.close();
+});

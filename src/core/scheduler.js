@@ -59,10 +59,13 @@ export function parseWhen(input, now) {
   return { ok: false, reason: 'bad-when' };
 }
 
-// Words that signal a RECURRING intent. chrono parses one-shot times only - natural-language
-// recurrence ("every Monday", "weekly") is not reliably supported - so we refuse these rather than
-// silently scheduling a single occurrence, and point the user back to the strict `every <N>{m|h|d}` form.
-const RECURRENCE_RE = /^(every|each|daily|weekly|monthly|hourly|annually|yearly)\b/i;
+// Words that signal a RECURRING intent. chrono parses one-shot times only, so we refuse these rather than
+// silently scheduling a single occurrence (e.g. "water plants every 3 days" would otherwise become a
+// one-shot with a dangling "every" left in the message). "every" is caught ANYWHERE in the line (it almost
+// always means recurrence); the other frequency words only when they LEAD, so a one-shot that merely
+// contains "daily"/"weekly" as an adjective ("send the daily report tomorrow") still goes through. The
+// user is pointed back to the strict `every <N>{m|h|d}` form.
+const RECURRENCE_RE = /\bevery\b|^(?:each|daily|weekly|monthly|hourly|annually|yearly)\b/i;
 
 /**
  * Parse a FREE natural-language reminder into an absolute fire time AND the leftover message, using

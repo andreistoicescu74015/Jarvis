@@ -19,15 +19,16 @@ const MAX_ITEMS_PER_CHECK = 5; // new items posted per feed per check (no burst 
 const MAX_BODY = 2_000_000; // characters of a feed response we parse (a sanity cap)
 
 const stripCdata = (s) => s.replace(/^\s*<!\[CDATA\[/, '').replace(/\]\]>\s*$/, '').trim();
+const fromCodePoint = (cp) => (Number.isInteger(cp) && cp >= 1 && cp <= 0x10ffff ? String.fromCodePoint(cp) : '');
 const decode = (s) =>
   String(s)
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
-    .replace(/&#34;/g, '"')
-    .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&')
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => fromCodePoint(parseInt(h, 16))) // hex entity, e.g. &#xe9;
+    .replace(/&#(\d+);/g, (_, d) => fromCodePoint(Number(d))) // decimal entity, e.g. &#233;
+    .replace(/&amp;/g, '&') // last, so &amp;#39; doesn't double-decode
     .trim();
 const tagText = (block, name) => {
   const m = block.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`, 'i'));
@@ -49,7 +50,11 @@ export function parseFeed(xml) {
     const title = tagText(block, 'title');
     let link = tagText(block, 'link'); // RSS: <link>url</link>
     if (!link) {
-      const href = block.match(/<link\b[^>]*\bhref=["']([^"']+)["']/i); // Atom: <link href="url"/>
+      // Atom: an entry can carry several <link>s; prefer rel="alternate" (the article), else one with no
+      // rel, else the first - so we never post the feed's own rel="self" URL instead of the article.
+      const tags = block.match(/<link\b[^>]*>/gi) ?? [];
+      const pick = tags.find((t) => /\brel=["']?alternate\b/i.test(t)) ?? tags.find((t) => !/\brel=/i.test(t)) ?? tags[0];
+      const href = pick?.match(/\bhref=["']([^"']+)["']/i);
       link = href ? decode(href[1]) : '';
     }
     const id = tagText(block, 'guid') || tagText(block, 'id') || link || title;
@@ -129,23 +134,28 @@ export function createFeeds(store, { now = () => Date.now() } = {}) {
       // Re-read after the await: an inbound `feed remove` may have landed on the shared store.
       const cur = feeds.get(f.id);
       if (!cur || cur.chatId !== f.chatId) continue;
+      // Compare against (and remember) ONLY the top window, capped to MAX_SEEN. `seen` is a SNAPSHOT of the
+      // last check's ids, so it always fully covers the candidates - an entry can never scroll out of
+      // `seen` while still in view, which previously made a feed with >MAX_SEEN items re-post old entries
+      // forever. New entries appear at the top, so they always fall inside the window.
+      const candidates = items.slice(0, MAX_SEEN);
+      const ids = candidates.map((it) => it.id);
       if (!cur.checked) {
-        feeds.set(f.id, { ...cur, checked: true, seen: items.map((it) => it.id).slice(0, MAX_SEEN) });
+        feeds.set(f.id, { ...cur, checked: true, seen: ids });
         continue; // baseline only - do not post the pre-existing entries
       }
       const seen = new Set(cur.seen ?? []);
-      const fresh = items.filter((it) => !seen.has(it.id)).slice(0, MAX_ITEMS_PER_CHECK);
-      const sent = [];
-      for (const it of fresh) {
+      const fresh = candidates.filter((it) => !seen.has(it.id));
+      let declined = false;
+      for (const it of fresh.slice(0, MAX_ITEMS_PER_CHECK)) { // cap the burst; extra new items this check are skipped
         const r = await deliver(f.chatId, it.link ? `${it.title}\n${it.link}` : it.title);
-        if (r === false) break; // ineligible chat - leave the rest for next tick (seen not advanced)
+        if (r === false) { declined = true; break; }
         delivered++;
-        sent.push(it.id);
       }
-      if (sent.length) {
-        const latest = feeds.get(f.id); // re-read again (deliver awaited)
-        if (latest && latest.chatId === f.chatId) feeds.set(f.id, { ...latest, seen: [...(latest.seen ?? []), ...sent].slice(-MAX_SEEN) });
-      }
+      if (declined) continue; // ineligible chat - keep the old snapshot and retry next tick
+      // Advance the snapshot to the current window (re-read in case `feed remove` landed during delivery).
+      const latest = feeds.get(f.id);
+      if (latest && latest.chatId === f.chatId) feeds.set(f.id, { ...latest, seen: ids });
     }
     return delivered;
   }
