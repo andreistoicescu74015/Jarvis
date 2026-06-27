@@ -375,3 +375,51 @@ test('ai dispatch: a deterministic command still works after the AI cap is hit',
   assert.equal(ai.calls.length, 1); // the typed command ran without touching the model
   store.close();
 });
+
+test('alias dispatch: a defined alias expands and runs its target with no AI call', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi({ command: 'ping', args: {} }); // would translate, but the alias pre-empts it
+  store.scoped('aliases').set('gm', 'ping'); // owner defined `gm` -> ping
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai });
+  const out = toPlain(await handle({ text: 'jarvis gm', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.equal(out, 'pong'); // expanded to ping and ran
+  assert.equal(ai.calls.length, 0); // deterministic - the model was never consulted
+  store.close();
+});
+
+test('alias dispatch: text after the alias name is appended to its target', async () => {
+  const store = createStore({ path: ':memory:' });
+  store.scoped('aliases').set('n', 'note add'); // `n <text>` -> note add <text>
+  const handle = createDispatcher(createRegistry([note]), { owner: 'boss', store });
+  await handle({ text: 'jarvis n buy milk', sender: 'boss', level: 'private', chatId: 'dm' });
+  assert.deepEqual(store.scoped('private:dm').get('notes'), ['buy milk']); // the appended text became the note
+  store.close();
+});
+
+test('alias dispatch: an alias to an owner-only command is refused for a non-owner (no escalation)', async () => {
+  const store = createStore({ path: ':memory:' });
+  store.scoped('aliases').set('go', 'groups activate'); // groups is owner-only
+  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, listGroups: async () => [{ id: 'g@g.us', name: 'G' }] });
+  const out = toPlain(await handle({ text: 'jarvis go', sender: 'u', level: 'group', chatId: 'g@g.us', isAdmin: false }));
+  assert.match(out, /Not allowed/i); // the target's owner-only scope still applies through runOne
+  store.close();
+});
+
+test('alias dispatch: a real command is never shadowed by an alias of the same name', async () => {
+  const store = createStore({ path: ':memory:' });
+  store.scoped('aliases').set('ping', 'note add hijacked'); // an alias colliding with a real command
+  const handle = createDispatcher(createRegistry([ping, note]), { owner: 'boss', store });
+  const out = toPlain(await handle({ text: 'jarvis ping', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.equal(out, 'pong'); // the real command wins (alias is checked only after registry.get)
+  assert.deepEqual(store.scoped('private:dm').get('notes') ?? [], []); // the alias target did NOT run
+  store.close();
+});
+
+test('alias dispatch: an alias whose target is not a real command reports it cleanly', async () => {
+  const store = createStore({ path: ':memory:' });
+  store.scoped('aliases').set('bad', 'nonexistentcmd foo');
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store });
+  const out = toPlain(await handle({ text: 'jarvis bad', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(out, /points to an unknown command/i);
+  store.close();
+});
