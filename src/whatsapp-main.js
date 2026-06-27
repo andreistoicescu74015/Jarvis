@@ -156,6 +156,9 @@ const handle = createDispatcher(registry, {
     community: adapter.community,
     scheduler,
     ai,
+    // Hard daily token budget for the AI layer: once the day's tokens reach it, Jarvis stops calling
+    // the model until the next server-local day (deterministic commands keep working). 0 = no cap.
+    aiDailyCap: num(process.env.JARVIS_AI_DAILY_TOKEN_CAP, 0),
     // Canonicalize a named person for the access lists: a JID (e.g. from an @mention)
     // is resolved toward its phone form; a bare number becomes a phone JID. Matching
     // then bridges LID <-> phone, so a person named one way matches a sender on the other.

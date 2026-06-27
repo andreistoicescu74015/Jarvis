@@ -2,13 +2,22 @@ import { b, code } from '../core/format.js';
 
 const group = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
-/** A one-line token-usage summary for the owner, shown once the AI has actually been used. */
+/** A token-usage summary for the owner: cumulative totals once the AI has been used, plus the daily
+ * budget (today's spend vs the cap, flagged when reached) whenever a cap is configured. */
 function usageLine(ctx) {
   if (!ctx.aiUsage) return '';
   const { here, global } = ctx.aiUsage.summary();
-  if (!global.total) return '';
   const calls = (n) => `${group(n)} call${n === 1 ? '' : 's'}`;
-  return `\nTokens used - here: ${group(here.total)} (${calls(here.calls)}); all chats: ${group(global.total)} (${calls(global.calls)}).`;
+  let out = '';
+  if (global.total) {
+    out += `\nTokens used - here: ${group(here.total)} (${calls(here.calls)}); all chats: ${group(global.total)} (${calls(global.calls)}).`;
+  }
+  const cap = ctx.aiUsage.cap ?? 0;
+  if (cap > 0) {
+    const today = ctx.aiUsage.today();
+    out += `\nToday: ${group(today)} / ${group(cap)} daily cap${today >= cap ? ' (reached - AI paused until tomorrow)' : ''}.`;
+  }
+  return out;
 }
 
 /**
