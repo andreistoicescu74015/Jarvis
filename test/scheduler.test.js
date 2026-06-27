@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from '../src/store/index.js';
-import { createScheduler, parseWhen } from '../src/core/scheduler.js';
+import { createScheduler, parseWhen, parseNatural } from '../src/core/scheduler.js';
 
 const M = 60_000;
 const H = 3_600_000;
@@ -210,4 +210,47 @@ test('scheduler: a plain job carries no kind (shape unchanged)', () => {
   const s = createScheduler(createStore({ path: ':memory:' }), { now: () => 0 });
   s.add({ chatId: 'A', when: 'in 1h', text: 'hi' });
   assert.ok(!('kind' in s.list('A')[0])); // no kind key on a normal job
+});
+
+test('parseNatural: extracts a relative time and leaves the rest as the message', () => {
+  const now = new Date('2026-06-17T12:00').getTime();
+  assert.deepEqual(parseNatural('call mom in 2 hours', now), { ok: true, fireAt: now + 2 * H, message: 'call mom' });
+});
+
+test('parseNatural: an absolute "tomorrow at 9am" resolves forward to 09:00 the next day', () => {
+  const now = new Date('2026-06-17T12:00').getTime();
+  const r = parseNatural('dentist tomorrow at 9am', now);
+  assert.equal(r.ok, true);
+  assert.equal(r.message, 'dentist');
+  const d = new Date(r.fireAt);
+  assert.equal(d.getHours(), 9);
+  assert.equal(d.getMinutes(), 0);
+  assert.equal(d.getDate(), 18); // the day after the 17th
+});
+
+test('parseNatural: distinct reasons for recurrence, no-time, past, and a time-only (empty) message', () => {
+  const now = new Date('2026-06-17T12:00').getTime();
+  assert.equal(parseNatural('every monday standup', now).reason, 'no-nl-recurrence'); // refused before chrono
+  assert.equal(parseNatural('just buy milk', now).reason, 'no-time'); // no time in the text
+  assert.equal(parseNatural('recap on 2020-01-01 09:00', now).reason, 'past'); // explicit past date
+  assert.equal(parseNatural('tomorrow at 9am', now).reason, 'empty-text'); // a time but nothing left to say
+});
+
+test('scheduler: addNatural parses free text, stores the message, one-shot', () => {
+  const now = new Date('2026-06-17T12:00').getTime();
+  const s = createScheduler(createStore({ path: ':memory:' }), { now: () => now });
+  const r = s.addNatural({ chatId: 'A', input: 'call mom in 2 hours' });
+  assert.equal(r.ok, true);
+  assert.equal(r.repeatMs, 0); // recurrence is not inferred from natural language
+  const [job] = s.list('A');
+  assert.equal(job.text, 'call mom');
+  assert.equal(job.fireAt, now + 2 * H);
+});
+
+test('scheduler: addNatural refuses recurrence words and a line with no time', () => {
+  const now = new Date('2026-06-17T12:00').getTime();
+  const s = createScheduler(createStore({ path: ':memory:' }), { now: () => now });
+  assert.equal(s.addNatural({ chatId: 'A', input: 'weekly review' }).reason, 'no-nl-recurrence');
+  assert.equal(s.addNatural({ chatId: 'A', input: 'no time here' }).reason, 'no-time');
+  assert.equal(s.list('A').length, 0); // nothing stored on a rejection
 });

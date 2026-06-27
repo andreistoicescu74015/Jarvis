@@ -128,3 +128,19 @@ test('schedule ai: a missing instruction or bad when-spec shows usage', async ()
   assert.match(await handle(m('jarvis schedule ai every 1d')), /Usage:.*schedule ai every/i); // no instruction
   assert.match(await handle(m('jarvis schedule ai bogus stuff')), /Usage:.*schedule ai in/i); // bad when-spec
 });
+
+test('schedule: plain language schedules and list shows the extracted message', async () => {
+  const { handle } = setup(new Date('2026-06-17T08:00').getTime());
+  assert.match(await handle(msg('jarvis schedule call mom tomorrow at 9am')), /Scheduled s1 for 2026-06-18 09:00/);
+  assert.match(await handle(msg('jarvis schedule list')), /s1:.*-> "call mom"/);
+});
+
+test('schedule: plain language with no time is refused with a hint', async () => {
+  const { handle } = setup();
+  assert.match(await handle(msg('jarvis schedule buy some milk')), /couldn't find a date or time/i);
+});
+
+test('schedule: plain-language recurrence points back to "every"', async () => {
+  const { handle } = setup();
+  assert.match(await handle(msg('jarvis schedule daily standup')), /every <N>/i);
+});

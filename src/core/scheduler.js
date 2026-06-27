@@ -13,6 +13,8 @@
  * A job: `{ chatId, text, fireAt, repeatMs, createdBy, createdAt }` stored under its id.
  */
 
+import * as chrono from 'chrono-node';
+
 const UNIT_MS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 
 // Bounds so scheduled jobs cannot grow the store without limit (mirrors the note caps): a per-message
@@ -57,6 +59,41 @@ export function parseWhen(input, now) {
   return { ok: false, reason: 'bad-when' };
 }
 
+// Words that signal a RECURRING intent. chrono parses one-shot times only - natural-language
+// recurrence ("every Monday", "weekly") is not reliably supported - so we refuse these rather than
+// silently scheduling a single occurrence, and point the user back to the strict `every <N>{m|h|d}` form.
+const RECURRENCE_RE = /^(every|each|daily|weekly|monthly|hourly|annually|yearly)\b/i;
+
+/**
+ * Parse a FREE natural-language reminder into an absolute fire time AND the leftover message, using
+ * chrono. One-shot only (no recurrence). Times are server-local; `now` is injected so parsing is
+ * deterministic. Returns a reason on failure rather than throwing.
+ *
+ * @param {string} input  e.g. "call the dentist tomorrow at 9am"
+ * @param {number} now    Current time in ms (injected).
+ * @returns {{ ok: true, fireAt: number, message: string } | { ok: false, reason: 'no-nl-recurrence' | 'no-time' | 'past' | 'empty-text' }}
+ */
+export function parseNatural(input, now) {
+  const text = String(input ?? '').trim();
+  if (!text) return { ok: false, reason: 'empty-text' };
+  if (RECURRENCE_RE.test(text)) return { ok: false, reason: 'no-nl-recurrence' };
+  let results;
+  try {
+    results = chrono.parse(text, new Date(now), { forwardDate: true });
+  } catch {
+    return { ok: false, reason: 'no-time' };
+  }
+  if (!results.length) return { ok: false, reason: 'no-time' };
+  const r = results[0];
+  const fireAt = r.date().getTime();
+  if (Number.isNaN(fireAt)) return { ok: false, reason: 'no-time' };
+  if (fireAt <= now) return { ok: false, reason: 'past' };
+  // chrono reports the exact span it matched, so the message is the text with that span removed.
+  const message = (text.slice(0, r.index) + text.slice(r.index + r.text.length)).replace(/\s+/g, ' ').trim();
+  if (!message) return { ok: false, reason: 'empty-text' };
+  return { ok: true, fireAt, message };
+}
+
 /**
  * @param {import('../store/index.js').Store} store
  * @param {{ now?: () => number }} [opts]
@@ -80,17 +117,31 @@ export function createScheduler(store, { now = () => Date.now() } = {}) {
    *
    * @returns {{ ok: true, id: string, fireAt: number, repeatMs: number } | { ok: false, reason: string }}
    */
-  function add({ chatId, createdBy = '', when, text, kind }) {
-    const w = parseWhen(when, now());
-    if (!w.ok) return w;
+  // Validate the message + per-chat bounds, then persist one job. Shared by `add` (a strict when-spec)
+  // and `addNatural` (free natural language) so both enforce the same caps and store the same shape.
+  function persist({ chatId, createdBy = '', text, fireAt, repeatMs, kind }) {
     if (!String(text ?? '').trim()) return { ok: false, reason: 'empty-text' };
     if (String(text).length > MAX_TEXT_LEN) return { ok: false, reason: 'too-long', max: MAX_TEXT_LEN };
     if (list(chatId).length >= MAX_JOBS) return { ok: false, reason: 'too-many', max: MAX_JOBS };
     const id = nextId();
     // `kind: 'ai'` marks a job whose `text` is an INSTRUCTION to run through the AI pipeline at fire
     // time, not a literal message. Stored only when set, so plain jobs keep their original shape.
-    jobs.set(id, { chatId, text, fireAt: w.fireAt, repeatMs: w.repeatMs, createdBy, createdAt: now(), ...(kind ? { kind } : {}) });
-    return { ok: true, id, fireAt: w.fireAt, repeatMs: w.repeatMs };
+    jobs.set(id, { chatId, text, fireAt, repeatMs, createdBy, createdAt: now(), ...(kind ? { kind } : {}) });
+    return { ok: true, id, fireAt, repeatMs };
+  }
+
+  function add({ chatId, createdBy = '', when, text, kind }) {
+    const w = parseWhen(when, now());
+    if (!w.ok) return w;
+    return persist({ chatId, createdBy, text, fireAt: w.fireAt, repeatMs: w.repeatMs, kind });
+  }
+
+  // Schedule from a FREE natural-language line ("call mom tomorrow at 9am"): chrono extracts the time
+  // and the remainder becomes the message. One-shot only (recurrence stays on the strict `every` form).
+  function addNatural({ chatId, createdBy = '', input, kind }) {
+    const p = parseNatural(input, now());
+    if (!p.ok) return p;
+    return persist({ chatId, createdBy, text: p.message, fireAt: p.fireAt, repeatMs: 0, kind });
   }
 
   /** This chat's jobs, soonest first. */
@@ -172,5 +223,5 @@ export function createScheduler(store, { now = () => Date.now() } = {}) {
     return { fired, failed };
   }
 
-  return { add, list, cancel, clearChat, setEnabled, setEnabledAll, tick };
+  return { add, addNatural, list, cancel, clearChat, setEnabled, setEnabledAll, tick };
 }
