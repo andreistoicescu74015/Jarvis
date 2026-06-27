@@ -29,11 +29,15 @@ const whenError = (r) =>
     ? 'That time is already past.'
     : r.reason === 'empty-text'
       ? 'The message is empty.'
-      : r.reason === 'too-long'
-        ? `That message is too long (max ${r.max} characters).`
-        : r.reason === 'too-many'
-          ? `Too many scheduled messages here (max ${r.max}); cancel some first.`
-          : 'Bad time. Use "in 2h", "at 2026-06-18 09:00", or "every 1d" (units: m, h, d).';
+      : r.reason === 'no-time'
+        ? 'I couldn\'t find a date or time in that. Try e.g. "tomorrow at 9am call mom", or "in 2h <msg>".'
+        : r.reason === 'no-nl-recurrence'
+          ? 'For a repeating message, use "every <N>{m|h|d}" - e.g. "every 1d <msg>".'
+          : r.reason === 'too-long'
+            ? `That message is too long (max ${r.max} characters).`
+            : r.reason === 'too-many'
+              ? `Too many scheduled messages here (max ${r.max}); cancel some first.`
+              : 'Bad time. Use "in 2h", "at 2026-06-18 09:00", or "every 1d" (units: m, h, d).';
 
 /**
  * Schedule a message for the bot to post later - once or repeating - without an inbound
@@ -48,9 +52,11 @@ const whenError = (r) =>
 export default {
   name: 'schedule',
   summary: 'Schedule a message to post later (once or repeating).',
-  usage: 'jarvis schedule in <2h> <msg> | at <YYYY-MM-DD> <HH:MM> <msg> | every <1d> <msg> | ai <when> <instruction> | list | cancel <id|all> | disable|enable <id|all>',
+  usage: 'jarvis schedule <call mom tomorrow 9am> | in <2h> <msg> | at <YYYY-MM-DD> <HH:MM> <msg> | every <1d> <msg> | ai <when> <instruction> | list | cancel <id|all> | disable|enable <id|all>',
   man:
     'Post a message to this chat later, with no one sending a command at that moment. ' +
+    'You can write it in plain language - "schedule call mom tomorrow at 9am" - and Jarvis finds the ' +
+    'time, leaving the rest as the message (one-time only; for repeats use "every"). ' +
     '"schedule in 2h <msg>" posts once in two hours; "schedule at 2026-06-18 09:00 <msg>" posts once at ' +
     'an absolute (server-local) time; "schedule every 1d <msg>" repeats. Durations are <number><unit> ' +
     'with unit m (minutes), h (hours) or d (days). "schedule list" shows this chat\'s scheduled messages ' +
@@ -151,6 +157,10 @@ export default {
       return r.ok ? confirm(r) : whenError(r);
     }
 
-    return `Usage: ${code('jarvis schedule in <2h> <msg> | at <YYYY-MM-DD> <HH:MM> <msg> | every <1d> <msg> | list | cancel <id|all> | disable|enable <id|all>')}`;
+    // The first word was not a known sub-action: treat the whole line as a free natural-language
+    // reminder ("call mom tomorrow at 9am"). Deterministic (chrono), no AI - the typed convenience
+    // form. A failure (no time found, recurrence, ...) returns a targeted hint via whenError.
+    const nl = ctx.scheduler.addNatural(ctx.rest);
+    return nl.ok ? confirm(nl) : whenError(nl);
   },
 };
