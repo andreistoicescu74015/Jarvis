@@ -58,7 +58,7 @@ const AI_MAX_CHAIN = 8;
  * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, send?: (target: string, text: string) => unknown, community?: { info: (id?: string) => Promise<object | undefined>, groups: (id?: string) => Promise<object[]>, all: () => Promise<object[]> }, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object }, ai?: { translate: (input: { text: string, tools: object[] }) => Promise<Array<{ command: string, args: object }> | null> }, requireOwner?: boolean, requireActivation?: boolean }} [opts]
  * @returns {(msg: import('./app.js').InboundMessage) => Promise<string | undefined>}
  */
-export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, community, scheduler, instagram, ai, requireOwner = false, requireActivation = false } = {}) {
+export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, community, scheduler, ai, requireOwner = false, requireActivation = false } = {}) {
   const ownerResolver = createOwnerResolver({ owner, match });
   const access = store ? createAccessPolicy(store, { match }) : null;
   const activation = store ? createActivation(store) : null;
@@ -263,7 +263,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
 
     // `capable` / `ownerCap` are message-scoped but command-independent, so they are built once and
     // shared by every command run below (a single typed command, or each step of an AI chain).
-    const capable = { store, access, links, activation, scheduler, lifecycle, send, community, instagram, aiGate: aiGateStore };
+    const capable = { store, access, links, activation, scheduler, lifecycle, send, community, aiGate: aiGateStore };
     const ownerCap = {
       exists: !!ownerResolver.current,
       isMe: isOwner,
@@ -387,9 +387,6 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
               all: () => community.all(),
             }
           : undefined,
-        // Instagram DM bridge (owner-only `ig` command): send a DM, list threads, answer a login
-        // challenge. Personal (not chat-scoped), so it is passed through as-is. Absent off the bridge.
-        instagram: instagram ?? undefined,
         scheduler: scheduler
           ? {
               add: (when, text, kind) => scheduler.add({ chatId, createdBy: sender, when, text, kind }),
