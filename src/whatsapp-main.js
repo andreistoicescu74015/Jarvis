@@ -218,7 +218,20 @@ const fetchFeed = async (url) => {
   const timer = setTimeout(() => controller.abort(), num(process.env.JARVIS_FEED_TIMEOUT_MS, 10_000));
   try {
     const res = await fetch(url, { signal: controller.signal, redirect: 'follow', headers: { 'user-agent': 'Jarvis-feed' } });
-    return res.ok ? await res.text() : '';
+    if (!res.ok || !res.body) return '';
+    // Bound the body we buffer: read the stream up to a cap, so a huge/misbehaving feed URL can't OOM the
+    // container (a plain res.text() would buffer the entire response first). Partial bodies still parse
+    // best-effort downstream.
+    const max = num(process.env.JARVIS_FEED_MAX_BYTES, 2_000_000);
+    const decoder = new TextDecoder();
+    let out = '';
+    let received = 0;
+    for await (const chunk of res.body) {
+      received += chunk.length;
+      out += decoder.decode(chunk, { stream: true });
+      if (received >= max) { controller.abort(); break; }
+    }
+    return out;
   } catch {
     return ''; // network error / timeout -> no items this round, retry next interval
   } finally {

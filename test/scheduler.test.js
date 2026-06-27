@@ -254,3 +254,14 @@ test('scheduler: addNatural refuses recurrence words and a line with no time', (
   assert.equal(s.addNatural({ chatId: 'A', input: 'no time here' }).reason, 'no-time');
   assert.equal(s.list('A').length, 0); // nothing stored on a rejection
 });
+
+test('parseNatural: a mid-sentence "every" is refused, but a "daily" adjective mid-sentence is not', () => {
+  const now = new Date('2026-06-17T12:00').getTime();
+  // Was a bug: chrono grabbed "3 days" and scheduled a one-shot with the message "water plants every".
+  assert.equal(parseNatural('water plants every 3 days', now).reason, 'no-nl-recurrence');
+  assert.equal(parseNatural('standup every monday at 9am', now).reason, 'no-nl-recurrence');
+  // A genuine one-shot that merely contains "daily" as an adjective still goes through.
+  const r = parseNatural('send the daily report tomorrow at 9am', now);
+  assert.equal(r.ok, true);
+  assert.equal(r.message, 'send the daily report');
+});
