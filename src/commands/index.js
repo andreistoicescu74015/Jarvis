@@ -8,7 +8,6 @@ import whitelist from './whitelist.js';
 import blacklist from './blacklist.js';
 import groups from './groups.js';
 import community from './community.js';
-import ig from './ig.js';
 import ai from './ai.js';
 import link from './link.js';
 import schedule from './schedule.js';
@@ -33,7 +32,6 @@ export const commands = [
   blacklist,
   groups,
   community,
-  ig,
   ai,
   link,
   schedule,
