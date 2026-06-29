@@ -14,6 +14,9 @@ test('toolCatalog: only includes commands the caller may run (by scope)', () => 
   assert.ok(names(owner).includes('groups')); // owner-only -> visible to the owner
   assert.ok(!names(stranger).includes('groups')); // hidden from a non-owner (would just be refused)
   assert.ok(names(stranger).includes('ping')); // open commands stay visible to everyone
+  assert.ok(!names(stranger).includes('link')); // group-only -> hidden from a private chat
+  const groupAdmin = toolCatalog(commands, { level: 'group', isAdmin: true, isOwner: false });
+  assert.ok(names(groupAdmin).includes('link')); // ...but offered to an admin in a group
 });
 
 test('toolCatalog: emits the OpenAI tool shape with the param schema (enum + required)', () => {
@@ -36,6 +39,8 @@ test('toCommandLine: omits absent optional params; a bare command when none are 
   assert.equal(toCommandLine(get('groups'), {}), 'groups');
   assert.equal(toCommandLine(get('groups'), { action: 'activate' }), 'groups activate');
   assert.equal(toCommandLine(get('owner'), {}), 'owner');
+  // A later optional arg with an EARLIER one omitted must NOT slide into the earlier slot: stop at the gap.
+  assert.equal(toCommandLine(get('groups'), { id: 'g@g.us' }), 'groups');
 });
 
 test('toCommandLine: throws on a missing required param; empty for an unknown command', () => {

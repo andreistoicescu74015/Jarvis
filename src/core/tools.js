@@ -65,7 +65,10 @@ export function toCommandLine(command, args = {}) {
     const v = raw == null ? '' : String(raw).trim();
     if (!v) {
       if (p.required) throw new Error(`tools: "${command.name}" is missing required arg "${p.name}"`);
-      continue;
+      // An omitted OPTIONAL param ends the positional line: a later value cannot fill this gap without
+      // shifting into the wrong slot on re-parse. Stop, so e.g. groups({id}) with no action rebuilds as
+      // "groups" (a safe list), never "groups <id>" (which would misparse the id as the action).
+      break;
     }
     parts.push(v);
   }

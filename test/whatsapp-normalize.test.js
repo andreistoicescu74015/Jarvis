@@ -97,6 +97,15 @@ test('normalize: a media caption becomes the text', () => {
   assert.equal(inbound.text, 'jarvis note add milk');
 });
 
+test('normalize: a document caption carries its text AND its @mentions', () => {
+  const inbound = toInbound(
+    { key: { remoteJid: GROUP, participant: '9@s.whatsapp.net' }, message: { documentMessage: { caption: 'jarvis ping', contextInfo: { mentionedJid: ['9@s.whatsapp.net'] } } } },
+    { groupMetadata: { participants: [] } },
+  );
+  assert.equal(inbound.text, 'jarvis ping');
+  assert.deepEqual(inbound.mentionedJid, ['9@s.whatsapp.net']); // document contextInfo is now read (was missed before)
+});
+
 test('normalize: fromMe is preserved (the app loop is what drops it)', () => {
   const inbound = toInbound({ key: { remoteJid: PRIVATE, fromMe: true }, message: { conversation: 'x' } });
   assert.equal(inbound.fromMe, true);
