@@ -11,6 +11,7 @@ import { b, code, esc } from './format.js';
 import { toolCatalog, toCommandLine } from './tools.js';
 import { isMisuse } from './reply.js';
 import { closest } from './closest.js';
+import { createRules, renderTemplate } from './rules.js';
 
 // Upper bound on how many commands one natural-language prompt may run. The model is the only
 // non-deterministic input; cap the fan-out so a single request can never spray an unbounded number
@@ -76,6 +77,9 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
   // Owner-defined command aliases (the `alias` command): short names that expand to a full command line,
   // run deterministically before the AI branch. Global, store-backed; a safe no-op without a store.
   const aliases = store ? createAliases(store) : null;
+  // Owner/admin-defined keyword auto-replies (the `rule` command): an addressed keyword posts a templated
+  // reply deterministically (no AI), checked after real commands and aliases. Per-chat, store-backed.
+  const rules = store ? createRules(store) : null;
   // Per-context CHATBOT mode (the `ai` command). Command translation is ALWAYS on; this gate only
   // controls whether Jarvis also answers general questions conversationally when nothing maps to a
   // command. Off by default; the owner opens it per chat with `jarvis ai on`.
@@ -125,6 +129,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       if (links) links.unlink(id); // leave any link overlay (revert, or dissolve it if this splits the rest)
       scheduler?.clearChat(id); // stop the group's proactive output: scheduled jobs...
       feeds?.clearChat(id); // ...and feed subscriptions, so a deactivate truly silences it (mirrors onRemoved)
+      rules?.clearChat(id); // ...and its keyword auto-replies (group data, gone with the group)
       if (store) {
         store.clearNamespace(`group:${id}`); // wipe the group's own data too - a deactivate is a full reset
         store.clearNamespace(`community:${id}`);
@@ -277,7 +282,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
 
     // `capable` / `ownerCap` are message-scoped but command-independent, so they are built once and
     // shared by every command run below (a single typed command, or each step of an AI chain).
-    const capable = { store, access, links, activation, scheduler, feeds, lifecycle, send, community, aliases, aiGate: aiGateStore };
+    const capable = { store, access, links, activation, scheduler, feeds, rules, lifecycle, send, community, aliases, aiGate: aiGateStore };
     const ownerCap = {
       exists: !!ownerResolver.current,
       isMe: isOwner,
@@ -412,6 +417,14 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
               remove: (id) => feeds.remove(id, chatId),
             }
           : undefined,
+        // Keyword auto-replies for this chat (the `rule` command); the dispatcher fires them below.
+        rules: rules
+          ? {
+              add: (keyword, reply) => rules.add({ chatId, createdBy: sender, keyword, reply }),
+              list: () => rules.list(chatId),
+              remove: (keyword) => rules.remove(chatId, keyword),
+            }
+          : undefined,
         scheduler: scheduler
           ? {
               add: (when, text, kind) => scheduler.add({ chatId, createdBy: sender, when, text, kind }),
@@ -478,6 +491,16 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       if (target) return runOne(target, reparsed.command, reparsed.args, reparsed.rest);
       log.info('alias: target is not a known command', { alias: command, target: reparsed?.command });
       return `Alias ${code(esc(command))} points to an unknown command.`;
+    }
+
+    // Owner/admin-defined keyword auto-reply (a deterministic rule): an exact keyword match posts a
+    // templated reply - no command, no AI, no tokens. Checked AFTER real commands and aliases (so it
+    // never shadows either) and before the fuzzy/AI branches. Reached only here: only on a message
+    // addressed to the bot in an already-authorized, active chat (the access + activation gates ran above).
+    const matchedRule = rules?.match(chatId, command);
+    if (matchedRule) {
+      log.info('rule: keyword auto-reply', { keyword: command, chatId, sender });
+      return renderTemplate(matchedRule.reply, { sender, chat: chatId });
     }
 
     // A near-miss of a real command (a typo): suggest the correction deterministically - no LLM, and it

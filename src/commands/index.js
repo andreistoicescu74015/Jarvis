@@ -13,6 +13,7 @@ import alias from './alias.js';
 import link from './link.js';
 import schedule from './schedule.js';
 import feed from './feed.js';
+import rule from './rule.js';
 import reset from './reset.js';
 import shutdown from './shutdown.js';
 import restart from './restart.js';
@@ -39,6 +40,7 @@ export const commands = [
   link,
   schedule,
   feed,
+  rule,
   reset,
   shutdown,
   restart,
