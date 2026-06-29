@@ -7,6 +7,7 @@ import { createActivation } from '../src/core/activation.js';
 import { createLinks } from '../src/core/links.js';
 import { createScheduler } from '../src/core/scheduler.js';
 import { createFeeds } from '../src/core/feeds.js';
+import { createRules } from '../src/core/rules.js';
 import { toPlain } from '../src/core/format.js';
 import groups from '../src/commands/groups.js';
 
@@ -170,20 +171,24 @@ test('activation: deactivating a group unlinks it and wipes its own data', async
   store.close();
 });
 
-test('activation: deactivating a group also clears its schedules and feeds (stops proactive output)', async () => {
+test('activation: deactivating a group also clears its schedules, feeds, and rules', async () => {
   const store = createStore({ path: ':memory:' });
   const activation = createActivation(store);
   activation.activate('gA@g.us', 'boss');
   const scheduler = createScheduler(store);
   const feeds = createFeeds(store);
+  const rules = createRules(store);
   scheduler.add({ chatId: 'gA@g.us', createdBy: 'boss', when: 'in 1h', text: 'reminder' });
   feeds.add({ chatId: 'gA@g.us', url: 'https://ex.com/rss' });
+  rules.add({ chatId: 'gA@g.us', createdBy: 'boss', keyword: 'menu', reply: 'soup' });
   assert.equal(scheduler.list('gA@g.us').length, 1);
   assert.equal(feeds.list('gA@g.us').length, 1);
+  assert.equal(rules.list('gA@g.us').length, 1);
   const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, requireActivation: true, scheduler, feeds });
   await handle({ text: 'jarvis groups deactivate gA@g.us', sender: 'boss', level: 'private', chatId: 'dm' });
   assert.equal(activation.isActive('gA@g.us'), false);
   assert.equal(scheduler.list('gA@g.us').length, 0); // proactive jobs gone
   assert.equal(feeds.list('gA@g.us').length, 0); // feed subscriptions gone
+  assert.equal(rules.list('gA@g.us').length, 0); // keyword auto-replies gone too
   store.close();
 });
