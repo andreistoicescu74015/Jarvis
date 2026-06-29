@@ -34,7 +34,10 @@ export default {
     'can join); a link between two already-linked groups is just insurance. "link remove" leaves the ' +
     'link; if that disconnects the rest, the whole overlay dissolves and every group reverts to its ' +
     'own data. Access lists are NOT shared - only data. "link" alone shows the status.',
-  scope: { admin: true },
+  // admin-level, and group-only: linking is between groups, so it is refused in a private chat - and,
+  // via `proactive`, hidden there from `help` and the AI tool catalog too (both filter by scope). The
+  // owner bypasses scope and still reaches the body's clearer "only between groups" message.
+  scope: { admin: true, proactive: true },
   requires: ['links'],
   // `remove` tears down the link and can dissolve the whole overlay (shared data discarded) -
   // destructive, so the AI translator never auto-runs it from a guess (the user must type it).

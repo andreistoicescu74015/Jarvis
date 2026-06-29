@@ -62,6 +62,7 @@ function contextInfoOf(content) {
     content.extendedTextMessage?.contextInfo ??
     content.imageMessage?.contextInfo ??
     content.videoMessage?.contextInfo ??
+    content.documentMessage?.contextInfo ?? // mirror extractText, which also reads a document's caption
     null
   );
 }
