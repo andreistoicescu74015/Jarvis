@@ -5,12 +5,13 @@ import { createDispatcher } from '../src/core/dispatch.js';
 import { createStore } from '../src/store/index.js';
 import { toPlain } from '../src/core/format.js';
 import alias from '../src/commands/alias.js';
+import reset from '../src/commands/reset.js';
 
 const ping = { name: 'ping', summary: 'p', run: () => 'pong' };
 
 function setup() {
   const store = createStore({ path: ':memory:' });
-  const handle = createDispatcher(createRegistry([ping, alias]), { owner: 'boss', store });
+  const handle = createDispatcher(createRegistry([ping, alias, reset]), { owner: 'boss', store });
   return { store, handle };
 }
 const boss = (text) => ({ text, sender: 'boss', level: 'private', chatId: 'dm' });
@@ -47,5 +48,13 @@ test('alias command: remove with no name, and an unknown subcommand, show usage'
   const { store, handle } = setup();
   assert.match(toPlain(await handle(boss('jarvis alias remove'))), /Usage:.*alias remove/i);
   assert.match(toPlain(await handle(boss('jarvis alias frobnicate'))), /Usage:.*alias add/i);
+  store.close();
+});
+
+test('alias command: an alias to a SENSITIVE command is not auto-run - the owner must type the real one', async () => {
+  const { store, handle } = setup();
+  await handle(boss('jarvis alias add wipe reset')); // `reset` is sensitive (confirm)
+  const out = toPlain(await handle(boss('jarvis wipe')));
+  assert.match(out, /type .*jarvis reset.* yourself to confirm/i); // gated via the alias path, not executed
   store.close();
 });
