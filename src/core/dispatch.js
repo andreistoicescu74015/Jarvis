@@ -324,19 +324,19 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       if (!scoped.ok) return `Not allowed: ${scoped.reason}.`;
       if (cmd.requires?.some((cap) => !capable[cap])) return 'That command is unavailable here.';
 
-      // From an AI translation (aiLine set): a SENSITIVE command - one that affects the bot itself
-      // (owner/reset/shutdown/restart/logout) or destroys data (a destructive SUBCOMMAND like
-      // `note clear`, `groups deactivate`) - is only ever suggested, never auto-run from a guess.
-      // Checked AFTER the access/scope guards, so a command the caller could not run anyway reports
-      // that, not a misleading suggestion. Typing it takes the normal path below (no aiLine) and runs.
-      // A SENSITIVE command (cmd.confirm) is never run without a human's explicit consent: from an AI
-      // guess (aiLine) it is suggested, not run; on a timer (scheduled) it is skipped entirely (no one to
-      // confirm); typed directly by a human it runs below (the typing IS the consent).
+      // INDIRECT invocation (aiLine set = an AI translation OR an alias expansion): a SENSITIVE command -
+      // one that affects the bot itself (owner/reset/shutdown/restart/logout) or destroys data (a
+      // destructive SUBCOMMAND like `note clear`, `groups deactivate`) - is only ever suggested, never
+      // auto-run. Checked AFTER the access/scope guards, so a command the caller could not run anyway
+      // reports that, not a misleading suggestion. A SENSITIVE command (cmd.confirm) needs a human's
+      // explicit consent: indirectly (an AI guess, or an alias that may expand to a destructive command the
+      // owner did not realize) it is suggested with the real line to type; on a timer (scheduled) it is
+      // skipped (no one to confirm); typed directly it runs below (the typing IS the consent).
       if (aiLine || msg.scheduled) {
         const needsConfirm = typeof cmd.confirm === 'function' ? cmd.confirm(args) : !!cmd.confirm;
         if (needsConfirm) {
           if (msg.scheduled) { log.info('scheduled: skipped a sensitive command', { command }); return undefined; }
-          return `I won't auto-run a sensitive command from a guess - type ${code(`${prefix} ${aiLine}`)} yourself to confirm.`;
+          return `I won't auto-run a sensitive command indirectly - type ${code(`${prefix} ${aiLine}`)} yourself to confirm.`;
         }
       }
 
@@ -486,9 +486,14 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     // never run a command the caller could not type by hand.
     const aliasTarget = aliases?.get(command);
     if (aliasTarget) {
-      const reparsed = parse(rest ? `${aliasTarget} ${rest}` : aliasTarget, prefix, { addressed: true });
+      const expanded = rest ? `${aliasTarget} ${rest}` : aliasTarget;
+      const reparsed = parse(expanded, prefix, { addressed: true });
       const target = reparsed?.command ? registry.get(reparsed.command) : undefined;
-      if (target) return runOne(target, reparsed.command, reparsed.args, reparsed.rest);
+      // Pass the expanded line so runOne applies the sensitive-command (confirm) guard: an alias is a
+      // typed shortcut, but a shortcut to a destructive/owner command (e.g. `bye` -> `logout`) must not
+      // auto-run - runOne refuses and tells the owner to type the real command. A non-sensitive target
+      // runs normally (the guard is a no-op). The target is still scope/access-checked, so no escalation.
+      if (target) return runOne(target, reparsed.command, reparsed.args, reparsed.rest, expanded);
       log.info('alias: target is not a known command', { alias: command, target: reparsed?.command });
       return `Alias ${code(esc(command))} points to an unknown command.`;
     }

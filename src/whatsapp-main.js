@@ -100,6 +100,10 @@ const adapter = createWhatsAppAdapter({
   // shows a fresh QR. In dev (no supervisor) it simply stops - rerun `npm start`.
   onLogout: () => quit(1),
   maxReconnects: num(process.env.JARVIS_MAX_RECONNECTS, 10),
+  // Offline-backlog cutoff: wide by design (default 5 min). The filter compares a message's server time
+  // to our local connect time, so a generous grace means a skewed host clock never drops a fresh command
+  // (see adapter.js). 0 effectively disables it (no message is old enough to drop).
+  offlineGraceMs: num(process.env.JARVIS_OFFLINE_GRACE_MS, 5 * 60 * 1000),
   // Fatal disconnect: a session takeover (440), a ban (403), or an unrecoverable session (500) stays
   // DOWN (exit 0) - restarting would re-fight or re-hammer. Reconnect exhaustion gets a clean restart
   // (exit non-zero) so a fresh process can retry from scratch.

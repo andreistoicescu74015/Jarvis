@@ -69,7 +69,7 @@ export function createWhatsAppAdapter({
   now = () => Date.now(),
   maxReconnects = 10,
   groupCacheTtlMs = 5 * 60 * 1000,
-  offlineGraceMs = 15 * 1000,
+  offlineGraceMs = 5 * 60 * 1000,
   humanize = {},
 } = {}) {
   // Human-presence heuristics (anti-ban). All optional, conservative defaults; tuned via env at
@@ -306,8 +306,14 @@ export function createWhatsAppAdapter({
     for (const wa of messages ?? []) {
       try {
         if (wa?.key?.fromMe) continue;
-        // Skip the offline backlog redelivered on (re)connect: messages sent before
-        // we came online. Messages without a timestamp can't be aged, so they pass.
+        // Skip clearly-STALE offline backlog redelivered on (re)connect (messages sent long before we
+        // came online), but bias toward processing. The cutoff compares a message's SERVER timestamp to
+        // our LOCAL connect time, so a host clock running ahead would otherwise drop FRESH commands - the
+        // worst outcome for an assistant (silently ignoring a user). So the grace is deliberately WIDE
+        // (default 5 min, env JARVIS_OFFLINE_GRACE_MS): realistic clock drift can't drop fresh messages,
+        // only genuinely old backlog after a real outage is dropped. Bursts are already bounded by the
+        // send pacer and sensitive commands are separately gated. A message without a timestamp can't be
+        // aged, so it passes.
         const ts = timestampMs(wa);
         if (connectedAt && ts && ts < connectedAt - offlineGraceMs) continue;
 

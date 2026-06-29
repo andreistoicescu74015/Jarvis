@@ -61,6 +61,28 @@ test('hardening: the offline backlog is skipped; fresh and timestamp-less messag
   assert.deepEqual(received.map((m) => m.chatId), ['B@s.whatsapp.net', 'C@s.whatsapp.net']);
 });
 
+test('hardening: a wide backlog grace tolerates host-clock skew - a fresh message is not dropped', async () => {
+  const clock = 10_000_000; // local connect time (the host clock)
+  const makeSocket = fakeSocketFactory();
+  const received = [];
+  const a = createWhatsAppAdapter(base({ makeSocket, now: () => clock })); // default grace = 5 min
+  a.start({ onMessage: async (m) => received.push(m) });
+  const sock = makeSocket.sockets[0];
+  sock.ev.emit('connection.update', { connection: 'open' }); // connectedAt = clock
+
+  // The host clock runs 2 minutes AHEAD of WhatsApp's server time, so a brand-new message carries a
+  // server timestamp 2 min "behind" our local connectedAt. The old 15s grace dropped it as backlog; the
+  // wide default (5 min) must let it through - we never silently ignore a fresh command over clock skew.
+  const skewedFreshSec = Math.floor((clock - 120_000) / 1000);
+  sock.ev.emit('messages.upsert', {
+    type: 'notify',
+    messages: [{ key: { remoteJid: 'A@s.whatsapp.net' }, messageTimestamp: skewedFreshSec, message: { conversation: 'jarvis ping' } }],
+  });
+  await tick();
+
+  assert.deepEqual(received.map((m) => m.chatId), ['A@s.whatsapp.net']); // passed despite the 2-min skew
+});
+
 test('hardening: group metadata is cached with a TTL, then refetched after it expires', async () => {
   let clock = 1_000_000;
   const makeSocket = fakeSocketFactory();
