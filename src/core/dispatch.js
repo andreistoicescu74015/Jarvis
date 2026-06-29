@@ -123,6 +123,8 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       if (access) access.clearContext(id); // tear down the group's lists with it
       aiGateStore?.delete(id); // and its AI-translation opt-in (a deactivate is a full reset)
       if (links) links.unlink(id); // leave any link overlay (revert, or dissolve it if this splits the rest)
+      scheduler?.clearChat(id); // stop the group's proactive output: scheduled jobs...
+      feeds?.clearChat(id); // ...and feed subscriptions, so a deactivate truly silences it (mirrors onRemoved)
       if (store) {
         store.clearNamespace(`group:${id}`); // wipe the group's own data too - a deactivate is a full reset
         store.clearNamespace(`community:${id}`);
@@ -421,14 +423,16 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
               setEnabledAll: (on) => scheduler.setEnabledAll(chatId, on),
             }
           : undefined,
-        // Owner reset: wipe THIS context's DATA - its notes and schedules. NOT its access lists: those
-        // are managed via whitelist/blacklist, and silently clearing them on a reset would open the chat
-        // up (a security regression). A full access reset is what deactivate -> reactivate already does.
-        // The chat's data ns is the link overlay when linked, so a linked group clears the shared cluster.
+        // Owner reset: wipe THIS context's DATA - its notes, schedules, and feed subscriptions. NOT its
+        // access lists: those are managed via whitelist/blacklist, and silently clearing them on a reset
+        // would open the chat up (a security regression). A full access reset is what deactivate ->
+        // reactivate already does. The notes ns is the link overlay when linked (a linked group clears the
+        // shared notes); schedules and feeds are per-chat, like scheduler.clearChat.
         resetContext: store
           ? () => {
               store.clearNamespace(links ? links.nsFor(chatId, ownNs) : ownNs);
               if (scheduler) scheduler.clearChat(chatId);
+              if (feeds) feeds.clearChat(chatId);
             }
           : undefined,
         owner: ownerCap,
