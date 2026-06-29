@@ -129,3 +129,42 @@ test('feeds: a feed with more than MAX_SEEN (200) items never re-posts old entri
   assert.equal(await f.tick(async () => big('<item><title>NEW</title><guid>gnew</guid></item>'), () => true), 0);
   store.close();
 });
+
+test('feeds: a partial batch (first sent, then a transient decline) never re-posts what already went out', async () => {
+  const store = createStore({ path: ':memory:' });
+  const f = createFeeds(store, { now: () => 1 });
+  f.add({ chatId: 'A', url: 'https://ex.com/rss' });
+  const base = '<rss><channel><item><title>Old</title><guid>old</guid></item></channel></rss>';
+  await f.tick(async () => base, () => true); // baseline
+  // Two new entries appear; the SECOND delivery hits a transient failure (false) mid-batch.
+  const two =
+    '<rss><channel><item><title>A1</title><guid>n1</guid></item><item><title>A2</title><guid>n2</guid></item><item><title>Old</title><guid>old</guid></item></channel></rss>';
+  let calls = 0;
+  const sent = [];
+  const flaky = (_c, t) => { calls += 1; if (calls === 2) return false; sent.push(t); return true; };
+  assert.equal(await f.tick(async () => two, flaky), 1); // only the first actually went out
+  assert.deepEqual(sent, ['A1']);
+  // Next check: the delivered entry must NOT repeat - only the still-undelivered one posts.
+  const after = [];
+  await f.tick(async () => two, (_c, t) => { after.push(t); return true; });
+  assert.deepEqual(after, ['A2']);
+  store.close();
+});
+
+test('feeds: more new entries than the per-check cap are deferred across checks, never dropped', async () => {
+  const store = createStore({ path: ':memory:' });
+  const f = createFeeds(store, { now: () => 1 });
+  f.add({ chatId: 'A', url: 'https://ex.com/rss' });
+  const feed = (n) =>
+    `<rss><channel>${Array.from({ length: n }, (_, i) => `<item><title>N${i}</title><guid>g${i}</guid></item>`).join('')}<item><title>Old</title><guid>old</guid></item></channel></rss>`;
+  await f.tick(async () => feed(0), () => true); // baseline: just the "Old" item
+  // 8 new entries (more than MAX_ITEMS_PER_CHECK = 5) appear at once.
+  const sent = [];
+  const deliver = (_c, t) => { sent.push(t.split('\n')[0]); return true; };
+  assert.equal(await f.tick(async () => feed(8), deliver), 5); // capped at 5 this check
+  assert.equal(await f.tick(async () => feed(8), deliver), 3); // the remaining 3 next check
+  assert.equal(await f.tick(async () => feed(8), deliver), 0); // all delivered, nothing repeats
+  assert.equal(sent.length, 8); // every entry posted exactly once
+  assert.equal(new Set(sent).size, 8);
+  store.close();
+});

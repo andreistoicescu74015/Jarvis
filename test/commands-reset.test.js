@@ -6,6 +6,7 @@ import { createDispatcher } from '../src/core/dispatch.js';
 import { toPlain } from '../src/core/format.js';
 import reset from '../src/commands/reset.js';
 import note from '../src/commands/note.js';
+import { createFeeds } from '../src/core/feeds.js';
 
 const inGroup = (handle, text) => handle({ text, sender: 'boss', chatId: 'gA', level: 'group' }).then(toPlain);
 
@@ -40,4 +41,15 @@ test('reset cmd: "reset all" reports unavailable when no wipe lifecycle is wired
   const store = createStore({ path: ':memory:' });
   const handle = createDispatcher(createRegistry([reset]), { owner: 'boss', store }); // no lifecycle
   assert.match(await handle({ text: 'jarvis reset all', sender: 'boss', chatId: 'gA', level: 'group' }), /Not available here/i);
+});
+
+test('reset cmd: reset also clears this context feed subscriptions', async () => {
+  const store = createStore({ path: ':memory:' });
+  const feeds = createFeeds(store);
+  const handle = createDispatcher(createRegistry([reset]), { owner: 'boss', store, feeds });
+  feeds.add({ chatId: 'gA', url: 'https://ex.com/rss' });
+  assert.equal(feeds.list('gA').length, 1);
+  await handle({ text: 'jarvis reset', sender: 'boss', chatId: 'gA', level: 'group' });
+  assert.equal(feeds.list('gA').length, 0);
+  store.close();
 });

@@ -146,16 +146,25 @@ export function createFeeds(store, { now = () => Date.now() } = {}) {
       }
       const seen = new Set(cur.seen ?? []);
       const fresh = candidates.filter((it) => !seen.has(it.id));
-      let declined = false;
-      for (const it of fresh.slice(0, MAX_ITEMS_PER_CHECK)) { // cap the burst; extra new items this check are skipped
+      // Post at most MAX_ITEMS_PER_CHECK per check (no burst from a busy feed), tracking what ACTUALLY went
+      // out. A `false` return - an ineligible chat, OR a transient send failure mid-batch - stops this feed
+      // for now but keeps whatever already delivered.
+      const justSent = [];
+      for (const it of fresh.slice(0, MAX_ITEMS_PER_CHECK)) {
         const r = await deliver(f.chatId, it.link ? `${it.title}\n${it.link}` : it.title);
-        if (r === false) { declined = true; break; }
+        if (r === false) break;
+        justSent.push(it.id);
         delivered++;
       }
-      if (declined) continue; // ineligible chat - keep the old snapshot and retry next tick
-      // Advance the snapshot to the current window (re-read in case `feed remove` landed during delivery).
+      // Advance `seen` to the window items that were EITHER already seen OR just delivered - never the whole
+      // window. Undelivered-fresh items (declined mid-batch, or beyond the per-check cap) stay unseen, so
+      // they post on a later check: never silently dropped (the cap defers, it does not discard), never
+      // re-posted after a partial batch. Still bounded by the window, so it keeps the snapshot that stops a
+      // >MAX_SEEN feed re-posting old entries. Re-read in case `feed remove` landed during delivery.
+      const sent = new Set(justSent);
+      const nextSeen = ids.filter((id) => seen.has(id) || sent.has(id));
       const latest = feeds.get(f.id);
-      if (latest && latest.chatId === f.chatId) feeds.set(f.id, { ...latest, seen: ids });
+      if (latest && latest.chatId === f.chatId) feeds.set(f.id, { ...latest, seen: nextSeen });
     }
     return delivered;
   }
