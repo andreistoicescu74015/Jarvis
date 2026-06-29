@@ -20,10 +20,10 @@ function setup() {
 const admin = (handle, text, chatId) => handle({ text, sender: 'u', chatId, level: 'group', isAdmin: true });
 const codeFrom = (out) => toPlain(out).match(/code: (\S+)/i)[1];
 
-test('link cmd: only works between groups, not in a private chat', async () => {
+test('link cmd: refused (and hidden) in a private chat - it is group-only', async () => {
   const { handle } = setup();
   const out = toPlain(await handle({ text: 'jarvis link new', sender: 'u', chatId: 'dm', level: 'private' }));
-  assert.match(out, /only between groups/i);
+  assert.match(out, /only in groups/i); // group-only scope refuses a non-owner DM (and hides it from help/catalog)
 });
 
 test('link cmd: linking needs a group admin', async () => {
