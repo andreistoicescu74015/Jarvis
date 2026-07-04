@@ -3,8 +3,7 @@
 A deterministic WhatsApp bot, built **core-first**: a small, strong runtime exposes
 capabilities ("directives") and commands are thin consumers of them.
 
-Being rebuilt from scratch with a clean history. See [`CONTRIBUTING.md`](CONTRIBUTING.md)
-for the branch / commit / PR flow.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the branch / commit / PR flow.
 
 ## Stack
 
@@ -34,30 +33,39 @@ what *you* can run where you are; `jarvis man <command>` explains one in detail.
 **Group admins** (in an active group; the owner too, anywhere)
 
 - `jarvis whitelist ...` / `jarvis blacklist ...` - control who may use a command (or the whole bot, `*`) here; `jarvis whitelist` alone shows the rules.
-- `jarvis schedule in <2h> <msg> | at <date> <time> <msg> | every <1d> <msg> | list | cancel <id>` - post a message later.
-- `jarvis link | link new | link accept <code> | link remove` - share one data context with another group.
+- `jarvis schedule <call mom tomorrow 9am> | in <2h> <msg> | at <date> <time> <msg> | every <1d> <msg> | list | cancel <id|all> | disable|enable <id|all>` - post a message later; a one-shot can be phrased in plain language (no AI - deterministic date parsing).
+- `jarvis rule add <keyword> <reply...> | list | remove <keyword>` - keyword auto-replies for this chat (`jarvis <keyword>` posts the reply; deterministic, no AI).
+- `jarvis link | link new | link accept <code> | link remove` - share one data context with another group (both must be active, individually or via their community).
 
 **Owner**
 
-- `jarvis owner | owner claim | owner resign` - who owns the bot; claim or resign.
-- `jarvis whoami [<@user|number>]` - show who you are, or look a person up.
-- `jarvis groups [activate|deactivate [<id>]]` - list and authorize the groups the bot runs in.
+- `jarvis owner | owner claim | owner resign` - claim or resign ownership (a claim persists across restarts; `OWNER_JID` always wins and silently retires a claimed owner).
+- `jarvis whoami [<@user|number>] | whoami forget <@user|number>` - show who you are, look a person up, or drop a stale identity mapping (re-learned from their next message).
+- `jarvis groups [activate|deactivate [<id>]]` - list and authorize the groups the bot runs in; a community id gets the umbrella (gate-only, nothing posted to the community).
 - `jarvis community [activate|deactivate [<id>]]` - show a community, or authorize all its groups at once.
-- `jarvis ai [on|off]` - turn chatbot mode on/off for this chat (see below).
+- `jarvis ai [on|off [all]]` - chatbot mode per chat, or everywhere with `all`; `jarvis ai` alone shows the state, tokens/requests used, and the provider's documented rate limits.
 - `jarvis alias add <name> <command...> | list | remove <name>` - define command shortcuts that expand and run with no AI.
+- `jarvis schedule ai in <2h>|at <date> <time>|every <1d> <instruction>` - schedule a natural-language instruction Jarvis runs at that time (through the same guards).
 - `jarvis reset [all]` - clear this chat's data, or wipe everything.
 - `jarvis shutdown` / `jarvis restart` / `jarvis logout` - lifecycle (details under [Owner commands](#owner-commands-in-chat)).
 
 ### Natural language
 
+Deterministic conveniences run first, with no AI and no tokens: a mistyped command gets a
+`Did you mean ...?` suggestion (never auto-run), owner-defined aliases expand to full commands, and
+keyword rules post their auto-reply.
+
 With an AI provider configured (`GITHUB_MODELS_TOKEN`), an addressed message that isn't an exact
 command is mapped to one or more commands - for anyone who may use Jarvis there, each still subject to
 every permission check. Jarvis echoes what it understood (`Understood: jarvis ...`) and runs it. A
 **sensitive** command - one that affects the bot itself (`owner`, `reset`, `shutdown`, `restart`,
-`logout`) or destroys data (`note clear`, `schedule clear`, `link remove`, `groups deactivate`) - is
-never auto-run from a guess; Jarvis asks you to type it. The owner can turn on a **chatbot mode** per
-chat with `jarvis ai on`, so Jarvis also answers general questions when nothing maps to a command.
-Without a token, only exact commands work.
+`logout`) or destroys data (`note clear`, `schedule clear`/`cancel all`, `link remove`,
+`groups deactivate`) - is never auto-run indirectly (an AI guess, an alias expansion, or a timer);
+Jarvis asks you to type it. The owner can turn on a **chatbot mode** per chat with `jarvis ai on`
+(everywhere with `ai on all`), so Jarvis also answers general questions when nothing maps to a
+command. The AI layer is budgeted: answers are size-bounded, an optional daily token cap
+(`JARVIS_AI_DAILY_TOKEN_CAP`) silences it until the next day, and `jarvis ai` shows today's spend
+next to GitHub Models' documented rate limits. Without a token, only exact commands work.
 
 ## Develop
 
