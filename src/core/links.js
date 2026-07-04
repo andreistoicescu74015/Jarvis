@@ -1,3 +1,5 @@
+import { randomInt } from 'node:crypto';
+
 /**
  * Context links ("crossover") - an OVERLAY model. Linking two active groups joins them into a shared
  * OVERLAY context that COVERS each group's own data without merging it: while linked, a group reads
@@ -27,9 +29,18 @@ export function createLinks(store, {
   const member = store.scoped('link-member'); // chatId -> overlayId
   const seq = store.scoped('link-seq'); // 'n' -> the overlay-id counter (its own ns: cannot collide with a chatId)
   const codes = store.scoped('link-codes'); // one-time link codes: code -> { from, at }
-  const makeCode = genCode ?? (() => Math.random().toString(36).slice(2, 8).toUpperCase());
+  const makeCode = genCode ?? cryptoCode;
   const overlayNs = (id) => `ctx:${id}`;
   const edgeId = (a, b) => (a <= b ? `${a}|${b}` : `${b}|${a}`);
+
+  // The default code generator: CRYPTO-random (a code is a capability - whoever redeems it joins the
+  // overlay - so it must not come from a predictable PRNG) over an unambiguous uppercase alphabet
+  // (no 0/O or 1/I/L), because codes get read aloud and retyped between groups. 6 chars over 31
+  // symbols ~ 8.9e8 combinations for a one-time code that lives 10 minutes.
+  function cryptoCode() {
+    const ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+    return Array.from({ length: 6 }, () => ALPHABET[randomInt(ALPHABET.length)]).join('');
+  }
 
   function nextOverlay() {
     const n = Number(seq.get('n') ?? 0) + 1;
@@ -84,7 +95,11 @@ export function createLinks(store, {
       for (const { key, value } of codes.list()) {
         if (now() - value.at > ttlMs) codes.delete(key);
       }
-      const code = makeCode();
+      // Never hand out a code that is still outstanding: a collision would silently replace the
+      // earlier code, stranding the group that shared it. Bounded retry - with crypto codes a repeat
+      // is astronomically unlikely; the bound only guards a degenerate injected generator.
+      let code = makeCode();
+      for (let i = 0; i < 8 && codes.get(code) !== undefined; i++) code = makeCode();
       codes.set(code, { from, ...(fromCommunity ? { fromCommunity } : {}), at: now() });
       return code;
     });

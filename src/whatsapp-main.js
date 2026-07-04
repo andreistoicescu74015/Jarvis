@@ -45,6 +45,7 @@ const ai = createAiClient({
   token: process.env.GITHUB_MODELS_TOKEN ?? '',
   baseUrl: process.env.JARVIS_AI_BASE_URL ?? 'https://models.github.ai/inference',
   model: process.env.JARVIS_AI_MODEL ?? 'openai/gpt-4o-mini',
+  maxTokens: num(process.env.JARVIS_AI_MAX_TOKENS, 800), // per-completion output bound (cost discipline)
   chatSystem: buildChatSystem(persona),
   log,
 });
