@@ -18,7 +18,9 @@ export default {
     'List the groups Jarvis is a member of, each with its id and whether the bot is active ' +
     'there. Jarvis stays silent in a group until you activate it. "groups activate" turns on ' +
     'the current group; "groups activate <id>" one named by id (copy it from the list); ' +
-    '"groups deactivate [<id>]" turns it back off. Activation survives restarts.',
+    '"groups deactivate [<id>]" turns it back off. A COMMUNITY id gets the umbrella instead: ' +
+    'gate-only, confirmed here, with nothing posted to the community (same as "community ' +
+    'activate"). Activation survives restarts.',
   scope: { owner: true },
   // `deactivate` is a full reset of the group (its access lists, AI opt-in, links, schedules, and
   // data are wiped) - destructive, so the AI translator never auto-runs it from a guess (owner must type it).
@@ -48,12 +50,35 @@ async function manage(ctx, sub) {
   if (arg && known.length && !match) return `No such group: ${code(esc(id))} (see ${code('jarvis groups')}).`;
   const name = match ? b(esc(match.name)) : code(esc(id));
 
+  // A COMMUNITY id gets community semantics: the gate-only umbrella, confirmed HERE - never a bulk
+  // announcement or an access reset pushed into the announcement group (no unsolicited sends;
+  // ban-safety). Recognized from the membership list, or by being run in the announcement chat
+  // itself (whose own id IS the community id).
+  const isCommunity = match ? !!match.isCommunity : !arg && ctx.level === 'community' && ctx.communityId === ctx.chatId;
+  if (isCommunity) {
+    if (sub === 'activate') {
+      return ctx.activation.activateCommunity(id, ctx.sender)
+        ? `Activated Jarvis across the ${name} community - its groups are on. Nothing was posted to them.`
+        : `${name} is already active.`;
+    }
+    return ctx.activation.deactivateCommunity(id)
+      ? `Deactivated Jarvis across the ${name} community. Groups you activated individually stay on.`
+      : `${name} was not active.`;
+  }
+
   if (sub === 'activate') {
     return (await ctx.activation.activate(id, ctx.sender))
       ? `Activated Jarvis in ${name}.`
       : `${name} is already active.`;
   }
-  return (await ctx.activation.deactivate(id)) ? `Deactivated Jarvis in ${name}.` : `${name} was not active.`;
+  if (await ctx.activation.deactivate(id)) return `Deactivated Jarvis in ${name}.`;
+  // Not individually active - but running under a community umbrella? Say so instead of a misleading
+  // "was not active": the switch to flip is at the community level.
+  const parent = arg ? match?.community : ctx.communityId;
+  if (parent && parent !== id && ctx.activation.isActive(parent)) {
+    return `${name} has no individual activation - it is active via its community umbrella. ${code(`jarvis community deactivate ${parent}`)} turns the whole community off.`;
+  }
+  return `${name} was not active.`;
 }
 
 /** List the groups - grouped by community, tagged active/inactive, with link clusters shown. */

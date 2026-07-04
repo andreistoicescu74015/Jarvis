@@ -71,8 +71,12 @@ export function createLinks(store, {
     return Object.values(byOverlay);
   }
 
-  /** Create a one-time code (TTL) this group shares to invite another group to link. */
-  function propose(from) {
+  /**
+   * Create a one-time code (TTL) this group shares to invite another group to link. `fromCommunity`
+   * (the proposer's parent community, when it has one) rides along on the code, so redemption can
+   * honor the community-umbrella activation for the proposing side too.
+   */
+  function propose(from, fromCommunity) {
     // Sweep codes past their redemption TTL before issuing a new one: a code is otherwise only deleted
     // when someone redeems it, so proposed-but-never-redeemed codes would accumulate forever. Atomic
     // with the new code's write (re-entrant), mirroring accept/unlink.
@@ -81,19 +85,20 @@ export function createLinks(store, {
         if (now() - value.at > ttlMs) codes.delete(key);
       }
       const code = makeCode();
-      codes.set(code, { from, at: now() });
+      codes.set(code, { from, ...(fromCommunity ? { fromCommunity } : {}), at: now() });
       return code;
     });
   }
 
   /**
-   * Redeem a code from group `by`. Both groups must be ACTIVE and not already in different overlays.
-   * Joining a solo group to an overlay just covers it; two solo groups create a fresh overlay; a
-   * redundant edge inside one overlay is allowed (connectivity insurance).
+   * Redeem a code from group `by`. Both groups must be ACTIVE - individually, or via their community
+   * umbrella (`byCommunity` is the redeemer's parent community; the proposer's rides on the code) -
+   * and not already in different overlays. Joining a solo group to an overlay just covers it; two
+   * solo groups create a fresh overlay; a redundant edge inside one overlay is allowed (insurance).
    *
    * @returns {{ ok: true } | { ok: false, reason: string }}
    */
-  function accept(code, by) {
+  function accept(code, by, byCommunity) {
     // Atomic: code consumption + the membership/edge writes commit together (re-entrant), so a crash
     // can't burn the code without linking, or link without consuming the code.
     return store.transaction(() => {
@@ -107,7 +112,10 @@ export function createLinks(store, {
       codes.delete(c); // one-time: a valid code is spent by this attempt, whatever the outcome
       const from = rec.from;
       if (from === by) return { ok: false, reason: 'same-chat' };
-      if (!isActivated(by) || !isActivated(from)) return { ok: false, reason: 'inactive' };
+      // Active = an own activation entry OR a live community umbrella (checked at redemption time,
+      // so a community deactivated after the code was issued no longer authorizes its groups).
+      const activeVia = (id, community) => isActivated(id) || (community && isActivated(community));
+      if (!activeVia(by, byCommunity) || !activeVia(from, rec.fromCommunity)) return { ok: false, reason: 'inactive' };
       const oBy = overlayOf(by);
       const oFrom = overlayOf(from);
       if (oBy && oFrom && oBy === oFrom) {

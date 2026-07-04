@@ -38,6 +38,28 @@ test('links: propose sweeps codes past their TTL (no unbounded code growth)', ()
   assert.deepEqual(codes.list().map((e) => e.key), ['C3']); // only the fresh code remains
 });
 
+test('links: accept honors the community umbrella on both sides (no own activation entries)', () => {
+  const store = createStore({ path: ':memory:' });
+  const active = new Set(['C']); // only the COMMUNITY id is activated
+  let n = 0;
+  const links = createLinks(store, { isActivated: (id) => active.has(id), genCode: () => `C${++n}` });
+  const code = links.propose('S1', 'C'); // the proposer's community rides on the code
+  assert.equal(links.accept(code, 'S2', 'C').ok, true); // the redeemer passes its own community
+  assert.deepEqual(new Set(links.chats('S1')), new Set(['S1', 'S2']));
+  store.close();
+});
+
+test('links: a community deactivated between propose and accept no longer authorizes (checked live)', () => {
+  const store = createStore({ path: ':memory:' });
+  const active = new Set(['C']);
+  let n = 0;
+  const links = createLinks(store, { isActivated: (id) => active.has(id), genCode: () => `C${++n}` });
+  const code = links.propose('S1', 'C');
+  active.delete('C'); // umbrella turned off before redemption
+  assert.equal(links.accept(code, 'S2', 'C').reason, 'inactive');
+  store.close();
+});
+
 test('links: accept joins two groups into one shared overlay (covering, not merging)', () => {
   const { store, links } = setup();
   store.scoped('own:A').set('note', 'a-secret'); // each group has its own data up front

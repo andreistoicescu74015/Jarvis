@@ -64,7 +64,9 @@ const AI_MAX_CHAIN = 8;
  *   from a chat): deactivate it and run the same full teardown `groups deactivate` performs.
  */
 export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, community, scheduler, ai, aiDailyCap = 0, requireOwner = false, requireActivation = false } = {}) {
-  const ownerResolver = createOwnerResolver({ owner, match });
+  // The owner-meta KV persists the claimed-owner slot (and the one-time private lockdown flag), so
+  // a `jarvis owner claim` survives restarts; OWNER_JID still wins and silently drops a stale claim.
+  const ownerResolver = createOwnerResolver({ owner, match, meta: store ? store.scoped('owner-meta') : undefined });
   const access = store ? createAccessPolicy(store, { match }) : null;
   const activation = store ? createActivation(store) : null;
   const links = store
@@ -396,8 +398,9 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
         aliases: aliases ?? undefined,
         links: links
           ? {
-              propose: () => links.propose(chatId),
-              accept: (code) => links.accept(code, chatId),
+              // The chat's community rides along so linking honors the umbrella activation too.
+              propose: () => links.propose(chatId, communityId),
+              accept: (code) => links.accept(code, chatId, communityId),
               unlink: () => links.unlink(chatId),
               clusters: () => links.clusters(),
             }

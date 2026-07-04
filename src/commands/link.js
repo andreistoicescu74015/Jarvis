@@ -55,7 +55,10 @@ export default {
       return others.length ? `${b('Linked with')}: ${others.map((c) => code(esc(c))).join(', ')}.` : 'Not linked.';
     }
     if (sub === 'new') {
-      if (!ctx.activation?.isActive(ctx.chatId)) return `Activate this group first (${code('jarvis groups activate')}).`;
+      // Active = its own activation entry OR its community umbrella - the same rule the dispatcher's
+      // gate applies, so a group the bot demonstrably answers in can always start a link.
+      const activeHere = ctx.activation?.isActive(ctx.chatId) || (ctx.communityId && ctx.activation?.isActive(ctx.communityId));
+      if (!activeHere) return `Activate this group first (${code('jarvis groups activate')}).`;
       const linkCode = ctx.links.propose();
       return `${b('Linking code')}: ${code(linkCode)}\nShare it with the other group; an admin there runs ${code('jarvis link accept ' + linkCode)}. It expires in 10 minutes.`;
     }

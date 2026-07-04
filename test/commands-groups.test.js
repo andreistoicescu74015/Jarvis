@@ -5,6 +5,7 @@ import { createDispatcher } from '../src/core/dispatch.js';
 import { createStore } from '../src/store/index.js';
 import { createActivation } from '../src/core/activation.js';
 import { createLinks } from '../src/core/links.js';
+import { createAccessPolicy } from '../src/core/access.js';
 import groups from '../src/commands/groups.js';
 import { toPlain } from '../src/core/format.js';
 
@@ -85,6 +86,66 @@ test('groups: activate rejects an unknown id and needs an id from a private chat
 
   const noId = toPlain(await handle({ text: 'jarvis groups activate', sender: 'boss', level: 'private' }));
   assert.match(noId, /name it/i);
+  store.close();
+});
+
+const communityGroups = async () => [
+  { id: 'c@g.us', name: 'Class', community: 'c@g.us', isCommunity: true }, // announcement group
+  { id: 's@g.us', name: 'Sub', community: 'c@g.us', isCommunity: false }, // sub-group of it
+];
+
+test('groups: a community id gets the gate-only umbrella - nothing is posted anywhere', async () => {
+  const store = createStore({ path: ':memory:' });
+  const sent = [];
+  const handle = createDispatcher(createRegistry([groups]), {
+    owner: 'boss',
+    store,
+    listGroups: communityGroups,
+    send: (target, text) => sent.push({ target, text }),
+  });
+  const out = toPlain(await handle({ text: 'jarvis groups activate c@g.us', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(out, /across the Class community/);
+  assert.match(out, /Nothing was posted/);
+  assert.equal(sent.length, 0); // gate-only: NO announcement, into the community or anywhere (ban-safety)
+  assert.equal(createActivation(store).isActive('c@g.us'), true);
+  // no admins-only access reset was pushed onto the community (only the unrelated private lockdown exists)
+  assert.equal(createAccessPolicy(store).all().filter((r) => r.context === 'c@g.us').length, 0);
+  // deactivate mirrors it, in place, with the individually-activated caveat
+  const off = toPlain(await handle({ text: 'jarvis groups deactivate c@g.us', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(off, /Deactivated Jarvis across the Class community/);
+  assert.equal(createActivation(store).isActive('c@g.us'), false);
+  store.close();
+});
+
+test('groups: activate run inside the announcement chat takes the umbrella path (no announcement)', async () => {
+  const store = createStore({ path: ':memory:' });
+  const sent = [];
+  const handle = createDispatcher(createRegistry([groups]), {
+    owner: 'boss',
+    store,
+    listGroups: async () => [], // even with no membership list, the chat itself identifies the community
+    send: (target, text) => sent.push({ target, text }),
+  });
+  const out = toPlain(
+    await handle({ text: 'jarvis groups activate', sender: 'boss', level: 'community', chatId: 'c@g.us', community: 'c@g.us' }),
+  );
+  assert.match(out, /across the .* community/);
+  assert.equal(sent.length, 0); // confirmed here (the command reply), nothing pushed elsewhere
+  assert.equal(createActivation(store).isActive('c@g.us'), true);
+  store.close();
+});
+
+test('groups: deactivating an umbrella-covered sub-group explains where the switch is', async () => {
+  const store = createStore({ path: ':memory:' });
+  createActivation(store).activate('c@g.us', 'boss'); // umbrella on; the sub-group has NO own entry
+  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, listGroups: communityGroups });
+  const out = toPlain(await handle({ text: 'jarvis groups deactivate s@g.us', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(out, /active via its community umbrella/);
+  assert.match(out, /community deactivate c@g\.us/); // points at the switch that actually works
+  assert.equal(createActivation(store).isActive('c@g.us'), true); // the umbrella itself is untouched
+  // an unrelated inactive group still gets the plain message
+  const plain = toPlain(await handle({ text: 'jarvis groups deactivate s@g.us', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(plain, /umbrella/); // (still umbrella-covered)
   store.close();
 });
 

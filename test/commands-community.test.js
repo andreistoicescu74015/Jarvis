@@ -97,6 +97,24 @@ test('community: activation is not blocked when the community read is unavailabl
   store.close();
 });
 
+test('community: a named id is validated when the communities list is available', async () => {
+  const store = createStore({ path: ':memory:' });
+  const cap = {
+    info: async () => INFO,
+    groups: async () => [],
+    all: async () => [{ id: 'c@g.us', name: 'Anul 2', reach: 501 }],
+  };
+  const handle = createDispatcher(createRegistry([community]), { owner: 'boss', store, community: cap });
+  // a typo is refused instead of confidently "activating" a phantom id
+  const bad = toPlain(await handle({ text: 'jarvis community activate typo@g.us', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(bad, /No such community/);
+  assert.equal(createActivation(store).isActive('typo@g.us'), false);
+  // a known id still activates
+  const ok = toPlain(await handle({ text: 'jarvis community activate c@g.us', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(ok, /Activated Jarvis across/);
+  store.close();
+});
+
 test('community: the owner deactivates the community umbrella (by id, from a DM)', async () => {
   const store = createStore({ path: ':memory:' });
   createActivation(store).activate('c@g.us', 'boss');
