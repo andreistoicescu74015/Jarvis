@@ -70,6 +70,13 @@ export function toCommandLine(command, args = {}) {
       // "groups" (a safe list), never "groups <id>" (which would misparse the id as the action).
       break;
     }
+    // A NON-VARIADIC param fills exactly one positional slot: a value with whitespace would re-parse
+    // as several arguments and shift everything after it, so the command would run with a DIFFERENT
+    // meaning than the line echoed to the user. Refuse the proposal instead (a failed translation) -
+    // better no command than a different one than shown.
+    if (!p.variadic && /\s/.test(v)) {
+      throw new Error(`tools: "${command.name}" arg "${p.name}" must be a single token`);
+    }
     parts.push(v);
   }
   return parts.join(' ').trim();

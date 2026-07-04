@@ -47,3 +47,12 @@ test('toCommandLine: throws on a missing required param; empty for an unknown co
   assert.throws(() => toCommandLine(get('schedule'), {}), /missing required/);
   assert.equal(toCommandLine(undefined, { x: 1 }), '');
 });
+
+test('toCommandLine: refuses a multi-word value in a NON-variadic slot (it would shift on re-parse)', () => {
+  // e.g. the model fills person="John Doe" for `whitelist <target> <verb> <person>`: rebuilt and
+  // re-parsed, "Doe" would spill into the next positional slot and the command would run with a
+  // different meaning than the echoed line - so the proposal is refused instead.
+  assert.throws(() => toCommandLine(get('whitelist'), { target: '*', verb: 'add', person: 'John Doe' }), /single token/);
+  // a variadic tail keeps accepting free text with spaces
+  assert.equal(toCommandLine(get('note'), { action: 'add', text: 'buy some milk' }), 'note add buy some milk');
+});

@@ -78,3 +78,32 @@ test('ai-usage: the daily bucket resets on a new calendar day; cumulative totals
   assert.equal(acct.summary('private').here.total, 105); // cumulative is untouched by the daily reset
   store.close();
 });
+
+test('ai-usage: the daily bucket counts requests too, and both reset on day rollover', () => {
+  const store = createStore({ path: ':memory:' });
+  let t = new Date('2026-07-04T10:00:00').getTime();
+  const acct = createAiUsage(store, { now: () => t });
+  acct.record('g@g.us', usage(30, 12));
+  acct.record('g@g.us', usage(10, 5));
+  assert.equal(acct.today(), 57);
+  assert.equal(acct.todayCalls(), 2); // vs the provider's documented requests/day ceiling
+  t = new Date('2026-07-05T00:01:00').getTime(); // the local day rolled over
+  assert.equal(acct.today(), 0);
+  assert.equal(acct.todayCalls(), 0);
+  store.close();
+});
+
+test('ai-usage: noteLimit remembers the LAST provider throttle for display', () => {
+  const store = createStore({ path: ':memory:' });
+  let t = 1000;
+  const acct = createAiUsage(store, { now: () => t });
+  assert.equal(acct.lastLimit(), undefined); // none seen yet
+  acct.noteLimit({ type: 'UserByModelByDay', retryAfterSec: 120 });
+  assert.deepEqual(acct.lastLimit(), { at: 1000, type: 'UserByModelByDay', retryAfterSec: 120 });
+  t = 2000;
+  acct.noteLimit({ type: 'Other', retryAfterSec: 5 });
+  assert.deepEqual(acct.lastLimit(), { at: 2000, type: 'Other', retryAfterSec: 5 }); // last one wins
+  acct.noteLimit({}); // header-less 429: still a valid marker
+  assert.deepEqual(acct.lastLimit(), { at: 2000, type: '', retryAfterSec: 0 });
+  store.close();
+});

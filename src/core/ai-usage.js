@@ -15,7 +15,8 @@
 export function createAiUsage(store, { now = () => Date.now() } = {}) {
   const usage = store.scoped('ai-usage');
   const GLOBAL = '*';
-  const TODAY = '#today'; // a single self-resetting bucket: { date, total } for the current local day
+  const TODAY = '#today'; // a single self-resetting bucket: { date, total, calls } for the current local day
+  const LIMIT = '#limit'; // the last provider throttle seen (a 429): { at, type, retryAfterSec }
   const num = (x) => (typeof x === 'number' && Number.isFinite(x) ? x : 0);
 
   // Server-local calendar day as YYYY-MM-DD - the daily-budget window (matches the TZ used for schedules).
@@ -24,11 +25,12 @@ export function createAiUsage(store, { now = () => Date.now() } = {}) {
     const p = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   };
-  // Today's global token total; a stale bucket (its date is not today) reads as 0 - the day has rolled over.
-  const todayTotal = () => {
+  // Today's global bucket; a stale one (its date is not today) reads as empty - the day rolled over.
+  const todayBucket = () => {
     const cur = usage.get(TODAY);
-    return cur && cur.date === dayStr(now()) ? num(cur.total) : 0;
+    return cur && cur.date === dayStr(now()) ? { total: num(cur.total), calls: num(cur.calls) } : { total: 0, calls: 0 };
   };
+  const todayTotal = () => todayBucket().total;
 
   function read(key) {
     const v = usage.get(key);
@@ -67,9 +69,26 @@ export function createAiUsage(store, { now = () => Date.now() } = {}) {
       store.transaction(() => {
         add(GLOBAL, u);
         if (context && context !== GLOBAL) add(context, u);
-        usage.set(TODAY, { date: dayStr(now()), total: todayTotal() + total }); // bump the daily-budget bucket
+        // Bump the daily bucket: tokens (the budget `allows` gates) AND the call count (so the owner
+        // can compare today's requests against the provider's documented requests/day ceiling).
+        const t = todayBucket();
+        usage.set(TODAY, { date: dayStr(now()), total: t.total + total, calls: t.calls + 1 });
       });
     },
+    /**
+     * Remember a provider throttle (a 429): what tripped (`type`, e.g. `UserByModelByDay`) and the
+     * advised wait. One snapshot - the LAST one is what the owner needs to see in `jarvis ai`.
+     */
+    noteLimit({ type = '', retryAfterSec = 0 } = {}) {
+      usage.set(LIMIT, { at: now(), type: String(type), retryAfterSec: num(retryAfterSec) });
+    },
+    /** The last provider throttle seen, or undefined if none was ever recorded. */
+    lastLimit() {
+      const v = usage.get(LIMIT);
+      return v ? { at: num(v.at), type: String(v.type ?? ''), retryAfterSec: num(v.retryAfterSec) } : undefined;
+    },
+    /** Model calls made so far in the current server-local day (vs the provider's requests/day cap). */
+    todayCalls: () => todayBucket().calls,
     /** Totals for one context plus the running global total, for display. */
     summary(context) {
       return { here: read(context), global: read(GLOBAL) };

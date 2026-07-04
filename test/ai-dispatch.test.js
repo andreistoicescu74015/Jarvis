@@ -423,3 +423,27 @@ test('alias dispatch: an alias whose target is not a real command reports it cle
   assert.match(out, /points to an unknown command/i);
   store.close();
 });
+
+test('ai dispatch: `ai on all` opens chatbot mode everywhere; a per-chat off overrides it', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi(null, 'sure!');
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai });
+  store.scoped('ai-enabled').set('*', true); // what `jarvis ai on all` writes
+  const on = toPlain(await handle({ text: 'jarvis hello there', sender: 'u', level: 'group', chatId: 'g@g.us' }));
+  assert.match(on, /sure!/); // answered via the global default
+  store.scoped('ai-enabled').set('g@g.us', false); // a per-chat opt-out (`jarvis ai off` here)
+  const off = toPlain(await handle({ text: 'jarvis hello there', sender: 'u', level: 'group', chatId: 'g@g.us' }));
+  assert.match(off, /didn't catch a command/i); // chatbot off here again; translation still ran
+  store.close();
+});
+
+test('ai dispatch: a provider 429 during translation is remembered for the owner to see', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = { calls: [], translate: async () => ({ commands: [], answer: null, limit: { type: 'UserByModelByDay', retryAfterSec: 60 } }) };
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai });
+  await handle({ text: 'jarvis do something', sender: 'boss', level: 'group', chatId: 'g@g.us' });
+  const noted = store.scoped('ai-usage').get('#limit');
+  assert.equal(noted.type, 'UserByModelByDay');
+  assert.equal(noted.retryAfterSec, 60);
+  store.close();
+});

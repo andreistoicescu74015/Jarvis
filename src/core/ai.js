@@ -65,10 +65,11 @@ const withUsage = (out, usage) => (usage ? { ...out, usage } : out);
  *   system?: string,
  *   chatSystem?: string,
  * }} [opts]
- * @returns {{ translate: (input: { text: string, tools: object[], chat?: boolean }) => Promise<{ commands: Array<{ command: string, args: object }>, answer: string | null }> } | null}
+ * @returns {{ translate: (input: { text: string, tools: object[], chat?: boolean }) => Promise<{ commands: Array<{ command: string, args: object }>, answer: string | null, usage?: object, limit?: { type: string, retryAfterSec: number } }> } | null}
  *   The client is null when no token is configured - AI is simply off and the caller stays
  *   deterministic-only. `translate` resolves to the model's tool calls (`commands`, a chain in order)
- *   and, in chat mode when nothing maps, a plain-text `answer`. Both empty/null on any failure.
+ *   and, in chat mode when nothing maps, a plain-text `answer`. Both empty/null on any failure. A 429
+ *   additionally carries `limit` (the provider throttle the response reported), for visibility.
  */
 export function createAiClient({
   token = '',
@@ -104,6 +105,17 @@ export function createAiClient({
         signal: controller.signal,
       });
       if (!res.ok) {
+        // A 429 is the provider's rate limiter: capture what its headers say (the quota that tripped,
+        // e.g. `UserByModelByDay`, and the advised wait) so the owner can SEE the throttle from
+        // `jarvis ai` instead of guessing why the AI went quiet. Other failures stay a plain warn.
+        if (res.status === 429) {
+          const limit = {
+            type: res.headers?.get?.('x-ratelimit-type') || '',
+            retryAfterSec: Number(res.headers?.get?.('retry-after')) || 0,
+          };
+          log.warn('ai: provider rate limit hit', { status: 429, ...limit });
+          return { ...EMPTY, limit };
+        }
         log.warn('ai: request failed', { status: res.status });
         return EMPTY;
       }

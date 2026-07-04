@@ -65,8 +65,24 @@ test('ai: chat mode still prefers a tool call when the request maps to a command
 });
 
 test('ai: a non-ok response -> empty (best-effort, never throws)', async () => {
-  const ai = createAiClient({ token: 't', fetchImpl: fakeFetch({}, { ok: false, status: 429 }) });
+  const ai = createAiClient({ token: 't', fetchImpl: fakeFetch({}, { ok: false, status: 500 }) });
   assert.deepEqual(await ai.translate({ text: 'x', tools }), EMPTY);
+});
+
+test('ai: a 429 stays empty but carries the provider throttle details from the headers', async () => {
+  const headers = { get: (k) => ({ 'x-ratelimit-type': 'UserByModelByDay', 'retry-after': '120' })[k] };
+  const ai = createAiClient({ token: 't', fetchImpl: async () => ({ ok: false, status: 429, headers, json: async () => ({}) }) });
+  const out = await ai.translate({ text: 'x', tools });
+  assert.deepEqual(out.commands, []);
+  assert.equal(out.answer, null);
+  assert.deepEqual(out.limit, { type: 'UserByModelByDay', retryAfterSec: 120 }); // what `jarvis ai` will surface
+});
+
+test('ai: a 429 with no rate-limit headers still resolves empty, with a bare limit marker', async () => {
+  const ai = createAiClient({ token: 't', fetchImpl: fakeFetch({}, { ok: false, status: 429 }) });
+  const out = await ai.translate({ text: 'x', tools });
+  assert.deepEqual(out.commands, []);
+  assert.deepEqual(out.limit, { type: '', retryAfterSec: 0 });
 });
 
 test('ai: a fetch error -> empty', async () => {

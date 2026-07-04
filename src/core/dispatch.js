@@ -63,7 +63,7 @@ const AI_MAX_CHAIN = 8;
  *   The message handler, plus `chatRemoved(chatId)` - the platform's removal hook (the bot was kicked
  *   from a chat): deactivate it and run the same full teardown `groups deactivate` performs.
  */
-export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, community, scheduler, ai, aiDailyCap = 0, requireOwner = false, requireActivation = false } = {}) {
+export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, community, scheduler, ai, aiDailyCap = 0, aiProvider, requireOwner = false, requireActivation = false } = {}) {
   // The owner-meta KV persists the claimed-owner slot (and the one-time private lockdown flag), so
   // a `jarvis owner claim` survives restarts; OWNER_JID still wins and silently drops a stale claim.
   const ownerResolver = createOwnerResolver({ owner, match, meta: store ? store.scoped('owner-meta') : undefined });
@@ -84,11 +84,17 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
   // Owner/admin-defined keyword auto-replies (the `rule` command): an addressed keyword posts a templated
   // reply deterministically (no AI), checked after real commands and aliases. Per-chat, store-backed.
   const rules = store ? createRules(store) : null;
-  // Per-context CHATBOT mode (the `ai` command). Command translation is ALWAYS on; this gate only
+  // Per-CHAT chatbot mode (the `ai` command). Command translation is ALWAYS on; this gate only
   // controls whether Jarvis also answers general questions conversationally when nothing maps to a
-  // command. Off by default; the owner opens it per chat with `jarvis ai on`.
+  // command. Off by default; the owner opens it per chat with `jarvis ai on` - each DM and each
+  // group is its own switch - or everywhere at once with `jarvis ai on all` (the '*' key, a global
+  // default an explicit per-chat setting overrides).
   const aiGateStore = store ? store.scoped('ai-enabled') : null;
-  const aiEnabledIn = (context) => !!aiGateStore?.get(context);
+  const aiEnabledIn = (chatId) => {
+    const own = aiGateStore?.get(chatId);
+    if (typeof own === 'boolean') return own; // an explicit per-chat setting wins
+    return !!aiGateStore?.get('*'); // else the global default (`ai on all`)
+  };
 
   // First-owner lockdown: the moment an owner is established (OWNER_JID at startup, or `owner claim`),
   // lock Jarvis's DMs to them by enabling the private whitelist - a stranger can no longer DM the bot.
@@ -170,6 +176,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       return { chain: [], answer: null };
     }
     if (aiUsage && result?.usage) aiUsage.record(context, result.usage); // account the tokens this call cost
+    if (aiUsage && result?.limit) aiUsage.noteLimit(result.limit); // remember a provider throttle (shown by `jarvis ai`)
     const proposals = Array.isArray(result?.commands) ? result.commands : [];
     const chain = [];
     for (const p of proposals) {
@@ -382,18 +389,38 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
               list: () => activation.list(),
             }
           : undefined,
-        // AI-translation opt-in for this context (the `ai` command); owner is exempt from the gate.
+        // Chatbot opt-in for THIS chat (the `ai` command): per-chat switches plus the `all` default.
+        // `on`/`off` write an explicit per-chat setting (off under a global on = an explicit false);
+        // `onAll`/`offAll` reset every per-chat override for one predictable global state.
         aiGate: aiGateStore
           ? {
-              isOn: () => aiEnabledIn(accessContext),
-              on: () => aiGateStore.set(accessContext, true),
-              off: () => aiGateStore.delete(accessContext),
+              isOn: () => aiEnabledIn(chatId),
+              on: () => aiGateStore.set(chatId, true),
+              off: () => (aiGateStore.get('*') ? aiGateStore.set(chatId, false) : aiGateStore.delete(chatId)),
+              onAll: () => {
+                for (const { key } of aiGateStore.list()) aiGateStore.delete(key);
+                aiGateStore.set('*', true);
+              },
+              offAll: () => {
+                for (const { key } of aiGateStore.list()) aiGateStore.delete(key);
+              },
+              state: () => ({ here: aiEnabledIn(chatId), global: !!aiGateStore.get('*'), own: aiGateStore.get(chatId) }),
               available: !!ai,
             }
           : undefined,
-        // AI token accounting for this context (read-only, for the owner's `ai` command): the cumulative
-        // summary plus today's spend and the configured daily cap (so the command can show the budget).
-        aiUsage: aiUsage ? { summary: () => aiUsage.summary(accessContext), today: () => aiUsage.today(), cap: aiDailyCap } : undefined,
+        // AI accounting for this context (read-only, for the owner's `ai` command): the cumulative
+        // summary, today's spend (tokens + requests) vs the configured daily cap, the provider's
+        // documented limits (static, from the composition root), and the last provider throttle seen.
+        aiUsage: aiUsage
+          ? {
+              summary: () => aiUsage.summary(accessContext),
+              today: () => aiUsage.today(),
+              todayCalls: () => aiUsage.todayCalls(),
+              lastLimit: () => aiUsage.lastLimit(),
+              cap: aiDailyCap,
+              provider: aiProvider,
+            }
+          : undefined,
         // Owner-defined command aliases (the `alias` command manages them; the dispatcher expands them above).
         aliases: aliases ?? undefined,
         links: links
@@ -528,7 +555,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       const request = rest ? `${command} ${rest}` : command;
       // `ai on` => also answer general questions here. A SCHEDULED job forces it on (the owner
       // authorized this output), so a non-command instruction still gets a composed answer.
-      const chatOn = aiEnabledIn(accessContext) || !!msg.scheduled;
+      const chatOn = aiEnabledIn(chatId) || !!msg.scheduled;
       const { chain, answer } = await aiResolve(request, { level, isAdmin, isOwner }, chatOn, accessContext);
       if (chain.length) {
         log.info('ai: translated a request', { to: chain.map((s) => s.line), sender });
