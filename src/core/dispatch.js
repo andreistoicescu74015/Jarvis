@@ -37,6 +37,7 @@ const AI_MAX_CHAIN = 8;
  * @property {import('./registry.js').Command[]} commands  Registered commands (for help/man).
  * @property {(text: string) => void} reply                Queue a line to send back.
  * @property {(token: string) => string} resolveUser       Canonicalize a typed person id (mention/number) for storage/match.
+ * @property {(token: string) => boolean} [forgetIdentity]  Drop a person's stored LID<->PN mapping (identity repair; platform capability).
  * @property {(id: string) => boolean} isSelf              True if the id is the bot itself (its trigger name or own id forms).
  * @property {import('../store/index.js').ScopedStore} [store] Per-conversation scoped KV (when configured).
  * @property {ReturnType<typeof createAccessPolicy>} [access] Owner-managed access lists (when a store is configured).
@@ -63,7 +64,7 @@ const AI_MAX_CHAIN = 8;
  *   The message handler, plus `chatRemoved(chatId)` - the platform's removal hook (the bot was kicked
  *   from a chat): deactivate it and run the same full teardown `groups deactivate` performs.
  */
-export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, community, scheduler, ai, aiDailyCap = 0, aiProvider, requireOwner = false, requireActivation = false } = {}) {
+export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, forgetIdentity, listGroups, send, community, scheduler, ai, aiDailyCap = 0, aiProvider, requireOwner = false, requireActivation = false } = {}) {
   // The owner-meta KV persists the claimed-owner slot (and the one-time private lockdown flag), so
   // a `jarvis owner claim` survives restarts; OWNER_JID still wins and silently drops a stale claim.
   const ownerResolver = createOwnerResolver({ owner, match, meta: store ? store.scoped('owner-meta') : undefined });
@@ -433,6 +434,9 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
             }
           : undefined,
         resolveUser: resolveUser ?? ((token) => String(token ?? '').trim()),
+        // Identity repair (the `whoami forget` escape hatch): drop a person's stored LID<->PN mapping
+        // so it re-learns fresh. Platform capability - absent where there is no identity store.
+        forgetIdentity: forgetIdentity ?? undefined,
         isSelf,
         log,
         lifecycle,

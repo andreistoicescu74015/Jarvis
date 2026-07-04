@@ -185,6 +185,15 @@ const handle = createDispatcher(registry, {
       const digits = t.replace(/[^0-9]/g, '');
       return digits ? identity.resolve(`${digits}@s.whatsapp.net`) : t;
     },
+    // Identity repair for `whoami forget`: the same token forms resolveUser accepts (an @mention jid,
+    // or a typed number), dropped from the learned LID<->PN map so the next message re-learns it.
+    forgetIdentity: (token) => {
+      const t = String(token ?? '').trim();
+      if (!t) return false;
+      if (t.includes('@')) return identity.forget(t);
+      const digits = t.replace(/[^0-9]/g, '');
+      return digits ? identity.forget(`${digits}@s.whatsapp.net`) : false;
+    },
   });
 const app = createApp(adapter, { handle });
 

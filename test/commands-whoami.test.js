@@ -52,3 +52,24 @@ test('whoami: is owner-only - a non-owner is not allowed', async () => {
   const out = await dispatch({ text: 'jarvis whoami', sender: 'rando', level: 'private', chatId: 'dm' });
   assert.match(out, /Not allowed: owner only/);
 });
+
+test('whoami: "forget" drops a person identity mapping via the platform capability', async () => {
+  const forgotten = [];
+  const opts = { forgetIdentity: (token) => { forgotten.push(token); return forgotten.length === 1; } };
+  const ok = await handle({ text: 'jarvis whoami forget 40712345678' }, opts);
+  assert.match(ok, /Forgot the stored identity mapping/);
+  assert.match(ok, /re-learned from their next message/);
+  assert.deepEqual(forgotten, ['40712345678']);
+  const none = await handle({ text: 'jarvis whoami forget 40712345678' }, opts); // second call: capability returns false
+  assert.match(none, /Nothing stored/);
+});
+
+test('whoami: "forget" prefers the @mention, needs a target, and reports when unavailable', async () => {
+  const forgotten = [];
+  const opts = { forgetIdentity: (token) => { forgotten.push(token); return true; } };
+  await handle({ text: 'jarvis whoami forget @john', mentionedJid: ['111@lid'] }, opts);
+  assert.deepEqual(forgotten, ['111@lid']); // the mention wins over the typed token
+  assert.match(await handle({ text: 'jarvis whoami forget' }, opts), /Usage/);
+  // off WhatsApp (no capability injected) it reports unavailable instead of throwing
+  assert.match(await handle({ text: 'jarvis whoami forget 40712' }), /unavailable here/i);
+});
