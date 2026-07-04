@@ -6,7 +6,6 @@ import { createLogger } from './core/log.js';
 import { commands } from './commands/index.js';
 import { createStore } from './store/index.js';
 import { createScheduler } from './core/scheduler.js';
-import { createFeeds } from './core/feeds.js';
 import { startProactive } from './core/proactive.js';
 import { num } from './core/env.js';
 
@@ -16,7 +15,6 @@ const registry = createRegistry(commands);
 const store = createStore({ path: process.env.JARVIS_DB ?? 'data/jarvis.db' });
 const log = createLogger({ level: process.env.LOG_LEVEL ?? 'info' });
 const scheduler = createScheduler(store);
-const feeds = createFeeds(store);
 // On the CLI, shutdown/restart just end the dev process; logout has no session.
 const lifecycle = {
   shutdown: () => setTimeout(() => process.exit(0), 50),
@@ -25,7 +23,7 @@ const lifecycle = {
 };
 const adapter = createCliAdapter();
 const app = createApp(adapter, {
-  handle: createDispatcher(registry, { owner: process.env.OWNER_JID ?? '', store, log, lifecycle, scheduler, feeds }),
+  handle: createDispatcher(registry, { owner: process.env.OWNER_JID ?? '', store, log, lifecycle, scheduler }),
 });
 
 // Proactive output (scheduled messages) runs in the background; on the CLI it prints to stdout.

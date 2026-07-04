@@ -2,8 +2,8 @@ import { isJidGroup } from 'baileys';
 import { nullLogger } from '../core/log.js';
 
 /**
- * Proactive delivery: the ONE path every unattended send takes - scheduled messages, scheduled AI
- * instructions, and feed digests. It enforces the same activation gate as inbound commands (never
+ * Proactive delivery: the ONE path every unattended send takes - scheduled messages and scheduled
+ * AI instructions. It enforces the same activation gate as inbound commands (never
  * post into a group the owner has not authorized - directly, or via its community umbrella), and it
  * runs a `kind: 'ai'` job back through the dispatcher as a synthetic addressed message carrying the
  * SAME facts a live message would: chat, level, and crucially the parent community. Without that

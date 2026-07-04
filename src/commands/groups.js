@@ -20,7 +20,7 @@ export default {
     'the current group; "groups activate <id>" one named by id (copy it from the list); ' +
     '"groups deactivate [<id>]" turns it back off. Activation survives restarts.',
   scope: { owner: true },
-  // `deactivate` is a full reset of the group (its access lists, AI opt-in, links, schedules, feeds, and
+  // `deactivate` is a full reset of the group (its access lists, AI opt-in, links, schedules, and
   // data are wiped) - destructive, so the AI translator never auto-runs it from a guess (owner must type it).
   confirm: (args) => (args[0] ?? '').toLowerCase() === 'deactivate',
   params: [
