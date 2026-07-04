@@ -22,6 +22,13 @@ function fakeSocketFactory() {
       sendPresenceUpdate: async (state, jid) => { sock.presence.push({ state, jid }); },
       readMessages: async (keys) => { sock.read.push(...keys); },
       updateProfileName: async (name) => { sock.named = name; sock.user.name = name; },
+      // Account privacy, as Baileys exposes it: fetch (with a force-refresh flag) + the read-receipts
+      // setter. Defaults to 'all' so existing tests see no repair traffic.
+      privacy: { readreceipts: 'all' },
+      privacyFetches: [],
+      privacyUpdates: [],
+      fetchPrivacySettings: async (force = false) => { sock.privacyFetches.push(!!force); return sock.privacy; },
+      updateReadReceiptsPrivacy: async (value) => { sock.privacyUpdates.push(value); sock.privacy.readreceipts = value; },
       groupMetadata: async () => ({ participants: [] }),
       end: () => { sock.ended = true; },
     };
@@ -515,4 +522,57 @@ test('adapter: the expected fresh-pairing profile-name failure stays out of the 
   sock.ev.emit('connection.update', { connection: 'open' });
   await tick();
   assert.ok(!warns.some((m) => /profile name/.test(m))); // the app-state-key case is debug, not warn
+});
+
+test('adapter: repairs the account read-receipts privacy on connect (blue ticks reach senders)', async () => {
+  const makeSocket = fakeSocketFactory();
+  const a = createWhatsAppAdapter(opts({ makeSocket }));
+  a.start({ onMessage: async () => {} });
+  const s = makeSocket.sockets[0];
+  s.privacy.readreceipts = 'none'; // the account was paired with read receipts OFF
+  s.ev.emit('connection.update', { connection: 'open' });
+  await tick();
+  await tick();
+  assert.deepEqual(s.privacyUpdates, ['all']); // repaired...
+  assert.equal(s.privacyFetches.at(-1), true); // ...and Baileys' privacy cache force-refreshed,
+  // otherwise readMessages would keep sending 'read-self' from the stale cache until a reconnect
+});
+
+test('adapter: leaves the privacy setting alone when it is already "all"', async () => {
+  const makeSocket = fakeSocketFactory();
+  const a = createWhatsAppAdapter(opts({ makeSocket }));
+  a.start({ onMessage: async () => {} });
+  const s = makeSocket.sockets[0];
+  s.ev.emit('connection.update', { connection: 'open' });
+  await tick();
+  await tick();
+  assert.deepEqual(s.privacyUpdates, []); // nothing to repair
+});
+
+test('adapter: with readReceipts off, the privacy setting is never touched (or even read)', async () => {
+  const makeSocket = fakeSocketFactory();
+  const a = createWhatsAppAdapter(opts({ makeSocket, humanize: { readReceipts: false } }));
+  a.start({ onMessage: async () => {} });
+  const s = makeSocket.sockets[0];
+  s.privacy.readreceipts = 'none';
+  s.ev.emit('connection.update', { connection: 'open' });
+  await tick();
+  await tick();
+  assert.deepEqual(s.privacyFetches, []); // receipts are opted out - respect that, change nothing
+  assert.deepEqual(s.privacyUpdates, []);
+});
+
+test('adapter: a privacy check failure only warns - the connect flow is not disturbed', async () => {
+  const makeSocket = fakeSocketFactory();
+  const { warns, log } = captureLog();
+  const a = createWhatsAppAdapter(opts({ makeSocket, log }));
+  a.start({ onMessage: async () => {} });
+  const s = makeSocket.sockets[0];
+  s.fetchPrivacySettings = async () => { throw new Error('iq timeout'); };
+  s.ev.emit('connection.update', { connection: 'open' });
+  await tick();
+  await tick();
+  assert.equal(warns.length, 1); // surfaced with guidance...
+  assert.match(warns[0], /read-receipts privacy/i);
+  assert.ok(s.presence.some((p) => p.state === 'available')); // ...and the connect flow completed
 });
