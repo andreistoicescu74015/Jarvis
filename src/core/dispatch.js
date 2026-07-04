@@ -59,7 +59,9 @@ const AI_MAX_CHAIN = 8;
  *
  * @param {import('./registry.js').Registry} registry
  * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, send?: (target: string, text: string) => unknown, community?: { info: (id?: string) => Promise<object | undefined>, groups: (id?: string) => Promise<object[]>, all: () => Promise<object[]> }, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object }, ai?: { translate: (input: { text: string, tools: object[] }) => Promise<Array<{ command: string, args: object }> | null> }, requireOwner?: boolean, requireActivation?: boolean }} [opts]
- * @returns {(msg: import('./app.js').InboundMessage) => Promise<string | undefined>}
+ * @returns {((msg: import('./app.js').InboundMessage) => Promise<string | undefined>) & { chatRemoved: (chatId: string) => void }}
+ *   The message handler, plus `chatRemoved(chatId)` - the platform's removal hook (the bot was kicked
+ *   from a chat): deactivate it and run the same full teardown `groups deactivate` performs.
  */
 export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, community, scheduler, feeds, ai, aiDailyCap = 0, requireOwner = false, requireActivation = false } = {}) {
   const ownerResolver = createOwnerResolver({ owner, match });
@@ -120,21 +122,25 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     if (send) await send(id, activationNotice());
     return true;
   }
+  // Full teardown of one chat's footprint - shared by the owner's deactivate and the platform's
+  // removal hook (`handle.chatRemoved`), so the two paths can never drift apart. Everything a chat
+  // accumulates goes with it.
+  function teardownChat(id) {
+    if (access) access.clearContext(id); // tear down the chat's access lists with it
+    aiGateStore?.delete(id); // and its AI-chatbot opt-in (a teardown is a full reset)
+    if (links) links.unlink(id); // leave any link overlay (revert, or dissolve it if this splits the rest)
+    scheduler?.clearChat(id); // stop the chat's proactive output: scheduled jobs...
+    feeds?.clearChat(id); // ...and feed subscriptions, so a teardown truly silences it
+    rules?.clearChat(id); // ...and its keyword auto-replies (chat data, gone with the chat)
+    if (store) {
+      store.clearNamespace(`group:${id}`); // wipe the chat's own data too - a teardown is a full reset
+      store.clearNamespace(`community:${id}`);
+    }
+  }
   function deactivateGroup(id) {
     if (!activation) return false;
     const was = activation.deactivate(id);
-    if (was) {
-      if (access) access.clearContext(id); // tear down the group's lists with it
-      aiGateStore?.delete(id); // and its AI-translation opt-in (a deactivate is a full reset)
-      if (links) links.unlink(id); // leave any link overlay (revert, or dissolve it if this splits the rest)
-      scheduler?.clearChat(id); // stop the group's proactive output: scheduled jobs...
-      feeds?.clearChat(id); // ...and feed subscriptions, so a deactivate truly silences it (mirrors onRemoved)
-      rules?.clearChat(id); // ...and its keyword auto-replies (group data, gone with the group)
-      if (store) {
-        store.clearNamespace(`group:${id}`); // wipe the group's own data too - a deactivate is a full reset
-        store.clearNamespace(`community:${id}`);
-      }
-    }
+    if (was) teardownChat(id); // idempotent: deactivating an already-inactive group changes nothing
     return was;
   }
 
@@ -193,7 +199,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     return `Did you mean: ${lines}? Type it to run.`;
   }
 
-  return async function handle(msg) {
+  async function handle(msg) {
     const parsed = parse(msg.text, prefix, { addressed: msg.addressed });
     if (!parsed) return undefined; // not addressed to the bot
 
@@ -266,13 +272,15 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       }
     }
 
-    // Owner-managed access lists (ADR-0006). The owner bypasses the whole layer, and the bootstrap
-    // `owner` command stays reachable so the bot can never be locked out of ownership. The GLOBAL gate
-    // is checked before the empty / unknown-command replies, so a blocked sender is fully silent (even
-    // to a bare prefix or junk). A denial is logged for audit, never surfaced in chat. The owner
+    // Owner-managed access lists (ADR-0006). The owner bypasses the whole layer, and while the bot is
+    // UNOWNED the bootstrap `owner` command stays reachable so it can never be locked out of ownership.
+    // Once an owner exists that exemption ends: `owner` obeys the lists like any command, so a
+    // locked-out stranger can no longer probe the bot (or learn who owns it) through it. The GLOBAL
+    // gate is checked before the empty / unknown-command replies, so a blocked sender is fully silent
+    // (even to a bare prefix or junk). A denial is logged for audit, never surfaced in chat. The owner
     // bypasses the lists everywhere; a group/community admin bypasses them in their own (already-active)
     // chat - admins always have access where Jarvis runs.
-    const globalExempt = isOwner || isAdmin || command === 'owner';
+    const globalExempt = isOwner || isAdmin || (command === 'owner' && !ownerResolver.current);
     if (access && !globalExempt && !access.passes('*', accessContext, sender)) {
       log.info('access deny (global)', { sender, chatId });
       return undefined;
@@ -315,7 +323,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     // command - however it arrived - passes the same guards (the owner/admin/`owner`-command bypass
     // the lists; owner-only commands are governed by `scope`).
     async function runOne(cmd, command, args, rest, aiLine) {
-      const exempt = isOwner || isAdmin || command === 'owner';
+      const exempt = isOwner || isAdmin || (command === 'owner' && !ownerResolver.current);
       if (access && !exempt && !cmd.scope?.owner && !access.passes(command, accessContext, sender)) {
         log.info('access deny (command)', { sender, chatId, command });
         return undefined;
@@ -436,16 +444,17 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
               setEnabledAll: (on) => scheduler.setEnabledAll(chatId, on),
             }
           : undefined,
-        // Owner reset: wipe THIS context's DATA - its notes, schedules, and feed subscriptions. NOT its
-        // access lists: those are managed via whitelist/blacklist, and silently clearing them on a reset
-        // would open the chat up (a security regression). A full access reset is what deactivate ->
-        // reactivate already does. The notes ns is the link overlay when linked (a linked group clears the
-        // shared notes); schedules and feeds are per-chat, like scheduler.clearChat.
+        // Owner reset: wipe THIS context's DATA - its notes, schedules, feed subscriptions, and keyword
+        // auto-replies. NOT its access lists: those are managed via whitelist/blacklist, and silently
+        // clearing them on a reset would open the chat up (a security regression). A full access reset
+        // is what deactivate -> reactivate already does. The notes ns is the link overlay when linked (a
+        // linked group clears the shared notes); schedules, feeds, and rules are per-chat.
         resetContext: store
           ? () => {
               store.clearNamespace(links ? links.nsFor(chatId, ownNs) : ownNs);
               if (scheduler) scheduler.clearChat(chatId);
               if (feeds) feeds.clearChat(chatId);
+              if (rules) rules.clearChat(chatId);
             }
           : undefined,
         owner: ownerCap,
@@ -548,5 +557,16 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       return `I didn't catch a command in that. Try ${code(`${prefix} help`)} to see what I can do.`;
     }
     return `Unknown command ${code(esc(command))}. Try ${code(`${prefix} help`)}.`;
+  }
+
+  // Platform hook: the bot was REMOVED from a chat (kicked, or the group was deleted). Same full
+  // teardown as an owner deactivation - nothing may keep firing into, or stay silently armed for a
+  // later re-add of, a chat the bot is no longer in - but unconditional: it also covers a chat with
+  // no own activation entry (active via a community umbrella, or activation not required), which
+  // `deactivate` alone would skip.
+  handle.chatRemoved = (chatId) => {
+    activation?.deactivate(chatId);
+    teardownChat(chatId);
   };
+  return handle;
 }

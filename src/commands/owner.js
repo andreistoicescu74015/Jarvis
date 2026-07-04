@@ -13,9 +13,9 @@ export default {
   summary: 'Claim or resign bot ownership (and show who owns it).',
   usage: 'jarvis owner | owner claim | owner resign',
   man:
-    'Bare "jarvis owner" shows who owns the bot (or that no one does yet). "claim" takes ' +
-    'a free owner slot; "resign" gives it up. The owner can also be set via OWNER_JID, in ' +
-    'which case it cannot resign from chat.',
+    'Bare "jarvis owner" shows whether the bot is owned (the contact itself is shown only to the ' +
+    'owner). "claim" takes a free owner slot; "resign" gives it up. The owner can also be set via ' +
+    'OWNER_JID, in which case it cannot resign from chat.',
   // Sensitive (it changes who controls the bot): the AI translator never auto-runs it from a guess -
   // claiming or resigning ownership must be typed.
   confirm: true,
@@ -29,16 +29,16 @@ export default {
     const sub = (ctx.args[0] ?? '').toLowerCase();
 
     if (!sub) {
-      return ctx.owner.exists
-        ? `${b('Owner')}: ${code(esc(ctx.owner.contact))}`
-        : `No owner yet. Send ${code('jarvis owner claim')} to become the owner.`;
+      if (!ctx.owner.exists) return `No owner yet. Send ${code('jarvis owner claim')} to become the owner.`;
+      // The contact is shown only to the owner themselves: it is a personal id (usually the owner's
+      // phone number), and anyone who can address the bot can run this command - never leak it.
+      return ctx.owner.isMe ? `${b('Owner')}: ${code(esc(ctx.owner.contact))}` : 'This bot already has an owner.';
     }
 
     if (sub === 'claim') {
       if (ctx.owner.exists) {
-        return ctx.owner.isMe
-          ? 'You are already the owner.'
-          : `There is already an owner: ${code(esc(ctx.owner.contact))}.`;
+        // Same privacy rule as the bare show: a would-be claimer learns the slot is taken, not whose it is.
+        return ctx.owner.isMe ? 'You are already the owner.' : 'There is already an owner.';
       }
       return ctx.owner.claim()
         ? 'You are now the owner.'

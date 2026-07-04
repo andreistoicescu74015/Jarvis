@@ -7,6 +7,7 @@ import { toPlain } from '../src/core/format.js';
 import reset from '../src/commands/reset.js';
 import note from '../src/commands/note.js';
 import { createFeeds } from '../src/core/feeds.js';
+import { createRules } from '../src/core/rules.js';
 
 const inGroup = (handle, text) => handle({ text, sender: 'boss', chatId: 'gA', level: 'group' }).then(toPlain);
 
@@ -51,5 +52,16 @@ test('reset cmd: reset also clears this context feed subscriptions', async () =>
   assert.equal(feeds.list('gA').length, 1);
   await handle({ text: 'jarvis reset', sender: 'boss', chatId: 'gA', level: 'group' });
   assert.equal(feeds.list('gA').length, 0);
+  store.close();
+});
+
+test('reset cmd: reset also clears this context keyword auto-replies', async () => {
+  const store = createStore({ path: ':memory:' });
+  const rules = createRules(store); // same store/namespace the dispatcher's own rules engine uses
+  const handle = createDispatcher(createRegistry([reset]), { owner: 'boss', store });
+  rules.add({ chatId: 'gA', createdBy: 'boss', keyword: 'menu', reply: 'soup' });
+  assert.equal(rules.list('gA').length, 1);
+  await handle({ text: 'jarvis reset', sender: 'boss', chatId: 'gA', level: 'group' });
+  assert.equal(rules.list('gA').length, 0); // an auto-reply is context data, gone with the reset
   store.close();
 });

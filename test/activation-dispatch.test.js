@@ -8,6 +8,7 @@ import { createLinks } from '../src/core/links.js';
 import { createScheduler } from '../src/core/scheduler.js';
 import { createFeeds } from '../src/core/feeds.js';
 import { createRules } from '../src/core/rules.js';
+import { createAccessPolicy } from '../src/core/access.js';
 import { toPlain } from '../src/core/format.js';
 import groups from '../src/commands/groups.js';
 
@@ -168,6 +169,60 @@ test('activation: deactivating a group unlinks it and wipes its own data', async
   assert.equal(store.scoped('group:gA@g.us').get('note'), undefined); // its own data wiped
   // the 2-group overlay dissolved: gB is solo again
   assert.deepEqual(createLinks(store).chats('gB@g.us'), ['gB@g.us']);
+  store.close();
+});
+
+test('activation umbrella: a scheduled message passes the gate only when it carries its community', async () => {
+  const { store, handle } = setup();
+  createActivation(store).activate('c@g.us', 'boss'); // umbrella on; the sub-group has no own entry
+  const base = { text: 'jarvis ping', sender: 'u', level: 'group', chatId: 's@g.us', addressed: true, scheduled: true };
+  // with the community fact (what the proactive deliver path must pass), the umbrella opens the gate
+  assert.equal(toPlain(await handle({ ...base, community: 'c@g.us' })), 'pong');
+  // without it the same scheduled message is silently dropped - the fact is load-bearing
+  assert.equal(await handle(base), undefined);
+  store.close();
+});
+
+test('activation: chatRemoved (the platform removal hook) mirrors the full deactivate teardown', async () => {
+  const store = createStore({ path: ':memory:' });
+  const activation = createActivation(store);
+  activation.activate('gA@g.us', 'boss');
+  activation.activate('gB@g.us', 'boss');
+  const links = createLinks(store, {
+    isActivated: (id) => activation.isActive(id),
+    clearNamespace: (ns) => store.clearNamespace(ns),
+  });
+  links.accept(links.propose('gA@g.us'), 'gB@g.us');
+  const scheduler = createScheduler(store);
+  const feeds = createFeeds(store);
+  const rules = createRules(store);
+  const access = createAccessPolicy(store);
+  scheduler.add({ chatId: 'gA@g.us', createdBy: 'boss', when: 'in 1h', text: 'reminder' });
+  feeds.add({ chatId: 'gA@g.us', url: 'https://ex.com/rss' });
+  rules.add({ chatId: 'gA@g.us', createdBy: 'boss', keyword: 'menu', reply: 'soup' });
+  access.add('whitelist', '*', 'gA@g.us', 'alice');
+  store.scoped('group:gA@g.us').set('notes', ['keep']);
+  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, requireActivation: true, scheduler, feeds });
+  handle.chatRemoved('gA@g.us');
+  assert.equal(activation.isActive('gA@g.us'), false); // silenced
+  assert.equal(scheduler.list('gA@g.us').length, 0); // proactive output gone
+  assert.equal(feeds.list('gA@g.us').length, 0);
+  assert.equal(rules.list('gA@g.us').length, 0); // auto-replies disarmed
+  assert.equal(access.all().filter((r) => r.context === 'gA@g.us').length, 0); // access lists gone
+  assert.equal(store.scoped('group:gA@g.us').get('notes'), undefined); // its data wiped
+  assert.deepEqual(createLinks(store).chats('gB@g.us'), ['gB@g.us']); // no ghost member: the overlay dissolved
+  store.close();
+});
+
+test('activation: chatRemoved also tears down a chat with no own activation entry (umbrella-only)', async () => {
+  const store = createStore({ path: ':memory:' });
+  const activation = createActivation(store);
+  activation.activate('c@g.us', 'boss'); // the community umbrella is on; s@g.us has NO own entry
+  const scheduler = createScheduler(store);
+  scheduler.add({ chatId: 's@g.us', createdBy: 'boss', when: 'in 1h', text: 'reminder' });
+  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, requireActivation: true, scheduler });
+  handle.chatRemoved('s@g.us');
+  assert.equal(scheduler.list('s@g.us').length, 0); // cleared even though deactivate() had nothing to undo
   store.close();
 });
 

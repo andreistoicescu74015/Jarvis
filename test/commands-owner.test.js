@@ -23,9 +23,13 @@ function stub(state) {
   return { ctx, calls };
 }
 
-test('owner cmd: show - reports the owner or that there is none', () => {
+test('owner cmd: show - reports the owner (contact only to the owner) or that there is none', () => {
   assert.match(owner.run(stub({}).ctx), /no owner yet/i);
-  assert.match(toPlain(owner.run(stub({ exists: true, contact: 'x@s.whatsapp.net' }).ctx)), /Owner: x@s\.whatsapp\.net/);
+  assert.match(toPlain(owner.run(stub({ exists: true, isMe: true, contact: 'x@s.whatsapp.net' }).ctx)), /Owner: x@s\.whatsapp\.net/);
+  // a non-owner learns there IS an owner, never who: the contact is a personal id
+  const other = toPlain(owner.run(stub({ exists: true, contact: 'x@s.whatsapp.net' }).ctx));
+  assert.match(other, /already has an owner/i);
+  assert.doesNotMatch(other, /x@s\.whatsapp\.net/);
 });
 
 test('owner cmd: claim - takes a free slot, otherwise shows the owner', () => {
@@ -34,7 +38,9 @@ test('owner cmd: claim - takes a free slot, otherwise shows the owner', () => {
   assert.equal(free.calls.claim, 1);
 
   const taken = stub({ args: ['claim'], exists: true, contact: 'boss' });
-  assert.match(toPlain(owner.run(taken.ctx)), /already an owner: boss/i);
+  const takenOut = toPlain(owner.run(taken.ctx));
+  assert.match(takenOut, /already an owner/i);
+  assert.doesNotMatch(takenOut, /boss/); // the contact is not revealed to a would-be claimer
   assert.equal(taken.calls.claim, 0);
 
   const mine = stub({ args: ['claim'], exists: true, isMe: true });
@@ -76,7 +82,9 @@ test('owner cmd: claim is private-only, then gates the owner-only commands', asy
 
 test('owner cmd: an env owner is not overridable and cannot resign', async () => {
   const handle = createDispatcher(createRegistry([owner]), { owner: 'boss' });
-  assert.match(toPlain(await handle({ text: 'jarvis owner claim', sender: 'alice', level: 'private' })), /already an owner: boss/i);
+  const out = toPlain(await handle({ text: 'jarvis owner claim', sender: 'alice', level: 'private' }));
+  assert.match(out, /already an owner/i);
+  assert.doesNotMatch(out, /boss/); // and the claim attempt does not leak whose slot it is
   assert.match(await handle({ text: 'jarvis owner resign', sender: 'boss', level: 'private' }), /configured via OWNER_JID/i);
 });
 
