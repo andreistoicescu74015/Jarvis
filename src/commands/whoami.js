@@ -12,14 +12,27 @@ function friendlyId(sender) {
 export default {
   name: 'whoami',
   summary: 'Owner: show who you are, or look a person up.',
-  usage: 'jarvis whoami | whoami <@user|number>',
+  usage: 'jarvis whoami | whoami <@user|number> | whoami forget <@user|number>',
   man:
     'Owner-only. Bare "whoami" shows who you are, where, and the canonical id Jarvis knows you by - the ' +
     'value to set as OWNER_JID. "whoami @user" or "whoami <number>" resolves another person to that id, ' +
-    'handy when deciding who may use the bot in private (then "jarvis whitelist * add ...").',
+    'handy when deciding who may use the bot in private (then "jarvis whitelist * add ..."). ' +
+    '"whoami forget @user" drops the stored identity mapping for a person (both id forms) - the repair ' +
+    'for a stale pairing after a phone-number change; it is re-learned from their next message.',
   scope: { owner: true },
   params: [{ name: 'person', desc: 'an @mention or phone number to look up; omit to show yourself' }],
   run: (ctx) => {
+    // Maintenance escape hatch: drop a person's stored identity mapping (see the identity store's
+    // self-heal - this is the manual counterpart). Typed-only on purpose (not offered as an AI tool
+    // param): it is a rare repair action, and the person token follows right after.
+    if ((ctx.args[0] ?? '').toLowerCase() === 'forget') {
+      if (typeof ctx.forgetIdentity !== 'function') return 'Identity management is unavailable here.';
+      const target = ctx.mentions?.[0] ?? (ctx.args[1] || '');
+      if (!target) return `Usage: ${code('jarvis whoami forget <@user|number>')}`;
+      return ctx.forgetIdentity(target)
+        ? `Forgot the stored identity mapping for ${b(friendlyId(String(target)))} - it will be re-learned from their next message.`
+        : 'Nothing stored for that person.';
+    }
     // Owner-only command. With an argument, resolve an @mention or typed number to the id Jarvis
     // stores and matches against; with none, just show the owner themselves.
     const named = ctx.mentions?.[0] ?? (ctx.args[0] || undefined);
