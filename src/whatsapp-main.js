@@ -1,5 +1,4 @@
 import { writeFileSync } from 'node:fs';
-import { isJidGroup } from 'baileys';
 import { createApp } from './core/app.js';
 import { createRegistry } from './core/registry.js';
 import { createDispatcher } from './core/dispatch.js';
@@ -11,6 +10,7 @@ import { createActivation } from './core/activation.js';
 import { startProactive } from './core/proactive.js';
 import { createSqliteAuthState } from './whatsapp/auth-store.js';
 import { createWhatsAppAdapter } from './whatsapp/adapter.js';
+import { createDeliver } from './whatsapp/deliver.js';
 import { createRateLimiter } from './whatsapp/pacing.js';
 import { createIdentityStore } from './whatsapp/identity-store.js';
 import { socketLogger } from './whatsapp/socket-logger.js';
@@ -111,13 +111,14 @@ const adapter = createWhatsAppAdapter({
     log.error('wa: fatal disconnect', { reason });
     quit(reason === 'exhausted' ? 1 : 0);
   },
-  // The bot was removed from a group: deactivate it so Jarvis goes silent there - including stopping
-  // its scheduled proactive sends (which deliver outside the inbound activation gate).
+  // The bot was removed from a group: run the dispatcher's FULL teardown (the same one an owner
+  // deactivation performs - activation, access lists, AI opt-in, link membership, schedules, feeds,
+  // auto-replies, and data), so nothing keeps firing into - or stays silently armed for a later
+  // re-add of - a chat the bot is no longer in. `handle` is assigned below; group events only fire
+  // after start(), so the late binding is safe.
   onRemoved: (chatId) => {
-    activation.deactivate(chatId);
-    const cleared = scheduler.clearChat(chatId);
-    if (cleared) log.info('cleared scheduled jobs for a removed group', { chatId, cleared });
-    feeds.clearChat(chatId); // drop the group's feed subscriptions too
+    handle.chatRemoved(chatId);
+    log.info('removed group torn down', { chatId });
   },
   // Track connection liveness for the heartbeat: stamp it immediately on connect, and the interval
   // below keeps it fresh while connected (so a disconnect lets it go stale -> unhealthy).
@@ -180,33 +181,20 @@ const handle = createDispatcher(registry, {
   });
 const app = createApp(adapter, { handle });
 
-// Proactive output (scheduled messages) runs in the background. Delivery reuses the adapter's
-// send, which paces every message through the global spacing limiter, so output never bursts.
-// Started before the (blocking) start() so the timer is live; the first tick is after one
-// interval, so we never deliver before the socket connects.
-const deliver = async (chatId, text, job) => {
-  // Proactive sends must respect the same activation gate as inbound commands: never post into a
-  // group the owner has not authorized (or has deactivated, or removed the bot from). A group also
-  // counts as active under its community umbrella (a community activated -> all its groups are on).
-  // Private chats have no activation entry and are never gated. Off when activation is not required.
-  if (requireActivation && isJidGroup(chatId)) {
-    const communityId = await adapter.communityOf(chatId);
-    if (!activation.isActive(chatId) && !(communityId && activation.isActive(communityId))) {
-      log.info('skip scheduled send to an inactive group', { chatId });
-      return false; // DECLINE: signal the scheduler this was not delivered, so it leaves the job pending
-    }
-  }
-  // An AI job carries an INSTRUCTION, not fixed text: run it as the owner who scheduled it, through the
-  // SAME dispatcher a live message uses (a synthetic addressed message flagged `scheduled`), then post
-  // whatever it produced. All guards re-run; chat mode is forced on; sensitive commands are skipped.
-  if (job?.kind === 'ai') {
-    const level = isJidGroup(chatId) ? 'group' : 'private';
-    const reply = await handle({ text, sender: job.createdBy, chatId, level, addressed: true, scheduled: true });
-    if (!reply) return true; // it fired but produced nothing to post - advance the job (don't retry)
-    return adapter.send(chatId, reply);
-  }
-  return adapter.send(chatId, text);
-};
+// Proactive output (scheduled messages, AI instructions, feed digests) runs in the background.
+// Delivery goes through createDeliver (src/whatsapp/deliver.js): the same activation gate as inbound
+// commands (community umbrella included), with AI jobs re-entering the dispatcher carrying the full
+// message context. It reuses the adapter's send, which paces every message through the global
+// spacing limiter, so output never bursts. Started before the (blocking) start() so the timer is
+// live; the first tick is after one interval, so we never deliver before the socket connects.
+const deliver = createDeliver({
+  send: (chatId, message) => adapter.send(chatId, message),
+  communityOf: (chatId) => adapter.communityOf(chatId),
+  isActive: (id) => activation.isActive(id),
+  handle,
+  requireActivation,
+  log,
+});
 const proactiveRunner = startProactive(
   async () => {
     await scheduler.tick(deliver, Date.now());

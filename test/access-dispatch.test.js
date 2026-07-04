@@ -67,13 +67,15 @@ test('dispatch+access: owner-only commands are governed by scope, not lists', as
   assert.match(await handle({ text: 'jarvis shutdown', sender: 'x', chatId: 'c1', level: 'group' }), /Not allowed: owner only/);
 });
 
-test('dispatch+access: an established owner locks the bot DMs to them (anti-lockout on owner)', async () => {
+test('dispatch+access: an established owner locks the bot DMs to them (the owner exemption ends)', async () => {
   const { handle } = setup({ owner: 'boss' });
   // once an owner exists, a stranger cannot DM the bot...
   assert.equal(await handle({ text: 'jarvis ping', sender: 'rando', level: 'private', chatId: 'dm' }), undefined);
-  // ...the owner can, and the bootstrap `owner` command stays reachable to anyone (anti-lockout)
+  // ...the owner can...
   assert.equal(await handle({ text: 'jarvis ping', sender: 'boss', level: 'private', chatId: 'dm' }), 'pong');
-  assert.match(await handle({ text: 'jarvis owner', sender: 'rando', level: 'private', chatId: 'dm' }), /Owner/);
+  // ...and `owner` is no longer exempt from the lists: a locked-out stranger gets silence, never the
+  // owner's contact. The anti-lockout exemption applies only while the bot is UNOWNED (claim test above).
+  assert.equal(await handle({ text: 'jarvis owner', sender: 'rando', level: 'private', chatId: 'dm' }), undefined);
 });
 
 test('dispatch+access: claiming locks the DMs; resigning clears the lock (symmetric)', async () => {

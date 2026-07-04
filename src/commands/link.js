@@ -14,7 +14,7 @@ function linkError(r) {
 }
 
 /**
- * Context links: join two GROUPS so they share one overlay context (DATA only - notes, schedules).
+ * Context links: join two GROUPS so they share one overlay context (DATA only - the shared notes).
  * The overlay COVERS each group's own data without merging it; unlinking returns each to its own.
  * Group-only and admin-gated (scope.admin): an admin in one group runs "link new" for a one-time code;
  * an admin in the other runs "link accept <code>". Both groups must be active. Access lists are never
@@ -27,7 +27,7 @@ export default {
   summary: 'Link this group with another to share one context.',
   usage: 'jarvis link | link new | link accept <code> | link remove',
   man:
-    'Share one overlay context (DATA: notes, schedules) between two GROUPS. Both must be active, and ' +
+    'Share one overlay context (DATA: the notes) between two GROUPS. Both must be active, and ' +
     'an admin on each side agrees: run "link new" here for a one-time code, share it, and an admin in ' +
     'the other group runs "link accept <code>". The overlay covers each group\'s own data without ' +
     'merging it - unlinking returns each group to its own data. Links are transitive (a third group ' +
