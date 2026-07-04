@@ -16,6 +16,7 @@ import { socketLogger } from './whatsapp/socket-logger.js';
 import { commands } from './commands/index.js';
 import { num } from './core/env.js';
 import { createAiClient, buildChatSystem } from './core/ai.js';
+import { providerLimits, LIMITS_DOC_DATE } from './core/ai-limits.js';
 import { loadPersona } from './core/persona.js';
 
 /**
@@ -165,6 +166,15 @@ const handle = createDispatcher(registry, {
     // Hard daily token budget for the AI layer: once the day's tokens reach it, Jarvis stops calling
     // the model until the next server-local day (deterministic commands keep working). 0 = no cap.
     aiDailyCap: num(process.env.JARVIS_AI_DAILY_TOKEN_CAP, 0),
+    // GitHub Models' DOCUMENTED rate limits for the configured model tier + Copilot plan (static -
+    // the API exposes no remaining-quota headers), so `jarvis ai` can show the provider's ceilings
+    // next to Jarvis's own spend. Unknown combos (custom endpoints) just omit the display.
+    aiProvider: (() => {
+      const tier = (process.env.JARVIS_AI_MODEL_TIER ?? 'low').toLowerCase();
+      const plan = (process.env.JARVIS_AI_PLAN ?? 'free').toLowerCase();
+      const limits = providerLimits(tier, plan);
+      return limits ? { tier, plan, ...limits, docDate: LIMITS_DOC_DATE } : undefined;
+    })(),
     // Canonicalize a named person for the access lists: a JID (e.g. from an @mention)
     // is resolved toward its phone form; a bare number becomes a phone JID. Matching
     // then bridges LID <-> phone, so a person named one way matches a sender on the other.
