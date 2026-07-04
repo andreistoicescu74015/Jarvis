@@ -199,6 +199,33 @@ export function createWhatsAppAdapter({
     }
   }
 
+  // Blue ticks are gated by an ACCOUNT privacy setting, not just by our readMessages call: Baileys
+  // downgrades every read receipt to 'read-self' - which the sender never sees - whenever the
+  // account's "read receipts" privacy is not 'all'. So the read-before-reply humanization above can
+  // silently look like it does nothing. When receipts are wanted, verify the setting on every
+  // (re)connect and repair it; then force-refresh Baileys' cached privacy settings, which
+  // updateReadReceiptsPrivacy does NOT do on its own (readMessages would keep consulting the stale
+  // cache until the next reconnect). Best-effort: a failure only logs what to fix by hand.
+  async function ensureReadReceiptsPrivacy() {
+    const s = sock; // capture: don't act on a socket a reconnect swapped out mid-await
+    if (!readReceipts || !s || stopped) return;
+    try {
+      const settings = await s.fetchPrivacySettings?.();
+      if (stopped || sock !== s) return;
+      if (!settings || settings.readreceipts === 'all') return; // already fine (or nothing to read)
+      await s.updateReadReceiptsPrivacy?.('all');
+      await s.fetchPrivacySettings?.(true); // refresh the cache readMessages consults
+      log.info('wa: turned the account read-receipts privacy to "all" - senders now see blue ticks', {
+        was: settings.readreceipts,
+      });
+    } catch (err) {
+      log.warn(
+        'wa: could not verify/repair read-receipts privacy - if ticks stay grey, set Privacy > Read receipts ON for the account',
+        { error: err?.message ?? String(err) },
+      );
+    }
+  }
+
   // Whether the bot itself is among a set of participant jids (LID- or PN-aware).
   function isSelfParticipant(participants) {
     const selfIds = [sock?.user?.id, sock?.user?.lid].filter(Boolean).map((j) => jidNormalizedUser(j));
@@ -249,6 +276,7 @@ export function createWhatsAppAdapter({
       onConnectionState(true); // liveness: we are connected (the heartbeat tracks this)
       log.info('wa: connected', { user: sock?.user?.id });
       await ensurePresence(); // name the account if needed, then go online so receipts register
+      await ensureReadReceiptsPrivacy(); // and make sure the account-side receipts switch is on
       return;
     }
     if (connection !== 'close' || stopped) return;

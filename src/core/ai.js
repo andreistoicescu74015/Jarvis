@@ -62,6 +62,7 @@ const withUsage = (out, usage) => (usage ? { ...out, usage } : out);
  *   fetchImpl?: typeof fetch,
  *   log?: import('./log.js').Logger,
  *   timeoutMs?: number,
+ *   maxTokens?: number,
  *   system?: string,
  *   chatSystem?: string,
  * }} [opts]
@@ -78,6 +79,7 @@ export function createAiClient({
   fetchImpl = fetch,
   log = nullLogger,
   timeoutMs = 8000,
+  maxTokens = 800,
   system = SYSTEM_PROMPT,
   chatSystem = CHAT_SYSTEM_PROMPT,
 } = {}) {
@@ -95,6 +97,9 @@ export function createAiClient({
         body: JSON.stringify({
           model,
           temperature: 0,
+          // Bound one completion (cost discipline): tool calls are tiny, and a chat-mode answer on
+          // WhatsApp should be short anyway - without this, a runaway answer's size is unbounded.
+          max_tokens: maxTokens,
           messages: [
             { role: 'system', content: chat ? chatSystem : system },
             { role: 'user', content: text },
