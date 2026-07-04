@@ -63,7 +63,7 @@ const AI_MAX_CHAIN = 8;
  *   The message handler, plus `chatRemoved(chatId)` - the platform's removal hook (the bot was kicked
  *   from a chat): deactivate it and run the same full teardown `groups deactivate` performs.
  */
-export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, community, scheduler, feeds, ai, aiDailyCap = 0, requireOwner = false, requireActivation = false } = {}) {
+export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, listGroups, send, community, scheduler, ai, aiDailyCap = 0, requireOwner = false, requireActivation = false } = {}) {
   const ownerResolver = createOwnerResolver({ owner, match });
   const access = store ? createAccessPolicy(store, { match }) : null;
   const activation = store ? createActivation(store) : null;
@@ -129,8 +129,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     if (access) access.clearContext(id); // tear down the chat's access lists with it
     aiGateStore?.delete(id); // and its AI-chatbot opt-in (a teardown is a full reset)
     if (links) links.unlink(id); // leave any link overlay (revert, or dissolve it if this splits the rest)
-    scheduler?.clearChat(id); // stop the chat's proactive output: scheduled jobs...
-    feeds?.clearChat(id); // ...and feed subscriptions, so a teardown truly silences it
+    scheduler?.clearChat(id); // stop the chat's proactive output (scheduled jobs), so a teardown truly silences it
     rules?.clearChat(id); // ...and its keyword auto-replies (chat data, gone with the chat)
     if (store) {
       store.clearNamespace(`group:${id}`); // wipe the chat's own data too - a teardown is a full reset
@@ -290,7 +289,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
 
     // `capable` / `ownerCap` are message-scoped but command-independent, so they are built once and
     // shared by every command run below (a single typed command, or each step of an AI chain).
-    const capable = { store, access, links, activation, scheduler, feeds, rules, lifecycle, send, community, aliases, aiGate: aiGateStore };
+    const capable = { store, access, links, activation, scheduler, rules, lifecycle, send, community, aliases, aiGate: aiGateStore };
     const ownerCap = {
       exists: !!ownerResolver.current,
       isMe: isOwner,
@@ -417,14 +416,6 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
               all: () => community.all(),
             }
           : undefined,
-        // Feed subscriptions for this chat (the `feed` command); the proactive runner posts new entries.
-        feeds: feeds
-          ? {
-              add: (url) => feeds.add({ chatId, url }),
-              list: () => feeds.list(chatId),
-              remove: (id) => feeds.remove(id, chatId),
-            }
-          : undefined,
         // Keyword auto-replies for this chat (the `rule` command); the dispatcher fires them below.
         rules: rules
           ? {
@@ -444,16 +435,15 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
               setEnabledAll: (on) => scheduler.setEnabledAll(chatId, on),
             }
           : undefined,
-        // Owner reset: wipe THIS context's DATA - its notes, schedules, feed subscriptions, and keyword
-        // auto-replies. NOT its access lists: those are managed via whitelist/blacklist, and silently
-        // clearing them on a reset would open the chat up (a security regression). A full access reset
-        // is what deactivate -> reactivate already does. The notes ns is the link overlay when linked (a
-        // linked group clears the shared notes); schedules, feeds, and rules are per-chat.
+        // Owner reset: wipe THIS context's DATA - its notes, schedules, and keyword auto-replies. NOT
+        // its access lists: those are managed via whitelist/blacklist, and silently clearing them on a
+        // reset would open the chat up (a security regression). A full access reset is what deactivate
+        // -> reactivate already does. The notes ns is the link overlay when linked (a linked group
+        // clears the shared notes); schedules and rules are per-chat.
         resetContext: store
           ? () => {
               store.clearNamespace(links ? links.nsFor(chatId, ownNs) : ownNs);
               if (scheduler) scheduler.clearChat(chatId);
-              if (feeds) feeds.clearChat(chatId);
               if (rules) rules.clearChat(chatId);
             }
           : undefined,

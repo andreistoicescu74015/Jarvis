@@ -3,7 +3,7 @@
  * matches a rule's keyword, Jarvis posts that rule's reply: no AI, no tokens. Inspired by Home
  * Assistant's trigger -> action model, scoped to the one trigger that stays inside the addressed-only
  * pillar (a keyword on a message ADDRESSED to the bot - never ambient chat). Per-chat: a group's
- * auto-replies are its own. Pure over the KV store (ADR-0002) like access/feeds, so rules survive
+ * auto-replies are its own. Pure over the KV store (ADR-0002) like access/scheduler, so rules survive
  * restarts.
  *
  * A rule is keyed by chat + keyword, so a keyword is unique per chat (adding it again overwrites the

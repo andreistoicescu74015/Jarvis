@@ -94,9 +94,9 @@ test('deliver: a failed send propagates (false), so the scheduler leaves the job
   assert.equal(await deliver('g@g.us', 'hi'), false);
 });
 
-test('deliver: the feeds-style two-argument call (no job) is a plain send', async () => {
+test('deliver: a two-argument call (no job) is a plain send', async () => {
   const { deliver, sent, handled } = setup({ active: ['g@g.us'] });
-  await deliver('g@g.us', 'title\nhttps://ex.com/a');
+  await deliver('g@g.us', 'plain text');
   assert.equal(sent.length, 1);
   assert.equal(handled.length, 0); // never routed through the dispatcher
 });
