@@ -38,9 +38,19 @@ export default {
 /** Activate/deactivate Jarvis across a whole community (the command is owner-only; the umbrella gate). */
 async function manage(ctx, sub) {
   if (!ctx.activation) return 'Activation is unavailable here.';
-  const id = (ctx.args[1] ?? '').trim() || ctx.communityId;
+  const arg = (ctx.args[1] ?? '').trim();
+  const id = arg || ctx.communityId;
   if (!id) {
     return `Run this inside a community, or name it: ${code(`jarvis community ${sub} <id>`)} (ids from ${code('jarvis groups')}).`;
+  }
+  // A NAMED id is validated against the communities the bot is actually in (when that read works): a
+  // typo must not "activate" a phantom id behind a confident confirmation. Best-effort like `groups`
+  // validates against its list - an empty or failed listing never blocks the local KV write.
+  if (arg) {
+    const knownCommunities = await ctx.community.all();
+    if (knownCommunities.length && !knownCommunities.some((c) => c.id === id)) {
+      return `No such community: ${code(esc(id))} (ids from ${code('jarvis groups')}).`;
+    }
   }
   // Activation is a local KV write - never block it on the (network, best-effort) community read.
   // The read only enriches the confirmation with the name + group count when it is available.

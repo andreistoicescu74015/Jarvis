@@ -53,6 +53,23 @@ test('link cmd: a bad code is reported clearly', async () => {
   assert.match(await admin(handle, 'jarvis link accept NOPE', 'gB'), /Unknown code/);
 });
 
+test('link cmd: sub-groups active only via their community umbrella can link', async () => {
+  const store = createStore({ path: ':memory:' });
+  createActivation(store).activate('c@g.us', 'boss'); // ONLY the community is activated
+  const handle = createDispatcher(createRegistry([link, note]), { store });
+  const inSub = (text, chatId) =>
+    handle({ text, sender: 'u', chatId, level: 'community', community: 'c@g.us', isAdmin: true });
+  // `link new` no longer demands an individual activation the dispatcher itself does not require
+  const out = await inSub('jarvis link new', 's1@g.us');
+  assert.doesNotMatch(toPlain(out), /Activate this group first/);
+  const code = codeFrom(out);
+  assert.match(await inSub(`jarvis link accept ${code}`, 's2@g.us'), /Linked/);
+  // the two sub-groups now share one data context
+  await inSub('jarvis note add shared', 's1@g.us');
+  assert.match(await inSub('jarvis note list', 's2@g.us'), /shared/);
+  store.close();
+});
+
 test('link cmd: cannot link into a group that is not active', async () => {
   const { handle } = setup();
   const code = codeFrom(await admin(handle, 'jarvis link new', 'gA'));
