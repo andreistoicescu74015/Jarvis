@@ -161,3 +161,14 @@ test('ai: a custom chatSystem is sent as the system prompt in chat mode', async 
   await ai.translate({ text: 'hello', tools, chat: true });
   assert.equal(JSON.parse(capture.init.body).messages[0].content, 'CUSTOM VOICE\nrules...');
 });
+
+test('ai: every request bounds the completion size (max_tokens), with an overridable default', async () => {
+  const capture = {};
+  const ai = createAiClient({ token: 't', fetchImpl: fakeFetch(toolCall('whitelist', {}), { capture }) });
+  await ai.translate({ text: 'x', tools });
+  assert.equal(JSON.parse(capture.init.body).max_tokens, 800); // the cost-discipline default
+  const tight = {};
+  const ai2 = createAiClient({ token: 't', maxTokens: 200, fetchImpl: fakeFetch(toolCall('whitelist', {}), { capture: tight }) });
+  await ai2.translate({ text: 'x', tools });
+  assert.equal(JSON.parse(tight.init.body).max_tokens, 200);
+});
