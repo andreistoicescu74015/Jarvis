@@ -176,3 +176,24 @@ test('links: a code is one-time - spent even by a refused attempt (no replay)', 
   links.unlink('C'); // C is solo again
   assert.equal(links.accept(code, 'C').reason, 'bad-code'); // the spent code cannot be replayed
 });
+
+test('links: the default code generator is crypto-random over an unambiguous alphabet', () => {
+  const store = createStore({ path: ':memory:' });
+  const links = createLinks(store); // no injected genCode -> the real generator
+  const code = links.propose('A');
+  assert.match(code, /^[2-9A-HJKMNP-Z]{6}$/); // 6 chars; no 0/O, 1/I/L to misread between groups
+  assert.equal(links.accept(code, 'B').ok, true); // and it round-trips through accept
+  store.close();
+});
+
+test('links: propose never hands out a code that is still outstanding (no silent replacement)', () => {
+  const store = createStore({ path: ':memory:' });
+  const seq = ['DUP', 'DUP', 'NEW']; // a degenerate generator that repeats itself once
+  const links = createLinks(store, { genCode: () => seq.shift() ?? 'XX' });
+  assert.equal(links.propose('A'), 'DUP');
+  assert.equal(links.propose('B'), 'NEW'); // the repeated DUP is skipped - it is still outstanding
+  // both codes stay independently redeemable (the first was not clobbered)
+  assert.equal(links.accept('DUP', 'C').ok, true);
+  assert.equal(links.accept('NEW', 'D').ok, true);
+  store.close();
+});
