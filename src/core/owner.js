@@ -17,6 +17,26 @@ import { sameUser } from './scope.js';
  *   `meta` is a scoped KV for the persisted claim (no meta -> the claim is ephemeral, as before).
  * @returns {{ isOwner: (sender: string) => boolean, claim: (sender: string) => void, resign: () => void, readonly current: string, readonly fromEnv: boolean }}
  */
+/**
+ * Wipe the whole store while KEEPING the persisted owner claim (`reset all`). The owner runs the
+ * wipe AS the owner - it must clear data, not un-own the bot: losing the claim would reopen the
+ * first-claimer window to any stranger after the restart, the exact race persistence closes.
+ * Only the claim itself is kept; the private-lockdown flag and whitelist are re-created on the
+ * next startup by the dispatcher's lockPrivateOnce (it runs whenever an owner exists).
+ *
+ * @param {import('../store/index.js').Store} store
+ * @returns {number} entries deleted by the wipe.
+ */
+export function wipeKeepingClaim(store) {
+  return store.transaction(() => {
+    const meta = store.scoped('owner-meta');
+    const claimed = meta.get('claimed');
+    const cleared = store.clearAll();
+    if (typeof claimed === 'string' && claimed) meta.set('claimed', claimed);
+    return cleared;
+  });
+}
+
 export function createOwnerResolver({ owner = '', match = sameUser, meta } = {}) {
   const fromEnv = !!owner;
   let current = owner ? String(owner) : '';

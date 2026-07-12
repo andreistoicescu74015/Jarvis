@@ -216,7 +216,7 @@ export function createWhatsAppAdapter({
       await s.updateReadReceiptsPrivacy?.('all');
       await s.fetchPrivacySettings?.(true); // refresh the cache readMessages consults
       log.info('wa: turned the account read-receipts privacy to "all" - senders now see blue ticks', {
-        was: settings.readreceipts,
+        was: settings.readreceipts ?? 'unset', // a partial payload omits the field; 'unset' beats logging undefined
       });
     } catch (err) {
       log.warn(
@@ -252,14 +252,30 @@ export function createWhatsAppAdapter({
     s.ev.on('groups.update', (updates) => {
       for (const u of updates ?? []) if (u?.id) groupCache.delete(u.id);
     });
-    s.ev.on('group-participants.update', (u) => {
-      if (!u?.id) return;
-      groupCache.delete(u.id);
-      // If the bot itself was removed from the group, tell the core - a group the bot is no longer in
-      // must go silent, including its scheduled proactive sends (which otherwise keep firing into it).
-      if (u.action === 'remove' && isSelfParticipant(u.participants)) {
-        log.warn('wa: removed from a group - signalling deactivation', { id: u.id });
-        onRemoved(u.id);
+    s.ev.on('group-participants.update', async (u) => {
+      try {
+        if (!u?.id) return;
+        groupCache.delete(u.id);
+        // If the bot itself was removed from the group, tell the core - a group the bot is no longer in
+        // must go silent, including its scheduled proactive sends (which otherwise keep firing into it).
+        if (u.action === 'remove' && isSelfParticipant(u.participants)) {
+          // The teardown this triggers is destructive (access lists, notes, rules, link membership),
+          // and a removal notification can be STALE - queued while we were offline and replayed after
+          // the bot was already re-added. Verify against LIVE membership first (the cache entry was
+          // deleted above, so this is a fresh read): still a member -> ignore the stale event. An
+          // unreadable metadata (the usual result of a real removal) proceeds with the teardown.
+          const meta = await groupMetadata(u.id);
+          if (isSelfParticipant((meta?.participants ?? []).map((p) => p?.id))) {
+            log.info('wa: ignoring a stale group removal - still a member', { id: u.id });
+            return;
+          }
+          log.warn('wa: removed from a group - signalling deactivation', { id: u.id });
+          onRemoved(u.id);
+        }
+      } catch (err) {
+        // An async event handler must never leak a rejection (it would hit unhandledRejection and
+        // restart the process over one group event).
+        log.error('wa: failed to handle a participants update', { error: err?.message ?? String(err) });
       }
     });
   }

@@ -64,9 +64,10 @@ test('ai: chat mode still prefers a tool call when the request maps to a command
   });
 });
 
-test('ai: a non-ok response -> empty (best-effort, never throws)', async () => {
+test('ai: a non-ok response -> empty and flagged failed (best-effort, never throws)', async () => {
   const ai = createAiClient({ token: 't', fetchImpl: fakeFetch({}, { ok: false, status: 500 }) });
-  assert.deepEqual(await ai.translate({ text: 'x', tools }), EMPTY);
+  // `failed` marks "the model was never really consulted" - a scheduled AI job retries on it.
+  assert.deepEqual(await ai.translate({ text: 'x', tools }), { ...EMPTY, failed: true });
 });
 
 test('ai: a 429 stays empty but carries the provider throttle details from the headers', async () => {
@@ -76,6 +77,7 @@ test('ai: a 429 stays empty but carries the provider throttle details from the h
   assert.deepEqual(out.commands, []);
   assert.equal(out.answer, null);
   assert.deepEqual(out.limit, { type: 'UserByModelByDay', retryAfterSec: 120 }); // what `jarvis ai` will surface
+  assert.equal(out.failed, true); // throttled = the model was never consulted (a scheduled job retries)
 });
 
 test('ai: a 429 with no rate-limit headers still resolves empty, with a bare limit marker', async () => {
@@ -85,9 +87,9 @@ test('ai: a 429 with no rate-limit headers still resolves empty, with a bare lim
   assert.deepEqual(out.limit, { type: '', retryAfterSec: 0 });
 });
 
-test('ai: a fetch error -> empty', async () => {
+test('ai: a fetch error -> empty and flagged failed', async () => {
   const ai = createAiClient({ token: 't', fetchImpl: async () => { throw new Error('network down'); } });
-  assert.deepEqual(await ai.translate({ text: 'x', tools }), EMPTY);
+  assert.deepEqual(await ai.translate({ text: 'x', tools }), { ...EMPTY, failed: true });
 });
 
 test('ai: empty text or empty tools -> empty without calling out', async () => {

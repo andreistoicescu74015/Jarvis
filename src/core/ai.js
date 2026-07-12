@@ -66,11 +66,14 @@ const withUsage = (out, usage) => (usage ? { ...out, usage } : out);
  *   system?: string,
  *   chatSystem?: string,
  * }} [opts]
- * @returns {{ translate: (input: { text: string, tools: object[], chat?: boolean }) => Promise<{ commands: Array<{ command: string, args: object }>, answer: string | null, usage?: object, limit?: { type: string, retryAfterSec: number } }> } | null}
+ * @returns {{ translate: (input: { text: string, tools: object[], chat?: boolean }) => Promise<{ commands: Array<{ command: string, args: object }>, answer: string | null, usage?: object, limit?: { type: string, retryAfterSec: number }, failed?: boolean }> } | null}
  *   The client is null when no token is configured - AI is simply off and the caller stays
  *   deterministic-only. `translate` resolves to the model's tool calls (`commands`, a chain in order)
  *   and, in chat mode when nothing maps, a plain-text `answer`. Both empty/null on any failure. A 429
  *   additionally carries `limit` (the provider throttle the response reported), for visibility.
+ *   `failed` marks every response where the model was never really consulted (a non-ok status, a
+ *   network error, a timeout) - as opposed to a successful call that simply mapped nothing - so a
+ *   scheduled AI job can retry later instead of being consumed for nothing.
  */
 export function createAiClient({
   token = '',
@@ -113,16 +116,18 @@ export function createAiClient({
         // A 429 is the provider's rate limiter: capture what its headers say (the quota that tripped,
         // e.g. `UserByModelByDay`, and the advised wait) so the owner can SEE the throttle from
         // `jarvis ai` instead of guessing why the AI went quiet. Other failures stay a plain warn.
+        // Every non-ok response carries `failed`, so callers can tell "the model was never really
+        // consulted" apart from "it ran and mapped nothing" (scheduled AI jobs retry on the former).
         if (res.status === 429) {
           const limit = {
             type: res.headers?.get?.('x-ratelimit-type') || '',
             retryAfterSec: Number(res.headers?.get?.('retry-after')) || 0,
           };
           log.warn('ai: provider rate limit hit', { status: 429, ...limit });
-          return { ...EMPTY, limit };
+          return { ...EMPTY, limit, failed: true };
         }
         log.warn('ai: request failed', { status: res.status });
-        return EMPTY;
+        return { ...EMPTY, failed: true };
       }
       const data = await res.json();
       const message = data?.choices?.[0]?.message;
@@ -148,7 +153,7 @@ export function createAiClient({
       return withUsage({ commands: [], answer: chat && content ? content : null }, data?.usage);
     } catch (err) {
       log.warn('ai: request error', { error: err?.message ?? String(err) });
-      return EMPTY;
+      return { ...EMPTY, failed: true }; // network error / timeout - the model was never consulted
     } finally {
       clearTimeout(timer);
     }

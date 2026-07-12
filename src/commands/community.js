@@ -45,16 +45,18 @@ async function manage(ctx, sub) {
   }
   // A NAMED id is validated against the communities the bot is actually in (when that read works): a
   // typo must not "activate" a phantom id behind a confident confirmation. Best-effort like `groups`
-  // validates against its list - an empty or failed listing never blocks the local KV write.
-  if (arg) {
-    const knownCommunities = await ctx.community.all();
-    if (knownCommunities.length && !knownCommunities.some((c) => c.id === id)) {
-      return `No such community: ${code(esc(id))} (ids from ${code('jarvis groups')}).`;
-    }
+  // validates against its list - an empty or failed listing never blocks the local KV write. The two
+  // reads (the validation list and the confirmation enrichment) are independent network calls, so
+  // they run in parallel - the owner waits for the slower one, not the sum.
+  const [knownCommunities, info] = await Promise.all([
+    arg ? ctx.community.all() : Promise.resolve([]),
+    ctx.community.info(id),
+  ]);
+  if (arg && knownCommunities.length && !knownCommunities.some((c) => c.id === id)) {
+    return `No such community: ${code(esc(id))} (ids from ${code('jarvis groups')}).`;
   }
   // Activation is a local KV write - never block it on the (network, best-effort) community read.
   // The read only enriches the confirmation with the name + group count when it is available.
-  const info = await ctx.community.info(id);
   const name = info ? b(esc(info.name)) : code(esc(id));
   if (sub === 'activate') {
     if (!ctx.activation.activateCommunity(id, ctx.sender)) return `${name} is already active.`;

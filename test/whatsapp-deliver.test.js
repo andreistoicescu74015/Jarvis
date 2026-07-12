@@ -20,7 +20,8 @@ function setup({ active = [], parents = {}, requireActivation = true, reply = un
       lookups.push(chatId);
       return parents[chatId];
     },
-    isActive: (id) => active.includes(id),
+    // The shared activation predicate (activation.isActiveVia in production).
+    isActiveVia: (id, community) => active.includes(id) || (!!community && active.includes(community)),
     handle: async (msg) => {
       handled.push(msg);
       return reply;
@@ -61,10 +62,29 @@ test('deliver: an AI job in an umbrella-activated sub-group reaches the dispatch
   assert.equal(handled[0].community, 'c@g.us'); // the load-bearing fact
   assert.equal(handled[0].chatId, 's@g.us');
   assert.equal(handled[0].sender, 'boss'); // runs as the owner who scheduled it
-  assert.equal(handled[0].level, 'group');
+  // Community chats live-classify as level 'community' (identity.js levelOf), and the dispatcher
+  // keys the chat's own data namespace on the level - 'group' here would read/write group:<id>
+  // while live use of the same chat reads community:<id>.
+  assert.equal(handled[0].level, 'community');
   assert.equal(handled[0].addressed, true);
   assert.equal(handled[0].scheduled, true);
   assert.deepEqual(sent, [{ chatId: 's@g.us', message: 'weekly summary' }]); // and the result is posted
+});
+
+test('deliver: a plain (non-community) group AI job still runs at level group', async () => {
+  const { deliver, handled } = setup({ active: ['g@g.us'], reply: 'ok' });
+  await deliver('g@g.us', 'list notes', { kind: 'ai', createdBy: 'boss' });
+  assert.equal(handled[0].level, 'group');
+  assert.equal(handled[0].community, undefined);
+});
+
+test('deliver: an AI job the dispatcher DECLINES (false = AI unavailable) stays pending', async () => {
+  // Regression: with the daily token cap spent (or the provider throttled/down), the instruction
+  // never ran - deliver must decline so the scheduler retries later, not consume the one-shot.
+  const { deliver, sent, handled } = setup({ active: ['g@g.us'], reply: false });
+  assert.equal(await deliver('g@g.us', 'summarize the notes', { kind: 'ai', createdBy: 'boss' }), false);
+  assert.equal(handled.length, 1); // the dispatcher was consulted...
+  assert.equal(sent.length, 0); // ...but nothing went out, and the job is NOT advanced
 });
 
 test('deliver: an AI job that produces nothing still advances (fires without sending)', async () => {

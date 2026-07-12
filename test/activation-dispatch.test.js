@@ -161,7 +161,9 @@ test('activation: deactivating a group unlinks it and wipes its own data', async
   });
   links.accept(links.propose('gA@g.us'), 'gB@g.us');
   store.scoped('group:gA@g.us').set('note', 'a-data');
-  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, requireActivation: true });
+  // A named id needs a verifiable membership list (a community id must never be guessed as a group).
+  const listGroups = async () => [{ id: 'gA@g.us', name: 'A' }, { id: 'gB@g.us', name: 'B' }];
+  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, requireActivation: true, listGroups });
   // the owner deactivates gA from a DM
   await handle({ text: 'jarvis groups deactivate gA@g.us', sender: 'boss', level: 'private', chatId: 'dm' });
   assert.equal(activation.isActive('gA@g.us'), false); // deactivated
@@ -232,10 +234,60 @@ test('activation: deactivating a group also clears its schedules and rules', asy
   rules.add({ chatId: 'gA@g.us', createdBy: 'boss', keyword: 'menu', reply: 'soup' });
   assert.equal(scheduler.list('gA@g.us').length, 1);
   assert.equal(rules.list('gA@g.us').length, 1);
-  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, requireActivation: true, scheduler });
+  const listGroups = async () => [{ id: 'gA@g.us', name: 'A' }];
+  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, requireActivation: true, scheduler, listGroups });
   await handle({ text: 'jarvis groups deactivate gA@g.us', sender: 'boss', level: 'private', chatId: 'dm' });
   assert.equal(activation.isActive('gA@g.us'), false);
   assert.equal(scheduler.list('gA@g.us').length, 0); // proactive jobs gone
   assert.equal(rules.list('gA@g.us').length, 0); // keyword auto-replies gone too
+  store.close();
+});
+
+test('activation: deactivating a sub-group that stays umbrella-active re-locks it to admins only', async () => {
+  // Regression: the teardown wipes the curated access lists of a chat the umbrella keeps LIVE -
+  // without the re-lock it silently flipped from admins-only to public behind a "Deactivated" reply.
+  const store = createStore({ path: ':memory:' });
+  const listGroups = async () => [
+    { id: 'c@g.us', name: 'Class', community: 'c@g.us', isCommunity: true },
+    { id: 's@g.us', name: 'Sub', community: 'c@g.us' },
+  ];
+  const handle = createDispatcher(createRegistry([ping, groups]), { owner: 'boss', store, requireActivation: true, listGroups });
+  createActivation(store).activate('c@g.us', 'boss'); // the umbrella is on...
+  await handle({ text: 'jarvis groups activate s@g.us', sender: 'boss', level: 'private', chatId: 'dm' }); // ...and S individually too
+  const out = toPlain(await handle({ text: 'jarvis groups deactivate s@g.us', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(out, /stays active via its community umbrella/i); // an honest reply, not a bare "Deactivated"
+  assert.match(out, /admins only/i);
+  assert.match(out, /community deactivate c@g\.us/); // points at the switch that actually silences it
+  // the gate is still open via the umbrella, but a non-admin is locked out again (not public)
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'stranger', level: 'group', chatId: 's@g.us', community: 'c@g.us' }), undefined);
+  assert.equal(toPlain(await handle({ text: 'jarvis ping', sender: 'adm', isAdmin: true, level: 'group', chatId: 's@g.us', community: 'c@g.us' })), 'pong');
+  store.close();
+});
+
+test('activation: teardown under `ai on all` leaves the chat explicitly opted OUT of chatbot mode', async () => {
+  // Regression: a bare delete of the per-chat key erased an explicit `ai off` opt-out, so a
+  // kicked-and-re-added chat came back with chatbot mode silently ON via the global default.
+  const store = createStore({ path: ':memory:' });
+  const aiGate = store.scoped('ai-enabled');
+  aiGate.set('*', true); // `jarvis ai on all`
+  aiGate.set('gA@g.us', false); // `jarvis ai off` in gA - an explicit opt-out
+  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, requireActivation: true });
+  handle.chatRemoved('gA@g.us');
+  assert.equal(aiGate.get('gA@g.us'), false); // the restrictive baseline survives the teardown
+  store.close();
+});
+
+test('activation: chatRemoved revokes the outstanding link codes the chat proposed', async () => {
+  // Regression: a code issued before the kick stayed redeemable (the proposer's community kept
+  // authorizing it), linking a torn-down chat into a live overlay with no fresh handshake.
+  const store = createStore({ path: ':memory:' });
+  const activation = createActivation(store);
+  activation.activate('c@g.us', 'boss'); // umbrella covers both sub-groups
+  let n = 0;
+  const links = createLinks(store, { isActivated: activation.isActiveVia, genCode: () => `C${++n}` });
+  const code = links.propose('s1@g.us', 'c@g.us'); // s1 shares a code...
+  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, requireActivation: true });
+  handle.chatRemoved('s1@g.us'); // ...then the bot is kicked from s1
+  assert.equal(links.accept(code, 's2@g.us', 'c@g.us').reason, 'bad-code'); // the code died with the chat
   store.close();
 });

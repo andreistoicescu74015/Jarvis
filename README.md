@@ -39,14 +39,14 @@ what *you* can run where you are; `jarvis man <command>` explains one in detail.
 
 **Owner**
 
-- `jarvis owner | owner claim | owner resign` - claim or resign ownership (a claim persists across restarts; `OWNER_JID` always wins and silently retires a claimed owner).
+- `jarvis owner | owner claim | owner resign` - claim or resign ownership (a claim persists across restarts and `reset all`; `OWNER_JID` always wins and silently retires a claimed owner).
 - `jarvis whoami [<@user|number>] | whoami forget <@user|number>` - show who you are, look a person up, or drop a stale identity mapping (re-learned from their next message).
 - `jarvis groups [activate|deactivate [<id>]]` - list and authorize the groups the bot runs in; a community id gets the umbrella (gate-only, nothing posted to the community).
 - `jarvis community [activate|deactivate [<id>]]` - show a community, or authorize all its groups at once.
 - `jarvis ai [on|off [all]]` - chatbot mode per chat, or everywhere with `all`; `jarvis ai` alone shows the state, tokens/requests used, and the provider's documented rate limits.
 - `jarvis alias add <name> <command...> | list | remove <name>` - define command shortcuts that expand and run with no AI.
 - `jarvis schedule ai in <2h>|at <date> <time>|every <1d> <instruction>` - schedule a natural-language instruction Jarvis runs at that time (through the same guards).
-- `jarvis reset [all]` - clear this chat's data, or wipe everything.
+- `jarvis reset [all]` - clear this chat's data, or wipe everything (the WhatsApp login and the ownership are kept).
 - `jarvis shutdown` / `jarvis restart` / `jarvis logout` - lifecycle (details under [Owner commands](#owner-commands-in-chat)).
 
 ### Natural language

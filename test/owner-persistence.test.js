@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from '../src/store/index.js';
-import { createOwnerResolver } from '../src/core/owner.js';
+import { createOwnerResolver, wipeKeepingClaim } from '../src/core/owner.js';
 import { createRegistry } from '../src/core/registry.js';
 import { createDispatcher } from '../src/core/dispatch.js';
 import owner from '../src/commands/owner.js';
@@ -70,5 +70,21 @@ test('owner persistence: dispatch - OWNER_JID takes over from a stale claim on t
   assert.equal(await h2({ text: 'jarvis ping', sender: 'boss', level: 'private', chatId: 'dm' }), 'pong');
   assert.equal(store.scoped('owner-meta').get('claimed'), undefined);
   assert.equal(await h2({ text: 'jarvis ping', sender: 'alice', level: 'private', chatId: 'dm' }), undefined); // just another stranger now
+  store.close();
+});
+
+test('owner persistence: a full wipe (reset all) clears the data but KEEPS the claim', () => {
+  // Regression: the owner runs `reset all` AS the owner - it must clear data, not un-own the bot
+  // (losing the claim would reopen the first-claimer window to any stranger after the restart).
+  const store = createStore({ path: ':memory:' });
+  createOwnerResolver({ meta: meta(store) }).claim('alice@s.whatsapp.net');
+  store.scoped('group:g@g.us').set('notes', ['data']); // some app data the wipe must clear
+  wipeKeepingClaim(store);
+  assert.equal(store.scoped('group:g@g.us').get('notes'), undefined); // wiped
+  assert.equal(meta(store).get('claimed'), 'alice@s.whatsapp.net'); // ownership survived
+  // "restart": a fresh resolver over the wiped store still knows the owner, and the dispatcher's
+  // lockPrivateOnce re-locks the DMs on construction (the flag itself was wiped with the rest)
+  assert.equal(createOwnerResolver({ meta: meta(store) }).current, 'alice@s.whatsapp.net');
+  assert.equal(meta(store).get('privateLocked'), undefined);
   store.close();
 });
