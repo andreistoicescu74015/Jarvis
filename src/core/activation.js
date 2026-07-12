@@ -16,6 +16,14 @@ export function createActivation(store, { now = () => Date.now() } = {}) {
     isActive: (chatId) => kv.has(chatId),
 
     /**
+     * Whether a chat is EFFECTIVELY active: its own activation entry, or a live community umbrella
+     * (`communityId` is the chat's parent community, when it has one). This is THE rule every gate
+     * shares - the dispatcher's inbound gate, proactive delivery, and link handshakes all call this
+     * one predicate instead of re-deriving it.
+     */
+    isActiveVia: (chatId, communityId) => kv.has(chatId) || (!!communityId && kv.has(communityId)),
+
+    /**
      * Activate a chat (idempotent), recording who activated it and when.
      * @returns {boolean} true if it was newly activated, false if already active.
      */

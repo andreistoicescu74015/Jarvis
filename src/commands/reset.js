@@ -3,8 +3,8 @@ import { b } from '../core/format.js';
 /**
  * Owner: reset Jarvis's memory. "reset" clears THIS context's data (its notes, schedules, and
  * keyword auto-replies; NOT its access lists) from wherever it is run; "reset all" wipes EVERY context and
- * restarts with a clean store, keeping the WhatsApp login (it is NOT a logout). Owner-only and
- * irreversible - run it deliberately.
+ * restarts with a clean store, keeping the WhatsApp login and the bot ownership (it is NOT a logout,
+ * and a claimed owner stays the owner). Owner-only and irreversible - run it deliberately.
  *
  * @type {import('../core/registry.js').Command}
  */
@@ -17,7 +17,8 @@ export default {
     'the shared notes), plus the schedules and keyword auto-replies of the chat you run it in; access lists are left alone (a full ' +
     'access reset is what deactivate -> reactivate does). "reset all" wipes EVERY context - all notes, ' +
     'schedules, links, access lists, activations - and restarts with a clean store, keeping the WhatsApp ' +
-    'login (it is NOT a logout). Owner-only and irreversible.',
+    'login AND the bot ownership (it is NOT a logout, and it does not un-own the bot: a claimed owner ' +
+    'stays the owner after the wipe). Owner-only and irreversible.',
   scope: { owner: true },
   confirm: true, // destructive - never auto-run from an AI translation; the user must type it
   params: [{ name: 'scope', enum: ['all'], desc: '"all" wipes every context and restarts clean; omit to reset just this chat' }],

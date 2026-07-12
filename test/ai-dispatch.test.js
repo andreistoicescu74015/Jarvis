@@ -447,3 +447,52 @@ test('ai dispatch: a provider 429 during translation is remembered for the owner
   assert.equal(noted.retryAfterSec, 60);
   store.close();
 });
+
+test('ai dispatch: a scheduled AI job gets FALSE (not silence) when the daily cap already blocks the model', async () => {
+  // Regression: false tells the proactive deliver path to DECLINE, so the scheduler keeps the job
+  // pending and retries later - a one-shot instruction must not be consumed while the AI is muted.
+  const store = createStore({ path: ':memory:' });
+  const d = new Date(); // the bucket's date is the SERVER-LOCAL day (matches ai-usage's dayStr)
+  const localDay = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  store.scoped('ai-usage').set('#today', { date: localDay, total: 999, calls: 1 });
+  const ai = fakeAi({ command: 'ping', args: {} });
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai, aiDailyCap: 100 });
+  const msg = { text: 'jarvis summarize things', sender: 'boss', level: 'group', chatId: 'g@g.us', addressed: true, scheduled: true };
+  assert.equal(await handle(msg), false); // the model was never consulted -> retry later
+  assert.equal(ai.calls.length, 0);
+  store.close();
+});
+
+test('ai dispatch: a scheduled AI job gets FALSE when the provider fails, undefined when it maps nothing', async () => {
+  const store = createStore({ path: ':memory:' });
+  const failing = { translate: async () => ({ commands: [], answer: null, failed: true }) }; // 429/5xx/timeout
+  const h1 = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai: failing });
+  const msg = { text: 'jarvis summarize things', sender: 'boss', level: 'group', chatId: 'g@g.us', addressed: true, scheduled: true };
+  assert.equal(await h1(msg), false); // unavailable -> decline
+  const empty = { translate: async () => ({ commands: [], answer: null }) }; // ran fine, mapped nothing
+  const h2 = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai: empty });
+  assert.equal(await h2(msg), undefined); // fired, nothing to post -> advance
+  store.close();
+});
+
+test('ai dispatch: throttled calls still count toward the daily request view', async () => {
+  // Regression: the requests/day line froze exactly while the provider 429ed, because only
+  // usage-carrying responses were counted. Attempts are counted before the call now.
+  const store = createStore({ path: ':memory:' });
+  const ai = { translate: async () => ({ commands: [], answer: null, limit: { type: 'UserByModelByDay', retryAfterSec: 60 }, failed: true }) };
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai });
+  await handle({ text: 'jarvis do something', sender: 'boss', level: 'group', chatId: 'g@g.us' });
+  await handle({ text: 'jarvis do something else', sender: 'boss', level: 'group', chatId: 'g@g.us' });
+  assert.equal(store.scoped('ai-usage').get('#today').calls, 2); // both throttled attempts counted
+  store.close();
+});
+
+test('ai dispatch: a legacy shared-DM chatbot opt-in (the old "private" key) is migrated away', async () => {
+  // The gate is keyed per chat now; the old row can never be read again - it is dropped (with a log)
+  // instead of lingering as a zombie that silently means nothing.
+  const store = createStore({ path: ':memory:' });
+  store.scoped('ai-enabled').set('private', true); // what a pre-upgrade `jarvis ai on` in a DM wrote
+  createDispatcher(createRegistry([ping]), { owner: 'boss', store });
+  assert.equal(store.scoped('ai-enabled').get('private'), undefined); // cleaned up at construction
+  store.close();
+});

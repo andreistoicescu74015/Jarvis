@@ -69,11 +69,21 @@ export function createAiUsage(store, { now = () => Date.now() } = {}) {
       store.transaction(() => {
         add(GLOBAL, u);
         if (context && context !== GLOBAL) add(context, u);
-        // Bump the daily bucket: tokens (the budget `allows` gates) AND the call count (so the owner
-        // can compare today's requests against the provider's documented requests/day ceiling).
+        // Bump the daily bucket's TOKENS (the budget `allows` gates). The daily request count is
+        // `noteCall`'s job - counted per ATTEMPT, before the response - so 429s/timeouts/failures
+        // (real provider requests that carry no usage payload) are never missing from it.
         const t = todayBucket();
-        usage.set(TODAY, { date: dayStr(now()), total: t.total + total, calls: t.calls + 1 });
+        usage.set(TODAY, { date: dayStr(now()), total: t.total + total, calls: t.calls });
       });
+    },
+    /**
+     * Count one model REQUEST against today's requests/day view. Called at the chokepoint right
+     * before the provider call, so throttled (429) and failed requests count too - the display
+     * exists precisely to explain the days the provider starts rejecting.
+     */
+    noteCall() {
+      const t = todayBucket();
+      usage.set(TODAY, { date: dayStr(now()), total: t.total, calls: t.calls + 1 });
     },
     /**
      * Remember a provider throttle (a 429): what tripped (`type`, e.g. `UserByModelByDay`) and the

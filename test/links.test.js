@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from '../src/store/index.js';
 import { createLinks } from '../src/core/links.js';
+import { createActivation } from '../src/core/activation.js';
 
 /** A links engine over a fresh store; every group is active unless listed in `inactive`. */
 function setup(inactive = []) {
@@ -40,9 +41,11 @@ test('links: propose sweeps codes past their TTL (no unbounded code growth)', ()
 
 test('links: accept honors the community umbrella on both sides (no own activation entries)', () => {
   const store = createStore({ path: ':memory:' });
-  const active = new Set(['C']); // only the COMMUNITY id is activated
+  const activation = createActivation(store);
+  activation.activate('C', 'boss'); // only the COMMUNITY id is activated
   let n = 0;
-  const links = createLinks(store, { isActivated: (id) => active.has(id), genCode: () => `C${++n}` });
+  // The production wiring: the ONE shared rule (activation.isActiveVia) is what links consults.
+  const links = createLinks(store, { isActivated: activation.isActiveVia, genCode: () => `C${++n}` });
   const code = links.propose('S1', 'C'); // the proposer's community rides on the code
   assert.equal(links.accept(code, 'S2', 'C').ok, true); // the redeemer passes its own community
   assert.deepEqual(new Set(links.chats('S1')), new Set(['S1', 'S2']));
@@ -51,12 +54,37 @@ test('links: accept honors the community umbrella on both sides (no own activati
 
 test('links: a community deactivated between propose and accept no longer authorizes (checked live)', () => {
   const store = createStore({ path: ':memory:' });
-  const active = new Set(['C']);
+  const activation = createActivation(store);
+  activation.activate('C', 'boss');
   let n = 0;
-  const links = createLinks(store, { isActivated: (id) => active.has(id), genCode: () => `C${++n}` });
+  const links = createLinks(store, { isActivated: activation.isActiveVia, genCode: () => `C${++n}` });
   const code = links.propose('S1', 'C');
-  active.delete('C'); // umbrella turned off before redemption
+  activation.deactivate('C'); // umbrella turned off before redemption
   assert.equal(links.accept(code, 'S2', 'C').reason, 'inactive');
+  store.close();
+});
+
+test('links: revoke drops only the outstanding codes one chat proposed', () => {
+  const store = createStore({ path: ':memory:' });
+  let n = 0;
+  const links = createLinks(store, { genCode: () => `C${++n}` });
+  links.propose('A'); // C1
+  links.propose('A'); // C2
+  const keep = links.propose('B'); // C3 - another chat's code must survive
+  assert.equal(links.revoke('A'), 2);
+  assert.deepEqual(store.scoped('link-codes').list().map((e) => e.key), ['C3']);
+  assert.equal(links.accept(keep, 'D').ok, true); // B's code still redeems
+  store.close();
+});
+
+test('links: propose fails loudly when the generator cannot produce a fresh code', () => {
+  // The collision guard promises an outstanding code is NEVER silently replaced; on retry
+  // exhaustion (only a degenerate injected generator can get there) it must throw, not clobber.
+  const store = createStore({ path: ':memory:' });
+  const links = createLinks(store, { genCode: () => 'DUP' });
+  assert.equal(links.propose('A'), 'DUP');
+  assert.throws(() => links.propose('B'), /unique link code/);
+  assert.equal(links.accept('DUP', 'C').ok, true); // the original code was left untouched
   store.close();
 });
 

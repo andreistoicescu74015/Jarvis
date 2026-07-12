@@ -41,7 +41,7 @@ const AI_MAX_CHAIN = 8;
  * @property {(id: string) => boolean} isSelf              True if the id is the bot itself (its trigger name or own id forms).
  * @property {import('../store/index.js').ScopedStore} [store] Per-conversation scoped KV (when configured).
  * @property {ReturnType<typeof createAccessPolicy>} [access] Owner-managed access lists (when a store is configured).
- * @property {{ isActive: (id: string) => boolean, activate: (id: string, by?: string) => boolean, deactivate: (id: string) => boolean, activateCommunity: (id: string, by?: string) => boolean, deactivateCommunity: (id: string) => boolean, list: () => string[] }} [activation] Per-group activation registry, plus the community umbrella (ADR-0008; when a store is configured).
+ * @property {{ isActive: (id: string) => boolean, isActiveVia: (id: string, communityId?: string) => boolean, activate: (id: string, by?: string) => boolean, deactivate: (id: string, parent?: string) => boolean, activateCommunity: (id: string, by?: string) => boolean, deactivateCommunity: (id: string) => boolean, list: () => string[] }} [activation] Per-group activation registry, plus the community umbrella (ADR-0008; when a store is configured).
  * @property {{ propose: () => string, accept: (code: string) => object, unlink: () => object }} [links] Context-link (overlay) handshake bound to this chat (when a store is configured).
  * @property {import('./log.js').Logger} log               Structured logger (never posts to chat).
  * @property {{ shutdown?: () => void, restart?: () => void, logout?: () => void }} [lifecycle] Process lifecycle controls (owner commands; injected per platform).
@@ -60,9 +60,11 @@ const AI_MAX_CHAIN = 8;
  *
  * @param {import('./registry.js').Registry} registry
  * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, send?: (target: string, text: string) => unknown, community?: { info: (id?: string) => Promise<object | undefined>, groups: (id?: string) => Promise<object[]>, all: () => Promise<object[]> }, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object }, ai?: { translate: (input: { text: string, tools: object[] }) => Promise<Array<{ command: string, args: object }> | null> }, requireOwner?: boolean, requireActivation?: boolean }} [opts]
- * @returns {((msg: import('./app.js').InboundMessage) => Promise<string | undefined>) & { chatRemoved: (chatId: string) => void }}
+ * @returns {((msg: import('./app.js').InboundMessage) => Promise<string | false | undefined>) & { chatRemoved: (chatId: string) => void }}
  *   The message handler, plus `chatRemoved(chatId)` - the platform's removal hook (the bot was kicked
- *   from a chat): deactivate it and run the same full teardown `groups deactivate` performs.
+ *   from a chat): deactivate it and run the same full teardown `groups deactivate` performs. For a
+ *   SCHEDULED message the handler may resolve `false`: the AI layer was unavailable (daily cap,
+ *   provider throttle/outage), so the caller should keep the job pending and retry later.
  */
 export function createDispatcher(registry, { prefix = 'jarvis', owner = '', store, log = nullLogger, match, lifecycle, resolveUser, forgetIdentity, listGroups, send, community, scheduler, ai, aiDailyCap = 0, aiProvider, requireOwner = false, requireActivation = false } = {}) {
   // The owner-meta KV persists the claimed-owner slot (and the one-time private lockdown flag), so
@@ -72,7 +74,8 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
   const activation = store ? createActivation(store) : null;
   const links = store
     ? createLinks(store, {
-        isActivated: (id) => activation.isActive(id), // a group must be active to link
+        // A group must be active to link - directly or via its community umbrella; the ONE shared rule.
+        isActivated: (id, communityId) => activation.isActiveVia(id, communityId),
         clearNamespace: (ns) => store.clearNamespace(ns), // drop a dissolved overlay's shared data
       })
     : null;
@@ -96,6 +99,13 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     if (typeof own === 'boolean') return own; // an explicit per-chat setting wins
     return !!aiGateStore?.get('*'); // else the global default (`ai on all`)
   };
+  // One-time migration: the gate used to key every DM under the shared 'private' access context;
+  // it is per-chat now, so a legacy row can never be read again. Drop it and say so - a silently
+  // dead opt-in would just look like chatbot mode randomly turning itself off after an upgrade.
+  if (aiGateStore?.get('private') !== undefined) {
+    aiGateStore.delete('private');
+    log.warn('ai: the DM chatbot opt-in is per-chat now - re-enable it with `ai on` in the DMs you want');
+  }
 
   // First-owner lockdown: the moment an owner is established (OWNER_JID at startup, or `owner claim`),
   // lock Jarvis's DMs to them by enabling the private whitelist - a stranger can no longer DM the bot.
@@ -136,8 +146,17 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
   // accumulates goes with it.
   function teardownChat(id) {
     if (access) access.clearContext(id); // tear down the chat's access lists with it
-    aiGateStore?.delete(id); // and its AI-chatbot opt-in (a teardown is a full reset)
-    if (links) links.unlink(id); // leave any link overlay (revert, or dissolve it if this splits the rest)
+    if (aiGateStore) {
+      // Reset the chatbot opt-in to the RESTRICTIVE baseline, like the access lists: under a global
+      // `ai on all`, a bare delete would erase an explicit `ai off` opt-out and the chat would come
+      // back with chatbot mode silently ON (token cost included) - so it starts explicitly off.
+      if (aiGateStore.get('*')) aiGateStore.set(id, false);
+      else aiGateStore.delete(id);
+    }
+    if (links) {
+      links.revoke(id); // outstanding link codes die with the chat - a torn-down chat must not stay linkable
+      links.unlink(id); // leave any link overlay (revert, or dissolve it if this splits the rest)
+    }
     scheduler?.clearChat(id); // stop the chat's proactive output (scheduled jobs), so a teardown truly silences it
     rules?.clearChat(id); // ...and its keyword auto-replies (chat data, gone with the chat)
     if (store) {
@@ -145,10 +164,18 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       store.clearNamespace(`community:${id}`);
     }
   }
-  function deactivateGroup(id) {
+  function deactivateGroup(id, parentCommunity) {
     if (!activation) return false;
     const was = activation.deactivate(id);
-    if (was) teardownChat(id); // idempotent: deactivating an already-inactive group changes nothing
+    if (was) {
+      teardownChat(id); // idempotent: deactivating an already-inactive group changes nothing
+      // Still answering via a live community umbrella? The teardown just wiped the curated access
+      // lists of a chat that STAYS live, which would flip it from admins-only to public behind a
+      // "deactivated" reply - re-lock it to the admins-only baseline until the community goes off.
+      if (access && parentCommunity && parentCommunity !== id && activation.isActive(parentCommunity)) {
+        access.enable('whitelist', '*', id);
+      }
+    }
     return was;
   }
 
@@ -165,8 +192,12 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     // when aiDailyCap <= 0. One chokepoint, so it bounds translation, chatbot answers, and timer jobs alike.
     if (aiUsage && !aiUsage.allows(aiDailyCap)) {
       log.info('ai: daily token cap reached - skipping the model call', { context, cap: aiDailyCap });
-      return { chain: [], answer: null };
+      return { chain: [], answer: null, failed: true }; // the model was never consulted
     }
+    // Count the ATTEMPT before the call: throttled (429) and failed requests are real provider
+    // requests too, and the requests/day view in `jarvis ai` exists precisely for the days the
+    // provider starts rejecting - freezing the counter right then would be the misleading display.
+    if (aiUsage) aiUsage.noteCall();
     let result;
     try {
       // The translator is best-effort and must never crash the deterministic bot (ADR-0003): the
@@ -174,7 +205,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       result = await ai.translate({ text: request, tools, chat });
     } catch (err) {
       log.error('ai: translation threw', { error: err?.message ?? String(err) });
-      return { chain: [], answer: null };
+      return { chain: [], answer: null, failed: true };
     }
     if (aiUsage && result?.usage) aiUsage.record(context, result.usage); // account the tokens this call cost
     if (aiUsage && result?.limit) aiUsage.noteLimit(result.limit); // remember a provider throttle (shown by `jarvis ai`)
@@ -193,9 +224,11 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     }
     if (chain.length > AI_MAX_CHAIN) {
       log.info('ai: truncating an over-long command chain', { proposed: chain.length, cap: AI_MAX_CHAIN });
-      return { chain: chain.slice(0, AI_MAX_CHAIN), answer: null };
+      return { chain: chain.slice(0, AI_MAX_CHAIN), answer: null, failed: false };
     }
-    return { chain, answer: result?.answer ?? null };
+    // `failed` = the model was never really consulted (cap, throttle, network) - as opposed to a
+    // successful call that mapped nothing. Scheduled AI jobs use it to retry instead of being consumed.
+    return { chain, answer: result?.answer ?? null, failed: !!result?.failed };
   }
 
   // A KNOWN command that could not interpret its arguments (a `misuse` reply) - ask the model what the
@@ -250,8 +283,9 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     // suppressed (no reply), like the gates around it.
     // A group/community is active if its own id is activated OR its parent community is (the community
     // umbrella: activating a community opens the silence gate for every group in it, including ones
-    // added later). `communityId` is the chat's community - itself for an announcement group.
-    const activeHere = activation && (activation.isActive(chatId) || (communityId && activation.isActive(communityId)));
+    // added later). `communityId` is the chat's community - itself for an announcement group. The
+    // rule is activation.isActiveVia - one predicate shared with proactive delivery and links.
+    const activeHere = activation && activation.isActiveVia(chatId, communityId);
     if (
       requireActivation &&
       activation &&
@@ -381,8 +415,11 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
         activation: activation
           ? {
               isActive: (id) => activation.isActive(id),
+              isActiveVia: (id, community) => activation.isActiveVia(id, community),
               activate: (id, by = sender) => activateGroup(id, by),
-              deactivate: (id) => deactivateGroup(id),
+              // `parent` (the target's community, when the caller knows it) lets the deactivation
+              // re-lock a chat that stays live under its community umbrella - see deactivateGroup.
+              deactivate: (id, parent) => deactivateGroup(id, parent),
               // Community umbrella (silence gate only - no access reset, no announce): activating a
               // community id authorizes every group under it. Raw on purpose, unlike activate() above.
               activateCommunity: (id, by = sender) => activation.activate(id, by),
@@ -398,12 +435,16 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
               isOn: () => aiEnabledIn(chatId),
               on: () => aiGateStore.set(chatId, true),
               off: () => (aiGateStore.get('*') ? aiGateStore.set(chatId, false) : aiGateStore.delete(chatId)),
-              onAll: () => {
-                for (const { key } of aiGateStore.list()) aiGateStore.delete(key);
-                aiGateStore.set('*', true);
-              },
+              // One transactional namespace clear (the store's own primitive, same as teardownChat
+              // uses) - not a delete-per-row loop that a crash could leave half-applied, with stale
+              // per-chat overrides silently winning over the new global state.
+              onAll: () =>
+                store.transaction(() => {
+                  store.clearNamespace('ai-enabled');
+                  aiGateStore.set('*', true);
+                }),
               offAll: () => {
-                for (const { key } of aiGateStore.list()) aiGateStore.delete(key);
+                store.clearNamespace('ai-enabled');
               },
               state: () => ({ here: aiEnabledIn(chatId), global: !!aiGateStore.get('*'), own: aiGateStore.get(chatId) }),
               available: !!ai,
@@ -560,7 +601,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       // `ai on` => also answer general questions here. A SCHEDULED job forces it on (the owner
       // authorized this output), so a non-command instruction still gets a composed answer.
       const chatOn = aiEnabledIn(chatId) || !!msg.scheduled;
-      const { chain, answer } = await aiResolve(request, { level, isAdmin, isOwner }, chatOn, accessContext);
+      const { chain, answer, failed } = await aiResolve(request, { level, isAdmin, isOwner }, chatOn, accessContext);
       if (chain.length) {
         log.info('ai: translated a request', { to: chain.map((s) => s.line), sender });
         const understood = `${b('Understood:')} ${chain.map((s) => code(`${prefix} ${s.line}`)).join(' ; ')}`;
@@ -577,7 +618,11 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
         return [understood, ...outs].join('\n');
       }
       if (chatOn && answer) return esc(answer); // chatbot mode (or a scheduled job): a composed reply
-      if (msg.scheduled) return undefined; // a timer posts nothing rather than the friendly nudge
+      // A timer posts nothing rather than the friendly nudge. `false` (vs undefined) tells the
+      // proactive deliver path the AI layer was UNAVAILABLE (cap spent, provider throttled/down):
+      // the instruction never ran, so the job should stay pending and retry - a one-shot must not
+      // be consumed for nothing. Undefined = the model ran and genuinely produced nothing to post.
+      if (msg.scheduled) return failed ? false : undefined;
       return `I didn't catch a command in that. Try ${code(`${prefix} help`)} to see what I can do.`;
     }
     return `Unknown command ${code(esc(command))}. Try ${code(`${prefix} help`)}.`;

@@ -20,10 +20,13 @@ export default {
     'the current group; "groups activate <id>" one named by id (copy it from the list); ' +
     '"groups deactivate [<id>]" turns it back off. A COMMUNITY id gets the umbrella instead: ' +
     'gate-only, confirmed here, with nothing posted to the community (same as "community ' +
-    'activate"). Activation survives restarts.',
+    'activate"). Deactivating a sub-group that stays on via its community umbrella re-locks it ' +
+    'to admins only. Naming an id needs the group list to be reachable (so a community id can ' +
+    'never be mistaken for a plain group). Activation survives restarts.',
   scope: { owner: true },
-  // `deactivate` is a full reset of the group (its access lists, AI opt-in, links, schedules, and
-  // data are wiped) - destructive, so the AI translator never auto-runs it from a guess (owner must type it).
+  // On a plain group, `deactivate` is a full reset (its access lists, AI opt-in, links, schedules, and
+  // data are wiped); on a community id it is the gate-only umbrella toggle. Either way it silences
+  // chats - destructive, so the AI translator never auto-runs it from a guess (owner must type it).
   confirm: (args) => (args[0] ?? '').toLowerCase() === 'deactivate',
   params: [
     { name: 'action', enum: ['activate', 'deactivate'], desc: 'turn the bot on/off in a group, or omit to list groups' },
@@ -44,11 +47,21 @@ async function manage(ctx, sub) {
   if (!id) {
     return `Run this in the group, or name it: ${code(`jarvis groups ${sub} <id>`)} (ids from ${code('jarvis groups')}).`;
   }
-  // When the membership list is available, validate a named id and resolve a display name.
   const known = ctx.listGroups ? await ctx.listGroups() : [];
   const match = known.find((g) => g.id === id);
-  if (arg && known.length && !match) return `No such group: ${code(esc(id))} (see ${code('jarvis groups')}).`;
+  // A NAMED id must be verifiable against the membership list. With the list unavailable (a fetch
+  // error, a reconnect window - the adapter reports []), guessing is dangerous: a community id
+  // would silently get plain-group semantics - an activation announcement plus an access reset
+  // pushed INTO the community on activate, or the full destructive teardown on deactivate. Refuse
+  // instead; the in-chat form (no id) never needs the list.
+  if (arg && !match) {
+    return known.length
+      ? `No such group: ${code(esc(id))} (see ${code('jarvis groups')}).`
+      : `I can't fetch the group list right now, so I can't verify that id - try again in a moment, or run ${code(`jarvis groups ${sub}`)} inside the group itself.`;
+  }
   const name = match ? b(esc(match.name)) : code(esc(id));
+  // The target's parent community, when known: umbrella-aware replies + the deactivation re-lock.
+  const parent = arg ? match?.community : ctx.communityId;
 
   // A COMMUNITY id gets community semantics: the gate-only umbrella, confirmed HERE - never a bulk
   // announcement or an access reset pushed into the announcement group (no unsolicited sends;
@@ -71,10 +84,17 @@ async function manage(ctx, sub) {
       ? `Activated Jarvis in ${name}.`
       : `${name} is already active.`;
   }
-  if (await ctx.activation.deactivate(id)) return `Deactivated Jarvis in ${name}.`;
+  if (await ctx.activation.deactivate(id, parent)) {
+    // Deactivated its own entry - but a live community umbrella keeps the bot answering there. Say
+    // so (a bare "Deactivated" would be a lie), and note the dispatcher re-locked it to admins only
+    // (its curated lists were reset by the teardown; a live chat must not silently open to everyone).
+    if (parent && parent !== id && ctx.activation.isActive(parent)) {
+      return `Removed ${name}'s own activation - but it stays ${b('active via its community umbrella')} (re-locked to admins only). ${code(`jarvis community deactivate ${parent}`)} turns the whole community off.`;
+    }
+    return `Deactivated Jarvis in ${name}.`;
+  }
   // Not individually active - but running under a community umbrella? Say so instead of a misleading
   // "was not active": the switch to flip is at the community level.
-  const parent = arg ? match?.community : ctx.communityId;
   if (parent && parent !== id && ctx.activation.isActive(parent)) {
     return `${name} has no individual activation - it is active via its community umbrella. ${code(`jarvis community deactivate ${parent}`)} turns the whole community off.`;
   }

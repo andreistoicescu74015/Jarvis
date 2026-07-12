@@ -17,6 +17,7 @@ import { commands } from './commands/index.js';
 import { num } from './core/env.js';
 import { createAiClient, buildChatSystem } from './core/ai.js';
 import { providerLimits, LIMITS_DOC_DATE } from './core/ai-limits.js';
+import { wipeKeepingClaim } from './core/owner.js';
 import { loadPersona } from './core/persona.js';
 
 /**
@@ -139,9 +140,23 @@ const lifecycle = {
     setTimeout(async () => { await adapter.logout(); quit(1); }, 1500);
   },
   wipe: () => {
-    log.warn('owner requested a full data wipe (auth kept)');
-    setTimeout(() => { store.clearAll(); quit(1); }, 1500); // clear the app db (the auth db is untouched), then restart
+    log.warn('owner requested a full data wipe (auth kept, ownership kept)');
+    // Clear the app db (the auth db is untouched), then restart. The persisted owner claim survives
+    // the wipe: the owner runs `reset all` AS the owner - it clears data, it must not un-own the bot
+    // (that would reopen the first-claimer window to any stranger after the restart).
+    setTimeout(() => { wipeKeepingClaim(store); quit(1); }, 1500);
   },
+};
+
+// One typed-token -> JID canonicalization for resolveUser AND forgetIdentity below: an @mention jid
+// passes through; a typed number becomes a phone JID; anything else yields '' (each caller keeps its
+// own fallback). One helper, so the lookup and the repair accept exactly the same token forms.
+const asJid = (token) => {
+  const t = String(token ?? '').trim();
+  if (!t) return '';
+  if (t.includes('@')) return t;
+  const digits = t.replace(/[^0-9]/g, '');
+  return digits ? `${digits}@s.whatsapp.net` : '';
 };
 
 // match is LID-aware so an owner set by phone number matches a LID sender. Captured (not inlined) so the
@@ -171,8 +186,10 @@ const handle = createDispatcher(registry, {
     // the API exposes no remaining-quota headers), so `jarvis ai` can show the provider's ceilings
     // next to Jarvis's own spend. Unknown combos (custom endpoints) just omit the display.
     aiProvider: (() => {
-      const tier = (process.env.JARVIS_AI_MODEL_TIER ?? 'low').toLowerCase();
-      const plan = (process.env.JARVIS_AI_PLAN ?? 'free').toLowerCase();
+      // Blank-tolerant on purpose (a blanked `JARVIS_AI_PLAN=` line means "the default", like the
+      // project's own num() treats ''): `??` alone would keep '' and silently drop the display.
+      const tier = ((process.env.JARVIS_AI_MODEL_TIER ?? '').trim() || 'low').toLowerCase();
+      const plan = ((process.env.JARVIS_AI_PLAN ?? '').trim() || 'free').toLowerCase();
       const limits = providerLimits(tier, plan);
       return limits ? { tier, plan, ...limits, docDate: LIMITS_DOC_DATE } : undefined;
     })(),
@@ -180,20 +197,15 @@ const handle = createDispatcher(registry, {
     // is resolved toward its phone form; a bare number becomes a phone JID. Matching
     // then bridges LID <-> phone, so a person named one way matches a sender on the other.
     resolveUser: (token) => {
-      const t = String(token ?? '').trim();
-      if (!t) return t;
-      if (t.includes('@')) return identity.resolve(t);
-      const digits = t.replace(/[^0-9]/g, '');
-      return digits ? identity.resolve(`${digits}@s.whatsapp.net`) : t;
+      const j = asJid(token);
+      return j ? identity.resolve(j) : String(token ?? '').trim();
     },
-    // Identity repair for `whoami forget`: the same token forms resolveUser accepts (an @mention jid,
-    // or a typed number), dropped from the learned LID<->PN map so the next message re-learns it.
+    // Identity repair for `whoami forget`: the SAME token forms as resolveUser (one shared asJid, so
+    // the lookup and the repair can never drift apart), dropped from the learned LID<->PN map so the
+    // next message re-learns it.
     forgetIdentity: (token) => {
-      const t = String(token ?? '').trim();
-      if (!t) return false;
-      if (t.includes('@')) return identity.forget(t);
-      const digits = t.replace(/[^0-9]/g, '');
-      return digits ? identity.forget(`${digits}@s.whatsapp.net`) : false;
+      const j = asJid(token);
+      return j ? identity.forget(j) : false;
     },
   });
 const app = createApp(adapter, { handle });
@@ -207,7 +219,7 @@ const app = createApp(adapter, { handle });
 const deliver = createDeliver({
   send: (chatId, message) => adapter.send(chatId, message),
   communityOf: (chatId) => adapter.communityOf(chatId),
-  isActive: (id) => activation.isActive(id),
+  isActiveVia: (chatId, communityId) => activation.isActiveVia(chatId, communityId),
   handle,
   requireActivation,
   log,

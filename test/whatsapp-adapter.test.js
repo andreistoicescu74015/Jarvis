@@ -576,3 +576,23 @@ test('adapter: a privacy check failure only warns - the connect flow is not dist
   assert.match(warns[0], /read-receipts privacy/i);
   assert.ok(s.presence.some((p) => p.state === 'available')); // ...and the connect flow completed
 });
+
+test('adapter: a stale removal event is ignored when the bot is still a member (live check)', async () => {
+  // Regression: a queued 'remove' replayed after a re-add must not trigger the destructive
+  // teardown - the handler verifies live membership before signalling the core.
+  const makeSocket = fakeSocketFactory();
+  const removed = [];
+  const a = createWhatsAppAdapter(opts({ makeSocket, onRemoved: (id) => removed.push(id) }));
+  a.start({ onMessage: async () => {} });
+  const sock = makeSocket.sockets[0];
+  // The live metadata still lists the bot: the removal notification is stale.
+  sock.groupMetadata = async () => ({ participants: [{ id: '1234@s.whatsapp.net' }] });
+  sock.ev.emit('group-participants.update', { id: 'G@g.us', action: 'remove', participants: ['1234@s.whatsapp.net'] });
+  await tick();
+  assert.deepEqual(removed, []); // ignored - the bot is demonstrably still in the group
+  // With the bot really gone (metadata unreadable, the usual case), the removal proceeds.
+  sock.groupMetadata = async () => { throw new Error('forbidden'); };
+  sock.ev.emit('group-participants.update', { id: 'G@g.us', action: 'remove', participants: ['1234@s.whatsapp.net'] });
+  await tick();
+  assert.deepEqual(removed, ['G@g.us']);
+});

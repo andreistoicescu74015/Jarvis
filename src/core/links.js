@@ -13,8 +13,9 @@ import { randomInt } from 'node:crypto';
  * overlay dissolves and every member reverts to its own data (the shared data is discarded). Because
  * the overlay never holds a group's own data (it only covers it), no merge or copy-out is ever needed.
  *
- * Pure over the KV store (ADR-0002). `isActivated` (both groups must be active to link), the clock,
- * the code generator, and `clearNamespace` (to drop a dissolved overlay's data) are injected.
+ * Pure over the KV store (ADR-0002). `isActivated(id, communityId?)` (both groups must be active to
+ * link - directly or via a community umbrella; the dispatcher injects activation.isActiveVia), the
+ * clock, the code generator, and `clearNamespace` (to drop a dissolved overlay's data) are injected.
  *
  * @param {import('../store/index.js').Store} store
  */
@@ -97,9 +98,11 @@ export function createLinks(store, {
       }
       // Never hand out a code that is still outstanding: a collision would silently replace the
       // earlier code, stranding the group that shared it. Bounded retry - with crypto codes a repeat
-      // is astronomically unlikely; the bound only guards a degenerate injected generator.
+      // is astronomically unlikely; the bound only guards a degenerate injected generator. On
+      // exhaustion FAIL LOUDLY instead of clobbering the outstanding code (the promise above holds).
       let code = makeCode();
       for (let i = 0; i < 8 && codes.get(code) !== undefined; i++) code = makeCode();
+      if (codes.get(code) !== undefined) throw new Error('links: could not generate a unique link code');
       codes.set(code, { from, ...(fromCommunity ? { fromCommunity } : {}), at: now() });
       return code;
     });
@@ -127,10 +130,10 @@ export function createLinks(store, {
       codes.delete(c); // one-time: a valid code is spent by this attempt, whatever the outcome
       const from = rec.from;
       if (from === by) return { ok: false, reason: 'same-chat' };
-      // Active = an own activation entry OR a live community umbrella (checked at redemption time,
-      // so a community deactivated after the code was issued no longer authorizes its groups).
-      const activeVia = (id, community) => isActivated(id) || (community && isActivated(community));
-      if (!activeVia(by, byCommunity) || !activeVia(from, rec.fromCommunity)) return { ok: false, reason: 'inactive' };
+      // Both sides must be active, checked at redemption time (so a community deactivated after the
+      // code was issued no longer authorizes its groups). The rule itself lives in ONE place -
+      // activation.isActiveVia, injected as `isActivated(id, community)` - not re-derived here.
+      if (!isActivated(by, byCommunity) || !isActivated(from, rec.fromCommunity)) return { ok: false, reason: 'inactive' };
       const oBy = overlayOf(by);
       const oFrom = overlayOf(from);
       if (oBy && oFrom && oBy === oFrom) {
@@ -143,6 +146,25 @@ export function createLinks(store, {
       if (!oFrom) member.set(from, overlay);
       edges.set(edgeId(by, from), { a: by, b: from });
       return { ok: true };
+    });
+  }
+
+  /**
+   * Revoke every outstanding (unredeemed) code this chat proposed. A torn-down chat must not stay
+   * linkable: without this, a code issued before a kick/deactivation would still be redeemable
+   * (the proposer's community can keep authorizing it) and would link a dead chat into a live
+   * overlay. Returns how many codes were dropped.
+   */
+  function revoke(from) {
+    return store.transaction(() => {
+      let dropped = 0;
+      for (const { key, value } of codes.list()) {
+        if (value.from === from) {
+          codes.delete(key);
+          dropped += 1;
+        }
+      }
+      return dropped;
     });
   }
 
@@ -180,5 +202,5 @@ export function createLinks(store, {
     clearNamespace(overlayNs(overlay));
   }
 
-  return { nsFor, chats, clusters, propose, accept, unlink };
+  return { nsFor, chats, clusters, propose, accept, unlink, revoke };
 }

@@ -189,3 +189,25 @@ test('groups: groups by community and shows link clusters', async () => {
   assert.match(out, /Alpha \+ Beta|Beta \+ Alpha/); // gA and gB shown as one cluster
   store.close();
 });
+
+test('groups: a named id is refused when the group list is unavailable (never guessed)', async () => {
+  // Regression: with the membership list unreadable (a fetch error reports []), a named COMMUNITY id
+  // silently degraded to plain-group semantics - an announcement + access reset pushed INTO the
+  // community on activate, or the full destructive teardown on deactivate. Refuse instead.
+  const store = createStore({ path: ':memory:' });
+  createActivation(store).activate('c@g.us', 'boss'); // an active community the owner might target
+  const sent = [];
+  const handle = createDispatcher(createRegistry([groups]), {
+    owner: 'boss',
+    store,
+    listGroups: async () => [], // the adapter's error value (socket down, fetch failed)
+    send: (target, text) => sent.push({ target, text }),
+  });
+  const off = toPlain(await handle({ text: 'jarvis groups deactivate c@g.us', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(off, /can't fetch the group list right now/i);
+  assert.equal(createActivation(store).isActive('c@g.us'), true); // nothing was torn down
+  const on = toPlain(await handle({ text: 'jarvis groups activate x@g.us', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(on, /can't fetch the group list right now/i);
+  assert.equal(sent.length, 0); // and nothing was announced anywhere
+  store.close();
+});

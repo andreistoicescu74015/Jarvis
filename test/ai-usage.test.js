@@ -83,13 +83,28 @@ test('ai-usage: the daily bucket counts requests too, and both reset on day roll
   const store = createStore({ path: ':memory:' });
   let t = new Date('2026-07-04T10:00:00').getTime();
   const acct = createAiUsage(store, { now: () => t });
+  // Requests are counted per ATTEMPT (noteCall, before the provider call); record() adds the tokens.
+  acct.noteCall();
   acct.record('g@g.us', usage(30, 12));
+  acct.noteCall();
   acct.record('g@g.us', usage(10, 5));
   assert.equal(acct.today(), 57);
   assert.equal(acct.todayCalls(), 2); // vs the provider's documented requests/day ceiling
   t = new Date('2026-07-05T00:01:00').getTime(); // the local day rolled over
   assert.equal(acct.today(), 0);
   assert.equal(acct.todayCalls(), 0);
+  store.close();
+});
+
+test('ai-usage: throttled/failed attempts count as requests even with no usage payload', () => {
+  // The requests/day view exists for the days the provider starts rejecting: a 429/timeout carries
+  // no usage, but it consumed a request - the counter must not freeze exactly then.
+  const store = createStore({ path: ':memory:' });
+  const acct = createAiUsage(store, { now: () => new Date('2026-07-04T10:00:00').getTime() });
+  acct.noteCall(); // a call that came back 429 - record() never runs
+  acct.noteCall(); // and another
+  assert.equal(acct.todayCalls(), 2);
+  assert.equal(acct.today(), 0); // no tokens were spent
   store.close();
 });
 
