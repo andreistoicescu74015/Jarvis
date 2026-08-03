@@ -14,7 +14,7 @@
     "test:coverage": "node --disable-warning=ExperimentalWarning --test --experimental-test-coverage --test-coverage-lines=85 test/*.test.js"
   },
   "dependencies": {
-    "baileys": "7.0.0-rc13",
+    "baileys": "7.0.0-rc14",
     "chrono-node": "^2.10.1",
     "qrcode-terminal": "^0.12.0"
   }
