@@ -22,3 +22,25 @@ test('commands manifest: every command documents itself (summary, usage, and a m
     assert.ok(c.usage.startsWith('jarvis '), `${c.name} usage should read as a typed line`);
   }
 });
+
+// A manual page is rendered WITHOUT escaping, so it can carry its own formatting. The flip side is
+// that a literal *, _, ~ or backtick left in one becomes a live WhatsApp marker for the reader:
+// a plain GITHUB_MODELS_TOKEN comes out with MODELS in italics. Inside a monospace span WhatsApp
+// applies no other formatting, so a marker there is safe - and that is where such names belong.
+// The sentinels are built from char codes so this file stays plain ASCII, like the rest of the repo.
+const CODE = String.fromCharCode(5); // what format.js `code(...)` wraps its text in
+const MONO = String.fromCharCode(4); // and `mono(...)`
+const SENTINELS = new RegExp(`[${String.fromCharCode(1)}-${String.fromCharCode(5)}]`, 'g');
+const plainPartOf = (man) =>
+  man
+    .replace(new RegExp(`${CODE}[^${CODE}]*${CODE}`, 'g'), '')
+    .replace(new RegExp(`${MONO}[^${MONO}]*${MONO}`, 'g'), '')
+    .replace(SENTINELS, ''); // bold/italic sentinels are our markup, not markers the reader sees
+
+test('commands manifest: no manual page leaves a live WhatsApp marker in plain text', () => {
+  for (const c of commands) {
+    if (!c.man) continue;
+    const offenders = plainPartOf(c.man).split(/\s+/).filter((w) => /[*_~`]/.test(w));
+    assert.deepEqual(offenders, [], `${c.name}: wrap these in code() so they render literally - ${offenders.join(' ')}`);
+  }
+});

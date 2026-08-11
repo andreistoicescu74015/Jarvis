@@ -58,7 +58,7 @@ export default {
     `${code('jarvis ai on all')} and ${code('jarvis ai off all')} set every chat at once; a later switch in one chat still wins there.\n` +
     `${code('jarvis ai')} alone shows the state, what has been spent, the provider's own limits, and the last time it throttled us.\n` +
     'A command that changes things is only ever suggested, never run from a guess.\n' +
-    'All of this needs an AI provider configured (the GITHUB_MODELS_TOKEN setting).',
+    `All of this needs an AI provider configured (the ${code('GITHUB_MODELS_TOKEN')} setting).`,
   scope: { owner: true },
   requires: ['aiGate'],
   params: [
