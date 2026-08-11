@@ -81,7 +81,7 @@ test('access cmd: an admin can gate the whole bot, but only in their own chat', 
   const admin = (text) => handle({ text, sender: 'adm', chatId: 'c1', level: 'group', isAdmin: true });
   await admin('jarvis blacklist * add rando');
   await admin('jarvis blacklist * enable');
-  assert.equal(await handle({ text: 'jarvis ping', sender: 'rando', chatId: 'c1', level: 'group' }), undefined); // blocked here
+  assert.match(await handle({ text: 'jarvis ping', sender: 'rando', chatId: 'c1', level: 'group' }), /only answer certain people/i); // blocked here
   assert.equal(await handle({ text: 'jarvis ping', sender: 'rando', chatId: 'c2', level: 'group' }), 'pong'); // not elsewhere
 });
 
@@ -116,7 +116,7 @@ test('access cmd: "list"/"show" (or no target) give the rules overview - where t
 test('access cmd: "*" target gates the whole bot in this context; owner bypasses', async () => {
   const { boss, as } = setup();
   assert.match(await boss('jarvis whitelist * enable'), /Turned on the whitelist for the whole bot/i);
-  assert.equal(await as('rando', 'jarvis ping', 'c1'), undefined); // blocked here (empty whitelist)
+  assert.match(await as('rando', 'jarvis ping', 'c1'), /only answer certain people/i); // blocked here (empty whitelist)
   assert.equal(await as('boss', 'jarvis ping', 'c1'), 'pong'); // owner bypass
   assert.equal(await as('rando', 'jarvis ping', 'cZ'), 'pong'); // another context is unaffected
 });

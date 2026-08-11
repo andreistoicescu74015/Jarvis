@@ -105,7 +105,8 @@ export default {
   usage: 'jarvis schedule <call mom tomorrow 9am> | in <2h> <msg> | at <YYYY-MM-DD> <HH:MM> <msg> | every <1d> <msg> | ai <when> <instruction> | list [all] | cancel <id|all> | disable|enable <id|all>',
   man:
     'Posts a message to this chat later, with nobody typing anything at that moment.\n' +
-    `${code('jarvis schedule call mom tomorrow at 9am')} - written plainly, Jarvis finds the time and the rest is the message. One-off only, and it reads English times.\n` +
+    `${code('jarvis schedule call mom tomorrow at 9am')} - written plainly, Jarvis finds the time and the rest is the message. One-off only.\n` +
+    `Romanian works the same: ${code('jarvis schedule suna-l pe tata maine la 9')}, ${code('peste 2 ore')}, ${code('vineri la 10')}, ${code('diseara la 20')}.\n` +
     `${code('jarvis schedule in 2h <message>')} posts once, two hours from now.\n` +
     `${code('jarvis schedule at 2026-06-18 09:00 <message>')} posts once at that time (the server's clock).\n` +
     `${code('jarvis schedule every 1d <message>')} keeps repeating. Durations are a number and m, h or d.\n` +

@@ -36,7 +36,8 @@ test('activation gate: the owner auto-activates an inactive group just by addres
   // the owner's command in an inactive group activates it, then runs
   assert.equal(toPlain(await handle({ text: 'jarvis ping', sender: 'boss', level: 'group', chatId: 'g@g.us' })), 'pong');
   assert.equal(createActivation(store).isActive('g@g.us'), true);
-  // the fresh activation is admin-only: a non-admin is blocked, an admin passes
+  // the fresh activation is admin-only: a non-admin is blocked (told once why), an admin passes
+  assert.match(await handle({ text: 'jarvis ping', sender: 'u', level: 'group', chatId: 'g@g.us' }), /only answer certain people/i);
   assert.equal(await handle({ text: 'jarvis ping', sender: 'u', level: 'group', chatId: 'g@g.us' }), undefined);
   assert.equal(toPlain(await handle({ text: 'jarvis ping', sender: 'u', level: 'group', chatId: 'g@g.us', isAdmin: true })), 'pong');
   store.close();
@@ -259,7 +260,10 @@ test('activation: deactivating a sub-group that stays umbrella-active re-locks i
   assert.match(out, /admins only/i);
   assert.match(out, /community deactivate c@g\.us/); // points at the switch that actually silences it
   // the gate is still open via the umbrella, but a non-admin is locked out again (not public)
-  assert.equal(await handle({ text: 'jarvis ping', sender: 'stranger', level: 'group', chatId: 's@g.us', community: 'c@g.us' }), undefined);
+  assert.match(
+    await handle({ text: 'jarvis ping', sender: 'stranger', level: 'group', chatId: 's@g.us', community: 'c@g.us' }),
+    /only answer certain people/i,
+  );
   assert.equal(toPlain(await handle({ text: 'jarvis ping', sender: 'adm', isAdmin: true, level: 'group', chatId: 's@g.us', community: 'c@g.us' })), 'pong');
   store.close();
 });
