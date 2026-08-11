@@ -18,7 +18,9 @@ function fakeSocketFactory() {
       presence: [],
       read: [],
       ended: false,
-      sendMessage: async (jid, content) => { sock.sent.push({ jid, content }); },
+      // `options` is recorded separately so the existing content assertions stay untouched.
+      sentOptions: [],
+      sendMessage: async (jid, content, options) => { sock.sent.push({ jid, content }); sock.sentOptions.push(options); },
       sendPresenceUpdate: async (state, jid) => { sock.presence.push({ state, jid }); },
       readMessages: async (keys) => { sock.read.push(...keys); },
       updateProfileName: async (name) => { sock.named = name; sock.user.name = name; },
@@ -595,4 +597,36 @@ test('adapter: a stale removal event is ignored when the bot is still a member (
   sock.ev.emit('group-participants.update', { id: 'G@g.us', action: 'remove', participants: ['1234@s.whatsapp.net'] });
   await tick();
   assert.deepEqual(removed, ['G@g.us']);
+});
+
+test('adapter: a reply in a GROUP is threaded onto the message that asked for it', async () => {
+  // A reply that arrives as its own message in a busy group belongs to nobody; WhatsApp's quote is
+  // what ties it back to the question.
+  const makeSocket = fakeSocketFactory();
+  const a = createWhatsAppAdapter(opts({ makeSocket }));
+  a.start({ onMessage: async () => {} });
+
+  const inbound = { key: { remoteJid: 'G@g.us', id: 'ABC', participant: '111@lid' }, message: { conversation: 'jarvis ping' } };
+  await a.send('G@g.us', 'pong', { replyTo: inbound });
+  assert.deepEqual(makeSocket.sockets[0].sentOptions[0], { quoted: inbound });
+});
+
+test('adapter: a reply in a one-to-one chat is not quoted (the conversation is the context)', async () => {
+  const makeSocket = fakeSocketFactory();
+  const a = createWhatsAppAdapter(opts({ makeSocket }));
+  a.start({ onMessage: async () => {} });
+
+  const inbound = { key: { remoteJid: '9@s.whatsapp.net', id: 'ABC' }, message: { conversation: 'jarvis ping' } };
+  await a.send('9@s.whatsapp.net', 'pong', { replyTo: inbound });
+  assert.equal(makeSocket.sockets[0].sentOptions[0], undefined);
+});
+
+test('adapter: an unattended send, or one with nothing quotable, passes no quote', async () => {
+  const makeSocket = fakeSocketFactory();
+  const a = createWhatsAppAdapter(opts({ makeSocket }));
+  a.start({ onMessage: async () => {} });
+
+  await a.send('G@g.us', 'the scheduled message'); // the proactive path names no source message
+  await a.send('G@g.us', 'x', { replyTo: 'not a message' }); // and a non-message is never handed to the socket
+  assert.deepEqual(makeSocket.sockets[0].sentOptions, [undefined, undefined]);
 });

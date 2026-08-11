@@ -1,7 +1,8 @@
-import { b, i, code, bullet, esc } from '../core/format.js';
+import { b, i, code, bullet, page, esc } from '../core/format.js';
 import { misuse } from '../core/reply.js';
 
 const UNIT_MS = { m: 60_000, h: 3_600_000, d: 86_400_000 };
+const PAGE = 20; // jobs shown by one listing (the soonest); a chat may hold 100, which no message fits
 
 /** A timestamp as a readable server-local `YYYY-MM-DD HH:MM`. */
 function fmtTime(ms) {
@@ -56,8 +57,11 @@ const whenError = (r) => (CLEAR_CAUSE.has(r.reason) ? whenText(r) : misuse(whenT
 async function listEverywhere(ctx) {
   if (!ctx.isOwner) return "Only the owner can see every chat's schedule.";
   if (typeof ctx.scheduler.listAll !== 'function') return 'That view is unavailable here.';
-  const jobs = ctx.scheduler.listAll();
-  if (!jobs.length) return 'Nothing scheduled anywhere.';
+  const all = ctx.scheduler.listAll();
+  if (!all.length) return 'Nothing scheduled anywhere.';
+  // Bound the whole view, not each chat's slice: the soonest jobs are the ones worth seeing, and a
+  // bot in many chats would otherwise build a message no phone (and past a point, no message) holds.
+  const { shown: jobs, hidden, total } = page(all, { limit: PAGE });
   const names = new Map();
   try {
     for (const g of (await ctx.listGroups?.()) ?? []) names.set(g.id, g.name);
@@ -66,7 +70,8 @@ async function listEverywhere(ctx) {
   }
   const byChat = new Map();
   for (const j of jobs) (byChat.get(j.chatId) ?? byChat.set(j.chatId, []).get(j.chatId)).push(j);
-  const out = [`${b('Scheduled everywhere')} ${i(`(${jobs.length} in ${byChat.size} chat${byChat.size === 1 ? '' : 's'})`)}`];
+  const chats = new Set(all.map((j) => j.chatId)).size; // counted over ALL jobs, not the shown slice
+  const out = [`${b('Scheduled everywhere')} ${i(`(${total} in ${chats} chat${chats === 1 ? '' : 's'})`)}`];
   for (const [chatId, chatJobs] of byChat) {
     const name = names.get(chatId);
     out.push(`${name ? `${b(esc(name))} ${code(esc(chatId))}` : code(esc(chatId))}:`);
@@ -80,6 +85,7 @@ async function listEverywhere(ctx) {
       ),
     );
   }
+  if (hidden) out.push(i(`Showing the ${jobs.length} soonest.`));
   return out.join('\n');
 }
 
@@ -98,21 +104,17 @@ export default {
   summary: 'Schedule a message to post later (once or repeating).',
   usage: 'jarvis schedule <call mom tomorrow 9am> | in <2h> <msg> | at <YYYY-MM-DD> <HH:MM> <msg> | every <1d> <msg> | ai <when> <instruction> | list [all] | cancel <id|all> | disable|enable <id|all>',
   man:
-    'Post a message to this chat later, with no one sending a command at that moment. ' +
-    'You can write it in plain language - "schedule call mom tomorrow at 9am" - and Jarvis finds the ' +
-    'time, leaving the rest as the message (one-time only; for repeats use "every"). ' +
-    '"schedule in 2h <msg>" posts once in two hours; "schedule at 2026-06-18 09:00 <msg>" posts once at ' +
-    'an absolute (server-local) time; "schedule every 1d <msg>" repeats. Durations are <number><unit> ' +
-    'with unit m (minutes), h (hours) or d (days). "schedule list" shows this chat\'s scheduled messages ' +
-    'with ids; "schedule list all" (owner only) shows every chat\'s scheduled messages at once, so you ' +
-    'can see everything Jarvis is going to post anywhere; ' +
-    '"schedule cancel <id>" removes one, "schedule clear" (or "cancel all") removes them all; ' +
-    '"schedule disable <id|all>" pauses without deleting (it is kept and skipped), "enable" resumes. ' +
-    'Scheduling works only in groups (where an admin can ' +
-    'do it), not in private chats - the owner excepted. Schedules survive restarts. ' +
-    '"schedule ai <when> <instruction>" (owner only) schedules a natural-language instruction Jarvis ' +
-    'runs at that time: it maps the instruction to commands, runs them, then posts the answer in its ' +
-    'own words, written from what they returned - e.g. "schedule ai every 1d summarize the notes here".',
+    'Posts a message to this chat later, with nobody typing anything at that moment.\n' +
+    `${code('jarvis schedule call mom tomorrow at 9am')} - written plainly, Jarvis finds the time and the rest is the message. One-off only, and it reads English times.\n` +
+    `${code('jarvis schedule in 2h <message>')} posts once, two hours from now.\n` +
+    `${code('jarvis schedule at 2026-06-18 09:00 <message>')} posts once at that time (the server's clock).\n` +
+    `${code('jarvis schedule every 1d <message>')} keeps repeating. Durations are a number and m, h or d.\n` +
+    `${code('jarvis schedule list')} shows this chat's, each with an id. ${code('jarvis schedule cancel <id>')} drops one, ` +
+    `${code('jarvis schedule clear')} drops them all.\n` +
+    `${code('jarvis schedule disable <id>')} pauses one without losing it, ${code('enable')} starts it again. Both take ${code('all')}.\n` +
+    `${code('jarvis schedule list all')} (owner) shows every chat at once, so you can see everything Jarvis is going to post anywhere.\n` +
+    `${code('jarvis schedule ai every 1d summarize the notes here')} (owner) schedules an INSTRUCTION instead of fixed text: Jarvis works it out at that time and posts the answer.\n` +
+    'Scheduling is for groups, by an admin; in a private chat only the owner can. Everything scheduled survives a restart.',
   scope: { admin: true, proactive: true },
   requires: ['scheduler'],
   // `clear` / `cancel all` delete every scheduled message here - destructive, so the AI translator
@@ -135,10 +137,13 @@ export default {
       if ((ctx.args[1] ?? '').toLowerCase() === 'all') return listEverywhere(ctx);
       const jobs = ctx.scheduler.list();
       if (!jobs.length) return 'Nothing scheduled here.';
-      return [
+      const { shown, hidden, total } = page(jobs, { limit: PAGE }); // soonest first: the head is what matters
+      const out = [
         b('Scheduled'),
-        bullet(jobs.map((j) => `${code(j.id)}: ${i(describe(j))}${j.disabled ? ` ${i('(paused)')}` : ''} -> "${esc(j.text)}"`)),
-      ].join('\n');
+        bullet(shown.map((j) => `${code(j.id)}: ${i(describe(j))}${j.disabled ? ` ${i('(paused)')}` : ''} -> "${esc(j.text)}"`)),
+      ];
+      if (hidden) out.push(i(`Showing the ${shown.length} soonest of ${total}.`));
+      return out.join('\n');
     }
 
     if (sub === 'disable' || sub === 'enable') {

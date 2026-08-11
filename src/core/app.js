@@ -22,7 +22,9 @@
  *
  * @typedef {Object} Adapter
  * @property {(handlers: { onMessage: (msg: InboundMessage) => unknown }) => (void | Promise<void>)} start
- * @property {(chatId: string, message: OutboundMessage) => (void | Promise<void>)} send
+ * @property {(chatId: string, message: OutboundMessage, opts?: { replyTo?: unknown }) => (void | Promise<void>)} send
+ *   `replyTo` is the platform-native inbound message being answered, so an adapter that supports
+ *   threading can attach the reply to it; unattended sends (the scheduler) pass none.
  * @property {() => (void | Promise<void>)} stop
  *
  * @typedef {Object} App
@@ -48,7 +50,10 @@ export function createApp(adapter, { handle } = {}) {
     if (msg.fromMe) return; // never react to our own messages
     const reply = await handle(msg);
     if (reply != null && reply !== '') {
-      await adapter.send(msg.chatId, reply);
+      // Hand the platform the message being answered: in a busy group a reply that arrives as its own
+      // message tells nobody which question it belongs to. A platform that can thread (WhatsApp quotes
+      // it) uses this; one that cannot ignores it.
+      await adapter.send(msg.chatId, reply, { replyTo: msg.raw });
     }
   };
 

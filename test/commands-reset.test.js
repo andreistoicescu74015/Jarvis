@@ -15,7 +15,7 @@ test('reset cmd: the owner resets the current context (its data is cleared)', as
   const handle = createDispatcher(createRegistry([reset, note]), { owner: 'boss', store });
   await inGroup(handle, 'jarvis note add keep-me');
   assert.match(await inGroup(handle, 'jarvis note list'), /keep-me/);
-  assert.match(await inGroup(handle, 'jarvis reset'), /reset/i);
+  assert.match(await inGroup(handle, 'jarvis reset'), /Cleared this chat's notes/i);
   assert.match(await inGroup(handle, 'jarvis note list'), /No notes yet/i);
 });
 

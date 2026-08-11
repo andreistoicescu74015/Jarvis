@@ -27,3 +27,11 @@ test('typingDelayMs: proportional to length, capped, and 0 for empty/garbage', (
   assert.equal(typingDelayMs(10), 500); // defaults: 50ms/char
   assert.equal(typingDelayMs(NaN), 0); // garbage -> no delay
 });
+
+test('typingDelayMs: the default cap keeps even a long reply from feeling stalled', () => {
+  // The wait is what a user sits through after asking. A `help` reply used to hold the indicator for
+  // six seconds, which reads as a dead bot rather than a human composing.
+  assert.equal(typingDelayMs(1291), 2500);
+  assert.equal(typingDelayMs(20), 1000); // short replies stay proportional
+  assert.equal(typingDelayMs(1291, { maxMs: 6000 }), 6000); // still tunable for anyone who wants the old feel
+});

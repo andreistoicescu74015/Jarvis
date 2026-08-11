@@ -69,7 +69,7 @@ test('community: is owner-only (an admin is no longer allowed)', async () => {
 
 test('community: reports unavailable where the platform has no community capability (e.g. CLI)', async () => {
   const handle = createDispatcher(createRegistry([community]), { owner: 'boss' }); // no community injected
-  assert.match(await handle({ text: 'jarvis community', sender: 'boss', level: 'private' }), /unavailable here/);
+  assert.match(await handle({ text: 'jarvis community', sender: 'boss', level: 'private' }), /can't do that in this chat/);
 });
 
 // --- community-wide activation (the umbrella) ---

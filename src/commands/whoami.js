@@ -15,11 +15,10 @@ export default {
   summary: 'Owner: show who you are, or look a person up.',
   usage: 'jarvis whoami | whoami <@user|number> | whoami forget <@user|number>',
   man:
-    'Owner-only. Bare "whoami" shows who you are, where, and the canonical id Jarvis knows you by - the ' +
-    'value to set as OWNER_JID. "whoami @user" or "whoami <number>" resolves another person to that id, ' +
-    'handy when deciding who may use the bot in private (then "jarvis whitelist * add ..."). ' +
-    '"whoami forget @user" drops the stored identity mapping for a person (both id forms) - the repair ' +
-    'for a stale pairing after a phone-number change; it is re-learned from their next message.',
+    'Owner only.\n' +
+    `${code('jarvis whoami')} shows who you are here and the id Jarvis knows you by - the value to put in the OWNER_JID setting.\n` +
+    `${code('jarvis whoami @user')} (a phone number works too) resolves someone else to that id, which is what the access lists match on.\n` +
+    `${code('jarvis whoami forget @user')} drops what Jarvis learned about them, for a number that changed hands; it is learned again from their next message.`,
   scope: { owner: true },
   params: [{ name: 'person', desc: 'an @mention or phone number to look up; omit to show yourself' }],
   run: (ctx) => {

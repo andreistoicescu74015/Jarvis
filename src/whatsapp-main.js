@@ -94,7 +94,7 @@ const adapter = createWhatsAppAdapter({
     readReceipts: (process.env.JARVIS_READ_RECEIPTS ?? 'on') !== 'off',
     readDelayMs: num(process.env.JARVIS_READ_DELAY_MS, 1000),
     typingPerCharMs: num(process.env.JARVIS_TYPING_PER_CHAR_MS, 50),
-    typingMaxMs: num(process.env.JARVIS_TYPING_MAX_MS, 6000),
+    typingMaxMs: num(process.env.JARVIS_TYPING_MAX_MS, 2500),
     sendJitterMs: num(process.env.JARVIS_SEND_JITTER_MS, 400),
   },
   // On logout the creds are wiped; exit non-zero so a supervisor restarts us and

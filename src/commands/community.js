@@ -16,12 +16,12 @@ export default {
   summary: 'Owner: show a community, or activate/deactivate Jarvis across all its groups.',
   usage: 'jarvis community | community activate [<id>] | community deactivate [<id>]',
   man:
-    'Show a WhatsApp community: its linked sub-groups with member counts, the total reach, and ' +
-    'whether Jarvis is active across it. "community activate [<id>]" turns Jarvis on for the whole ' +
-    'community at once - every group in it (including ones added later) passes the silence gate; ' +
-    '"community deactivate [<id>]" reverses it, but groups you activated individually stay on. Run ' +
-    'it inside the community (or one of its groups), or name it by id (from "jarvis groups"). ' +
-    'Activating a community does not change any group\'s access lists.',
+    'Shows a WhatsApp community: its groups with member counts, the total reach, and whether Jarvis is active across it.\n' +
+    `${code('jarvis community activate')} turns Jarvis on for the whole community at once - every group in it, including ones added later.\n` +
+    `${code('jarvis community deactivate')} reverses that; groups you activated one by one stay on.\n` +
+    'Run it inside the community or one of its groups, or name it by id (ids come from ' +
+    `${code('jarvis groups')}).\n` +
+    "Switching a community on or off never touches a group's access lists, and posts nothing to it.",
   scope: { owner: true },
   requires: ['community'],
   params: [

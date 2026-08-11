@@ -78,7 +78,7 @@ test('schedule: the owner may schedule in a private chat (proactive owner-exempt
 
 test('schedule: unavailable when no scheduler is configured (e.g. without a store)', async () => {
   const handle = createDispatcher(createRegistry([schedule]), { store: createStore({ path: ':memory:' }) });
-  assert.match(await handle(msg('jarvis schedule list')), /unavailable/i);
+  assert.match(await handle(msg('jarvis schedule list')), /can't do that in this chat/i);
 });
 
 test('schedule: clear (and "cancel all") cancels every scheduled message here', async () => {
@@ -194,4 +194,23 @@ test('schedule: a bare "all" is still a natural-language reminder, not the globa
   const out = await handle(msg('jarvis schedule all hands meeting tomorrow at 9am', { sender: 'boss' }));
   assert.match(out, /Scheduled s1 for 2026-06-18 09:00/);
   assert.doesNotMatch(out, /Scheduled everywhere/);
+});
+
+test('schedule: a long list is capped to the soonest, saying what it left out', async () => {
+  const { scheduler, handle } = setup();
+  for (let n = 1; n <= 25; n++) scheduler.add({ chatId: 'A', when: `in ${n}h`, text: `job ${n}` });
+  const out = await handle(msg('jarvis schedule list'));
+  assert.match(out, /Showing the 20 soonest of 25/);
+  assert.match(out, /-> "job 1"/); // the soonest is there...
+  assert.doesNotMatch(out, /-> "job 25"/); // ...the far end is not
+  assert.ok(out.split('\n').length <= 22);
+});
+
+test('schedule: "list all" is capped the same way, counting every chat', async () => {
+  const { scheduler, handle } = setup(0, { owner: 'boss' });
+  for (let n = 1; n <= 15; n++) scheduler.add({ chatId: 'A', when: `in ${n}h`, text: `a${n}` });
+  for (let n = 1; n <= 15; n++) scheduler.add({ chatId: 'B', when: `in ${n}h`, text: `b${n}` });
+  const out = await handle(msg('jarvis schedule list all', { sender: 'boss' }));
+  assert.match(out, /Scheduled everywhere \(30 in 2 chats\)/); // the totals are over everything...
+  assert.match(out, /Showing the 20 soonest/); // ...even though only a slice is printed
 });

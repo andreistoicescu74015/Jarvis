@@ -42,11 +42,15 @@ export function createRateLimiter({ minIntervalMs = 800, now = () => Date.now() 
  * (`perCharMs` each) up to a `maxMs` ceiling, so a long reply does not keep the indicator up
  * absurdly long. Pure - the caller adds any jitter. Returns 0 for empty/garbage input.
  *
+ * The ceiling is deliberately short. A person composing a long message really does take longer, but
+ * a bot answering a typed command is not composing, and every second here is a second the user waits
+ * after asking - a `help` that takes eight seconds reads as broken, not as human.
+ *
  * @param {number} textLength
  * @param {{ perCharMs?: number, maxMs?: number }} [opts]
  * @returns {number} milliseconds to show "composing" before sending.
  */
-export function typingDelayMs(textLength, { perCharMs = 50, maxMs = 6000 } = {}) {
+export function typingDelayMs(textLength, { perCharMs = 50, maxMs = 2500 } = {}) {
   const len = Math.max(0, Math.floor(Number(textLength) || 0));
   const per = Math.max(0, Number(perCharMs) || 0);
   const cap = Math.max(0, Number(maxMs) || 0);

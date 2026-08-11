@@ -27,18 +27,51 @@ test('note: add then list (persisted through ctx.store)', async () => {
   store.close();
 });
 
-test('note: get and del work by 1-based index', async () => {
+test('note: get and del work by a STABLE number that never shifts under a deletion', async () => {
+  // Numbers used to be positions, so deleting #1 renumbered everything after it: a number read from
+  // an earlier listing then pointed at a different note, and "del 2" deleted the wrong one.
   const store = createStore({ path: ':memory:' });
   const out = await run(store, [
     'jarvis note add a',
     'jarvis note add b',
+    'jarvis note add c',
     'jarvis note get 2',
     'jarvis note del 1',
     'jarvis note list',
+    'jarvis note get 3',
+    'jarvis note add d',
   ]);
-  assert.equal(out[2], 'b');
-  assert.match(out[3], /Deleted note: a/);
-  assert.equal(out[4], 'Notes\n1. b');
+  assert.equal(out[3], 'b');
+  assert.match(out[4], /Deleted note #1: a/);
+  assert.equal(out[5], 'Notes\n2. b\n3. c'); // the survivors keep the numbers they were listed under
+  assert.equal(out[6], 'c'); // and "get 3" still means the same note it meant before
+  assert.match(out[7], /Added note #4/); // a new note never reuses a freed number
+  store.close();
+});
+
+test('note: a chat whose notes predate stable ids keeps working, numbered as it was', async () => {
+  const store = createStore({ path: ':memory:' });
+  store.scoped('private:c1').set('notes', ['old one', 'old two']); // the legacy bare-array shape
+  const out = await run(store, ['jarvis note list', 'jarvis note del 1', 'jarvis note list', 'jarvis note add fresh']);
+  assert.equal(out[0], 'Notes\n1. old one\n2. old two'); // same numbers the chat already saw
+  assert.match(out[1], /Deleted note #1: old one/);
+  assert.equal(out[2], 'Notes\n2. old two');
+  assert.match(out[3], /Added note #3/); // the counter continues past the migrated notes
+  store.close();
+});
+
+test('note: a long list is capped to the newest, saying what it left out', async () => {
+  // At the 500-note cap a full listing runs past what one WhatsApp message can carry: the send fails
+  // and the reader gets silence. So a listing shows a slice and says so.
+  const store = createStore({ path: ':memory:' });
+  await run(store, Array.from({ length: 25 }, (_, n) => `jarvis note add nota ${n + 1}`));
+  const [listing] = await run(store, ['jarvis note list']);
+  const lines = listing.split('\n');
+  assert.equal(lines.length, 22); // title + 20 notes + the footer
+  assert.match(lines[1], /^6\. nota 6$/); // the newest 20, so it starts at #6
+  assert.match(lines[20], /^25\. nota 25$/);
+  assert.match(listing, /Showing the newest 20 of 25/);
+  assert.match(listing, /note get <n>/); // and how to reach one of the rest
   store.close();
 });
 

@@ -1,4 +1,37 @@
-import { b, i, code, bullet, esc } from '../core/format.js';
+import { b, i, code, bullet, page, esc } from '../core/format.js';
+
+const PAGE = 30; // groups shown by one listing, so a bot in many chats still produces a readable message
+
+/**
+ * Resolve what the owner typed to exactly one group: its id, or its NAME. The id is what WhatsApp
+ * uses and what nobody can retype from a phone (`120363041234567890@g.us`), so a name - or a
+ * distinctive part of one - is accepted too, matched case-insensitively. An ambiguous name is
+ * REFUSED rather than guessed: the same argument also drives `deactivate`, and hitting the wrong
+ * group there tears it down.
+ *
+ * @returns {{ ok: true, group: object } | { ok: false, message: string }}
+ */
+function findGroup(arg, known) {
+  const byId = known.find((g) => g.id === arg);
+  if (byId) return { ok: true, group: byId };
+  // Without the membership list nothing can be verified, and a community id given plain-group
+  // semantics would announce into the community or tear it down. Refuse instead of guessing.
+  if (!known.length) {
+    return {
+      ok: false,
+      message: `I can't fetch the group list right now, so I can't check which group that is - try again in a moment, or run the command inside the group itself.`,
+    };
+  }
+  const q = arg.toLowerCase();
+  const exact = known.filter((g) => String(g.name).toLowerCase() === q);
+  const hits = exact.length ? exact : known.filter((g) => String(g.name).toLowerCase().includes(q));
+  if (hits.length === 1) return { ok: true, group: hits[0] };
+  if (!hits.length) return { ok: false, message: `I'm not in a group called ${code(esc(arg))} (see ${code('jarvis groups')}).` };
+  return {
+    ok: false,
+    message: `${code(esc(arg))} fits ${hits.length} groups: ${hits.slice(0, 5).map((g) => b(esc(g.name))).join(', ')}. Use the full name.`,
+  };
+}
 
 /**
  * Owner-only: list and authorize the groups Jarvis runs in (ADR-0008). `jarvis groups`
@@ -13,16 +46,17 @@ import { b, i, code, bullet, esc } from '../core/format.js';
 export default {
   name: 'groups',
   summary: 'Owner: list and activate/deactivate the groups the bot runs in.',
-  usage: 'jarvis groups | groups activate [<id>] | groups deactivate [<id>]',
+  usage: 'jarvis groups | groups activate [<name>] | groups deactivate [<name>]',
   man:
-    'List the groups Jarvis is a member of, each with its id and whether the bot is active ' +
-    'there. Jarvis stays silent in a group until you activate it. "groups activate" turns on ' +
-    'the current group; "groups activate <id>" one named by id (copy it from the list); ' +
-    '"groups deactivate [<id>]" turns it back off. A COMMUNITY id gets the umbrella instead: ' +
-    'gate-only, confirmed here, with nothing posted to the community (same as "community ' +
-    'activate"). Deactivating a sub-group that stays on via its community umbrella re-locks it ' +
-    'to admins only. Naming an id needs the group list to be reachable (so a community id can ' +
-    'never be mistaken for a plain group). Activation survives restarts.',
+    'List the groups Jarvis is in, with their ids and whether the bot is active in each.\n' +
+    'Jarvis stays silent in a group until you activate it.\n' +
+    `${code('jarvis groups activate')} turns on the group you are in.\n` +
+    `${code('jarvis groups activate <name>')} turns on another one - the name from the list (a ` +
+    'distinctive part of it is enough); the id works too. An ambiguous name is refused, never guessed.\n' +
+    `${code('jarvis groups deactivate [<name>]')} turns it back off and clears what that chat held.\n` +
+    'Naming a COMMUNITY switches its whole umbrella instead: gate-only, confirmed here, with nothing ' +
+    'posted to the community. A sub-group that stays on via that umbrella is re-locked to admins only.\n' +
+    'Naming a group needs the group list to be reachable; activation survives restarts.',
   scope: { owner: true },
   // On a plain group, `deactivate` is a full reset (its access lists, AI opt-in, links, schedules, and
   // data are wiped); on a community id it is the gate-only umbrella toggle. Either way it silences
@@ -30,7 +64,7 @@ export default {
   confirm: (args) => (args[0] ?? '').toLowerCase() === 'deactivate',
   params: [
     { name: 'action', enum: ['activate', 'deactivate'], desc: 'turn the bot on/off in a group, or omit to list groups' },
-    { name: 'id', desc: 'the group id (omit for the current group)' },
+    { name: 'id', desc: 'the group name or id (omit for the current group)' },
   ],
   run: async (ctx) => {
     const sub = (ctx.args[0] ?? '').toLowerCase();
@@ -42,23 +76,20 @@ export default {
 /** Turn activation on/off for the current chat (no id) or a chat named by id. */
 async function manage(ctx, sub) {
   if (!ctx.activation) return 'Activation is unavailable here.';
-  const arg = (ctx.args[1] ?? '').trim();
-  const id = arg || (ctx.level !== 'private' ? ctx.chatId : '');
-  if (!id) {
-    return `Run this in the group, or name it: ${code(`jarvis groups ${sub} <id>`)} (ids from ${code('jarvis groups')}).`;
-  }
+  // Everything after the verb is the target, so a group NAME with spaces reads naturally.
+  const arg = ctx.args.slice(1).join(' ').trim();
   const known = ctx.listGroups ? await ctx.listGroups() : [];
-  const match = known.find((g) => g.id === id);
-  // A NAMED id must be verifiable against the membership list. With the list unavailable (a fetch
-  // error, a reconnect window - the adapter reports []), guessing is dangerous: a community id
-  // would silently get plain-group semantics - an activation announcement plus an access reset
-  // pushed INTO the community on activate, or the full destructive teardown on deactivate. Refuse
-  // instead; the in-chat form (no id) never needs the list.
-  if (arg && !match) {
-    return known.length
-      ? `No such group: ${code(esc(id))} (see ${code('jarvis groups')}).`
-      : `I can't fetch the group list right now, so I can't verify that id - try again in a moment, or run ${code(`jarvis groups ${sub}`)} inside the group itself.`;
+  let match;
+  if (arg) {
+    const found = findGroup(arg, known);
+    if (!found.ok) return found.message;
+    match = found.group;
   }
+  const id = match ? match.id : ctx.level !== 'private' ? ctx.chatId : '';
+  if (!id) {
+    return `Run this in the group, or name it: ${code(`jarvis groups ${sub} <name>`)} (names from ${code('jarvis groups')}).`;
+  }
+  if (!match) match = known.find((g) => g.id === id); // the in-chat form: look the current chat up for its name
   const name = match ? b(esc(match.name)) : code(esc(id));
   // The target's parent community, when known: umbrella-aware replies + the deactivation re-lock.
   const parent = arg ? match?.community : ctx.communityId;
@@ -120,9 +151,10 @@ async function list(ctx) {
   };
   // Split standalone groups from community members (a sub-group's `community` is its parent's id).
   const sorted = groups.slice().sort((a, b2) => String(a.name).localeCompare(String(b2.name)));
+  const { shown, hidden } = page(sorted, { limit: PAGE }); // a bot in many groups still gets a readable list
   const standalone = [];
   const byCommunity = new Map();
-  for (const g of sorted) {
+  for (const g of shown) {
     if (!g.community) standalone.push(g);
     else (byCommunity.get(g.community) ?? byCommunity.set(g.community, []).get(g.community)).push(g);
   }
@@ -138,5 +170,6 @@ async function list(ctx) {
   if (clusters.length) {
     out.push(`${b('Linked together')}:`, bullet(clusters.map((c) => c.map((id) => esc(nameOf(id))).join(' + '))));
   }
+  if (hidden) out.push(i(`Showing ${shown.length} of ${groups.length}, alphabetically.`));
   return out.join('\n');
 }

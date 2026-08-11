@@ -52,15 +52,13 @@ export default {
   summary: 'Owner: let Jarvis also answer general questions here (chatbot mode).',
   usage: 'jarvis ai | ai on [all] | ai off [all]',
   man:
-    'Natural-language command translation is ALWAYS on - anyone who may use Jarvis here can phrase a ' +
-    'command in plain language, and it maps to the matching command(s). "ai on" ADDITIONALLY lets ' +
-    'Jarvis answer general questions in THIS chat like a normal assistant (each DM and each group is ' +
-    'its own switch); "ai off" restricts this chat back to commands only. "ai on all" / "ai off all" ' +
-    'set the default for every chat at once (clearing per-chat overrides; a later per-chat toggle ' +
-    'still wins here). "ai" alone shows the state, the tokens/requests used, the provider\'s ' +
-    'documented rate limits (set JARVIS_AI_MODEL_TIER and JARVIS_AI_PLAN to match your account), and ' +
-    'the last provider throttle, if any. Sensitive commands are only ever suggested, never auto-run. ' +
-    'Needs an AI provider (GITHUB_MODELS_TOKEN).',
+    'Putting a command in plain words always works, for anyone who may use Jarvis here. This command is about something else: whether Jarvis also ANSWERS.\n' +
+    `${code('jarvis ai on')} lets it answer general questions in this chat, like a normal assistant. Each chat is its own switch.\n` +
+    `${code('jarvis ai off')} puts this chat back to commands only.\n` +
+    `${code('jarvis ai on all')} and ${code('jarvis ai off all')} set every chat at once; a later switch in one chat still wins there.\n` +
+    `${code('jarvis ai')} alone shows the state, what has been spent, the provider's own limits, and the last time it throttled us.\n` +
+    'A command that changes things is only ever suggested, never run from a guess.\n' +
+    'All of this needs an AI provider configured (the GITHUB_MODELS_TOKEN setting).',
   scope: { owner: true },
   requires: ['aiGate'],
   params: [

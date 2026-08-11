@@ -1,5 +1,7 @@
-import { b, code, bullet, esc } from '../core/format.js';
+import { b, i, code, bullet, page, esc } from '../core/format.js';
 import { misuse } from '../core/reply.js';
+
+const PAGE = 20; // auto-replies shown by one listing; a chat may hold 100, which no message fits
 
 /**
  * Owner/admin: keyword auto-replies for this chat. "jarvis rule add <keyword> <reply...>" makes Jarvis
@@ -14,11 +16,11 @@ export default {
   summary: 'Owner/admin: keyword auto-replies for this chat.',
   usage: 'jarvis rule add <keyword> <reply...> | list | remove <keyword>',
   man:
-    'Keyword auto-replies, scoped to this chat. "rule add menu Today: soup and bread" makes "jarvis ' +
-    'menu" reply with that text - deterministically, with no AI. A keyword is a single word and is ' +
-    'checked after real commands and aliases (so it cannot shadow them). The reply may use {{sender}} ' +
-    'and {{chat}} as placeholders. "rule list" (or "rule" alone) shows them; "rule remove <keyword>" ' +
-    'deletes one. Owner anywhere, or a group admin in their group.',
+    'Keyword auto-replies for this chat, posted without any AI. Owner anywhere, or a group admin in their own group.\n' +
+    `${code('jarvis rule add menu Today: soup and bread')} makes ${code('jarvis menu')} reply with that text.\n` +
+    `${code('jarvis rule list')} shows them, ${code('jarvis rule remove <keyword>')} deletes one.\n` +
+    'A keyword is a single word, and it can never shadow a real command or a shortcut.\n' +
+    `The reply may contain ${code('{{sender}}')} and ${code('{{chat}}')}, which are filled in when it is posted.`,
   scope: { ownerOrAdmin: true },
   requires: ['rules'],
   params: [
@@ -31,7 +33,10 @@ export default {
     if (!sub || sub === 'list') {
       const all = ctx.rules.list();
       if (!all.length) return 'No auto-replies here.';
-      return [b('Auto-replies'), bullet(all.map((r) => `${code(r.keyword)} -> ${esc(r.reply)}`))].join('\n');
+      const { shown, hidden, total } = page(all, { limit: PAGE });
+      const out = [b('Auto-replies'), bullet(shown.map((r) => `${code(r.keyword)} -> ${esc(r.reply)}`))];
+      if (hidden) out.push(i(`Showing ${shown.length} of ${total}, alphabetically.`));
+      return out.join('\n');
     }
 
     if (sub === 'add') {
