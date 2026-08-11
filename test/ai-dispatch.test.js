@@ -605,3 +605,19 @@ test('ai dispatch: a composition call is accounted like any other (tokens and re
   assert.equal(store.scoped('ai-usage').get('#today').calls, 2); // two real provider requests
   store.close();
 });
+
+test('ai dispatch: the model can activate a group whose name has spaces', async () => {
+  // The tool bridge refuses a non-variadic argument containing a space, so before this the model
+  // could only ever name single-word groups while typing the same thing worked.
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi({ command: 'groups', args: { action: 'activate', id: 'Anul 3 Info' } });
+  const handle = createDispatcher(createRegistry([groups]), {
+    owner: 'boss', store, ai,
+    listGroups: async () => [{ id: 'g@g.us', name: 'Anul 3 Info' }, { id: 'h@g.us', name: 'Licenta' }],
+  });
+  const out = toPlain(await handle({ text: 'jarvis porneste-te in grupul Anul 3 Info', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(out, /Understood: jarvis groups activate Anul 3 Info/);
+  assert.match(out, /Activated Jarvis in Anul 3 Info/);
+  assert.equal(store.scoped('activation').has('g@g.us'), true);
+  store.close();
+});

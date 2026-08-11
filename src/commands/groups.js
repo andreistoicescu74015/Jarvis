@@ -37,8 +37,8 @@ function findGroup(arg, known) {
  * Owner-only: list and authorize the groups Jarvis runs in (ADR-0008). `jarvis groups`
  * lists every group the bot is a member of, each with its id and whether Jarvis is active
  * there. A group is inactive (the bot stays silent) until the owner activates it:
- * `jarvis groups activate` turns on the current group, `jarvis groups activate <id>` one
- * named by id (copy it from the list); `deactivate` reverses it. The platform supplies the
+ * `jarvis groups activate` turns on the current group, `jarvis groups activate <name>` one
+ * named by its name (or its id); `deactivate` reverses it. The platform supplies the
  * membership list via `ctx.listGroups`; off a group platform it is empty.
  *
  * @type {import('../core/registry.js').Command}
@@ -64,7 +64,10 @@ export default {
   confirm: (args) => (args[0] ?? '').toLowerCase() === 'deactivate',
   params: [
     { name: 'action', enum: ['activate', 'deactivate'], desc: 'turn the bot on/off in a group, or omit to list groups' },
-    { name: 'id', desc: 'the group name or id (omit for the current group)' },
+    // Variadic, and last: a group NAME has spaces ("Anul 3 Info"), and a non-variadic argument is
+    // refused by the tool bridge for containing one - so the model could name only single-word groups
+    // while a typed command handled any of them.
+    { name: 'id', desc: 'the group name or id (omit for the current group)', variadic: true },
   ],
   run: async (ctx) => {
     const sub = (ctx.args[0] ?? '').toLowerCase();
@@ -73,7 +76,7 @@ export default {
   },
 };
 
-/** Turn activation on/off for the current chat (no id) or a chat named by id. */
+/** Turn activation on/off for the current chat (no argument) or one named by its name or id. */
 async function manage(ctx, sub) {
   if (!ctx.activation) return 'Activation is unavailable here.';
   // Everything after the verb is the target, so a group NAME with spaces reads naturally.

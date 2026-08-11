@@ -18,7 +18,7 @@ export default {
     `${code('jarvis owner')} says whether the bot has one; who it is shows only to the owner themselves.\n` +
     `${code('jarvis owner claim')} takes the slot while it is free, and only from a private chat.\n` +
     `${code('jarvis owner resign')} gives it up again.\n` +
-    'An owner set through the OWNER_JID setting cannot resign from chat - change the setting instead.',
+    `An owner set through the ${code('OWNER_JID')} setting cannot resign from chat - change the setting instead.`,
   // Sensitive (it changes who controls the bot): the AI translator never auto-runs it from a guess -
   // claiming or resigning ownership must be typed.
   confirm: true,

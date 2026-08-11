@@ -8,6 +8,14 @@ const reg = createRegistry(commands);
 const get = (n) => reg.get(n);
 const names = (cat) => cat.map((t) => t.function.name);
 
+test('toCommandLine: the trailing variadic param carries a value with spaces (a group name)', () => {
+  // Groups are named by NAME now, and names have spaces. A non-variadic argument is refused for
+  // containing one, so the model could only ever name single-word groups while typing worked for any.
+  assert.equal(toCommandLine(get('groups'), { action: 'activate', id: 'Anul 3 Info' }), 'groups activate Anul 3 Info');
+  assert.equal(toCommandLine(get('groups'), { action: 'deactivate', id: 'Beta' }), 'groups deactivate Beta');
+  assert.equal(toCommandLine(get('groups'), { action: 'activate' }), 'groups activate'); // still optional
+});
+
 test('toolCatalog: only includes commands the caller may run (by scope)', () => {
   const owner = toolCatalog(commands, { level: 'private', isAdmin: false, isOwner: true });
   const stranger = toolCatalog(commands, { level: 'private', isAdmin: false, isOwner: false });

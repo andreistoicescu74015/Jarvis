@@ -142,3 +142,22 @@ test('community: the show view tags the activation state across the community', 
   assert.match(out, /General \(412\) \(on\)/);
   store.close();
 });
+
+test('community: a big community is capped, and a long description is clipped', async () => {
+  // Every other listing is bounded; this one printed each linked group and the description in full,
+  // which for a large community is a message nobody scrolls to the end of.
+  const big = {
+    id: 'c@g.us',
+    name: 'Facultate',
+    description: 'x'.repeat(900),
+    subGroups: Array.from({ length: 42 }, (_, n) => ({ id: `s${n}@g.us`, name: `Grup ${String(n).padStart(2, '0')}`, size: 10 })),
+    reach: 900,
+  };
+  const handle = createDispatcher(createRegistry([community]), { owner: 'boss', community: fakeCommunity(big) });
+  const out = toPlain(await handle({ text: 'jarvis community', sender: 'boss', level: 'community', chatId: 'c@g.us', community: 'c@g.us' }));
+  assert.match(out, /Groups \(42\):/); // the real total is still reported
+  assert.match(out, /Showing 30 of 42/);
+  assert.ok(out.split('\n').length <= 35, 'the listing stays within one readable message');
+  assert.ok(!out.includes('x'.repeat(400)), 'the description is clipped');
+  assert.match(out, /\.\.\./);
+});

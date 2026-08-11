@@ -1,4 +1,7 @@
-import { b, i, code, bullet, esc } from '../core/format.js';
+import { b, i, code, bullet, page, esc } from '../core/format.js';
+
+const PAGE = 30; // sub-groups shown at once, so a large community still produces a readable message
+const MAX_DESC = 300; // a community description can run to thousands of characters; this is a summary view
 
 /**
  * Show or authorize a WhatsApp community. `jarvis community` shows the current
@@ -84,18 +87,26 @@ async function show(ctx) {
   const reach = info.reach ? ` ${i(`(${info.reach} members)`)}` : '';
   const state = ctx.activation ? ` ${i(umbrella ? '(active)' : '(inactive)')}` : '';
   const out = [`${b('Community')} ${esc(info.name)}${reach}${state}`];
-  if (info.description) out.push(esc(info.description));
+  // The description is whatever the community set, up to thousands of characters. This view is about
+  // the structure, so a long one is clipped rather than allowed to bury the group list under it.
+  if (info.description) {
+    const d = info.description;
+    out.push(esc(d.length > MAX_DESC ? `${d.slice(0, MAX_DESC).trimEnd()}...` : d));
+  }
   if (info.subGroups.length) {
+    // A community can hold a lot of groups; one line each adds up to a message nobody scrolls.
+    const { shown, hidden, total } = page(info.subGroups, { limit: PAGE });
     out.push(
-      `${b('Groups')} ${i(`(${info.subGroups.length})`)}:`,
+      `${b('Groups')} ${i(`(${total})`)}:`,
       bullet(
-        info.subGroups.map((g) => {
+        shown.map((g) => {
           const size = Number.isFinite(g.size) ? ` ${i(`(${g.size})`)}` : '';
           const on = ctx.activation ? ` ${i(umbrella || active.has(g.id) ? '(on)' : '(off)')}` : '';
           return `${esc(g.name)}${size}${on}`;
         }),
       ),
     );
+    if (hidden) out.push(i(`Showing ${shown.length} of ${total}.`));
   } else {
     out.push(i('No linked sub-groups.'));
   }
