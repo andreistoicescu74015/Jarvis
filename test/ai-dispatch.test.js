@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createRegistry } from '../src/core/registry.js';
 import { createDispatcher } from '../src/core/dispatch.js';
 import { createStore } from '../src/store/index.js';
+import { createScheduler } from '../src/core/scheduler.js';
 import { toPlain } from '../src/core/format.js';
 import whitelist from '../src/commands/whitelist.js';
 import blacklist from '../src/commands/blacklist.js';
@@ -494,5 +495,113 @@ test('ai dispatch: a legacy shared-DM chatbot opt-in (the old "private" key) is 
   store.scoped('ai-enabled').set('private', true); // what a pre-upgrade `jarvis ai on` in a DM wrote
   createDispatcher(createRegistry([ping]), { owner: 'boss', store });
   assert.equal(store.scoped('ai-enabled').get('private'), undefined); // cleaned up at construction
+  store.close();
+});
+
+test('ai dispatch: the mis-usage assist is not whitelist-only - a mis-used note gets a suggestion too', async () => {
+  // The `misuse` sentinel used to be wired into the access commands alone, so every other command
+  // answered an unreadable line with a bare usage text and no help.
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi({ command: 'note', args: { action: 'list' } });
+  const handle = createDispatcher(createRegistry([ping, note]), { owner: 'boss', store, ai });
+  const out = toPlain(await handle({ text: 'jarvis note arata-mi tot', sender: 'boss', level: 'private', chatId: 'dm' }));
+  assert.match(out, /Usage: jarvis note add/); // the usage text is still shown
+  assert.match(out, /Did you mean: .*jarvis note list.*Type it to run/i); // now with what was likely meant
+  store.close();
+});
+
+test('ai dispatch: a schedule line with no readable time gets a suggestion, never an auto-run', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi({ command: 'schedule', args: { action: 'in', rest: '2h suna la dentist' } });
+  const handle = createDispatcher(createRegistry([schedule]), {
+    owner: 'boss', store, ai, scheduler: createScheduler(store),
+  });
+  const out = toPlain(await handle({ text: 'jarvis schedule suna la dentist', sender: 'boss', level: 'group', chatId: 'g@g.us' }));
+  assert.match(out, /couldn't find a date or time/i);
+  assert.match(out, /Did you mean: .*jarvis schedule in 2h suna la dentist.*Type it to run/i);
+  assert.equal(createScheduler(store).listAll().length, 0); // suggested only - nothing was scheduled
+  store.close();
+});
+
+test('ai dispatch: a rejection with a clear cause stays a plain answer and costs no model call', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi({ command: 'ping', args: {} });
+  const handle = createDispatcher(createRegistry([schedule]), {
+    owner: 'boss', store, ai, scheduler: createScheduler(store),
+  });
+  const out = toPlain(await handle({ text: 'jarvis schedule at 2020-01-01 09:00 old', sender: 'boss', level: 'group', chatId: 'g@g.us' }));
+  assert.match(out, /already past/);
+  assert.doesNotMatch(out, /Did you mean/i); // the caller knows exactly what to change
+  assert.equal(ai.calls.length, 0); // so the model is never consulted for it
+  store.close();
+});
+
+test('ai dispatch: a scheduled job answers the instruction, composed from what the commands returned', async () => {
+  // Without this the timer posted the raw output of whatever commands the instruction mapped to, so
+  // "summarize the notes" could only ever echo a note listing.
+  const store = createStore({ path: ':memory:' });
+  const composed = [];
+  const ai = fakeAi({ command: 'ping', args: {} });
+  ai.compose = async ({ request, results }) => { composed.push({ request, results }); return { answer: 'All good - it answered.' }; };
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai });
+  const out = toPlain(await handle({ text: 'check the bot', sender: 'boss', level: 'group', chatId: 'g@g.us', addressed: true, scheduled: true }));
+  assert.equal(out, 'All good - it answered.');
+  assert.deepEqual(composed, [{ request: 'check the bot', results: 'pong' }]); // it saw the instruction AND the output
+  store.close();
+});
+
+test('ai dispatch: a failed composition still posts the raw command output (never silence)', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi({ command: 'ping', args: {} });
+  ai.compose = async () => ({ answer: null, failed: true });
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai });
+  const out = toPlain(await handle({ text: 'check the bot', sender: 'boss', level: 'group', chatId: 'g@g.us', addressed: true, scheduled: true }));
+  assert.equal(out, 'pong');
+  store.close();
+});
+
+test('ai dispatch: a composition that throws is isolated - the raw output is posted', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi({ command: 'ping', args: {} });
+  ai.compose = async () => { throw new Error('boom'); };
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai });
+  const out = toPlain(await handle({ text: 'check the bot', sender: 'boss', level: 'group', chatId: 'g@g.us', addressed: true, scheduled: true }));
+  assert.equal(out, 'pong');
+  store.close();
+});
+
+test('ai dispatch: composition is skipped once the daily token cap is spent mid-job', async () => {
+  const store = createStore({ path: ':memory:' });
+  let composeCalls = 0;
+  const ai = fakeAi({ command: 'ping', args: {} }, null, { prompt_tokens: 40, completion_tokens: 20, total_tokens: 60 });
+  ai.compose = async () => { composeCalls += 1; return { answer: 'composed' }; };
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai, aiDailyCap: 50 });
+  const out = toPlain(await handle({ text: 'check the bot', sender: 'boss', level: 'group', chatId: 'g@g.us', addressed: true, scheduled: true }));
+  assert.equal(composeCalls, 0); // the translation itself spent the day's budget
+  assert.equal(out, 'pong'); // so the job still posts, uncomposed rather than not at all
+  store.close();
+});
+
+test('ai dispatch: an interactive AI reply is never composed (its command output stays verifiable)', async () => {
+  const store = createStore({ path: ':memory:' });
+  let composeCalls = 0;
+  const ai = fakeAi({ command: 'ping', args: {} });
+  ai.compose = async () => { composeCalls += 1; return { answer: 'composed' }; };
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai });
+  const out = toPlain(await handle({ text: 'jarvis check the bot', sender: 'boss', level: 'group', chatId: 'g@g.us' }));
+  assert.equal(composeCalls, 0);
+  assert.match(out, /Understood: jarvis ping/); // a live user sees exactly what ran...
+  assert.match(out, /pong/); // ...and its real output
+  store.close();
+});
+
+test('ai dispatch: a composition call is accounted like any other (tokens and requests)', async () => {
+  const store = createStore({ path: ':memory:' });
+  const ai = fakeAi({ command: 'ping', args: {} }, null, { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 });
+  ai.compose = async () => ({ answer: 'composed', usage: { prompt_tokens: 15, completion_tokens: 5, total_tokens: 20 } });
+  const handle = createDispatcher(createRegistry([ping]), { owner: 'boss', store, ai });
+  await handle({ text: 'check the bot', sender: 'boss', level: 'group', chatId: 'g@g.us', addressed: true, scheduled: true });
+  assert.equal(store.scoped('ai-usage').get('g@g.us').total, 50); // translation + composition
+  assert.equal(store.scoped('ai-usage').get('#today').calls, 2); // two real provider requests
   store.close();
 });

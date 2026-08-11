@@ -46,9 +46,8 @@ const AI_MAX_CHAIN = 8;
  * @property {import('./log.js').Logger} log               Structured logger (never posts to chat).
  * @property {{ shutdown?: () => void, restart?: () => void, logout?: () => void }} [lifecycle] Process lifecycle controls (owner commands; injected per platform).
  * @property {() => Promise<{ id: string, name: string }[]>} listGroups  Groups the bot is in (platform capability; empty off a group platform).
- * @property {(target: string, text: string) => unknown} [send]  Send a message to any chat/user (proactive; platform capability).
  * @property {{ info: (id?: string) => Promise<import('../whatsapp/community.js').Community | undefined>, groups: (id?: string) => Promise<object[]>, all: () => Promise<object[]> }} [community] WhatsApp community reads (metadata + linked sub-groups; platform capability, absent off WhatsApp). `info`/`groups` default to the current chat's community.
- * @property {{ add: (when: string, text: string) => object, list: () => object[], cancel: (id: string) => object }} [scheduler] Schedule a message to post later, bound to this chat (when a scheduler is configured).
+ * @property {{ add: (when: string, text: string) => object, list: () => object[], listAll: () => object[], cancel: (id: string) => object }} [scheduler] Schedule a message to post later, bound to this chat (when a scheduler is configured); `listAll` spans every chat (owner oversight).
  * @property {{ exists: boolean, isMe: boolean, fromEnv: boolean, contact: string, claim: () => boolean, resign: () => void }} [owner] Owner-slot management (the `owner` command).
  */
 
@@ -59,7 +58,7 @@ const AI_MAX_CHAIN = 8;
  * `handle(msg)` for `createApp`.
  *
  * @param {import('./registry.js').Registry} registry
- * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, send?: (target: string, text: string) => unknown, community?: { info: (id?: string) => Promise<object | undefined>, groups: (id?: string) => Promise<object[]>, all: () => Promise<object[]> }, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object }, ai?: { translate: (input: { text: string, tools: object[] }) => Promise<Array<{ command: string, args: object }> | null> }, requireOwner?: boolean, requireActivation?: boolean }} [opts]
+ * @param {{ prefix?: string, owner?: string, store?: import('../store/index.js').Store, log?: import('./log.js').Logger, match?: (a: string, b: string) => boolean, lifecycle?: object, resolveUser?: (token: string) => string, listGroups?: () => Promise<{ id: string, name: string }[]>, send?: (target: string, text: string) => unknown, community?: { info: (id?: string) => Promise<object | undefined>, groups: (id?: string) => Promise<object[]>, all: () => Promise<object[]> }, scheduler?: { add: (job: object) => object, list: (chatId: string) => object[], cancel: (id: string, chatId: string) => object }, ai?: { translate: (input: { text: string, tools: object[] }) => Promise<Array<{ command: string, args: object }> | null>, compose?: (input: { request: string, results: string }) => Promise<{ answer: string | null }> }, requireOwner?: boolean, requireActivation?: boolean }} [opts]
  * @returns {((msg: import('./app.js').InboundMessage) => Promise<string | false | undefined>) & { chatRemoved: (chatId: string) => void }}
  *   The message handler, plus `chatRemoved(chatId)` - the platform's removal hook (the bot was kicked
  *   from a chat): deactivate it and run the same full teardown `groups deactivate` performs. For a
@@ -231,6 +230,29 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     return { chain, answer: result?.answer ?? null, failed: !!result?.failed };
   }
 
+  // A SCHEDULED instruction has already run as commands; turn their raw output into the message to
+  // post, so a timer can answer "summarize today's notes" in prose instead of echoing a command
+  // listing. Exactly ONE extra model call, only on the scheduled path (an interactive reply keeps its
+  // raw, verifiable command output), under the same daily budget. Any failure returns null and the
+  // caller posts the raw output - composition being unavailable must never silence the job.
+  async function aiCompose(request, results, context) {
+    if (typeof ai.compose !== 'function') return null;
+    if (aiUsage && !aiUsage.allows(aiDailyCap)) {
+      log.info('ai: daily token cap reached - posting the raw command output', { context, cap: aiDailyCap });
+      return null;
+    }
+    if (aiUsage) aiUsage.noteCall();
+    let result;
+    try {
+      result = await ai.compose({ request, results });
+    } catch (err) {
+      log.error('ai: composition threw', { error: err?.message ?? String(err) });
+      return null;
+    }
+    if (aiUsage && result?.usage) aiUsage.record(context, result.usage);
+    return result?.answer ? esc(result.answer) : null;
+  }
+
   // A KNOWN command that could not interpret its arguments (a `misuse` reply) - ask the model what the
   // user likely meant and return a one-line suggestion (never auto-run). Best-effort: null if AI is off
   // or nothing maps. Reuses aiResolve, so the suggestion is scope-filtered and canonical.
@@ -333,7 +355,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
 
     // `capable` / `ownerCap` are message-scoped but command-independent, so they are built once and
     // shared by every command run below (a single typed command, or each step of an AI chain).
-    const capable = { store, access, links, activation, scheduler, rules, lifecycle, send, community, aliases, aiGate: aiGateStore };
+    const capable = { store, access, links, activation, scheduler, rules, lifecycle, community, aliases, aiGate: aiGateStore };
     const ownerCap = {
       exists: !!ownerResolver.current,
       isMe: isOwner,
@@ -482,7 +504,9 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
         log,
         lifecycle,
         listGroups: listGroups ?? (() => []),
-        send: send ?? undefined,
+        // No `send` here on purpose: unattended output must go through the scheduler and the
+        // activation-gated deliver path, so a command cannot post into a chat that gate would refuse.
+        // The dispatcher keeps its own `send` for the activation announce.
         // Community reads, bound to this chat's community by default (pass an id to target another).
         community: community
           ? {
@@ -504,6 +528,9 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
               add: (when, text, kind) => scheduler.add({ chatId, createdBy: sender, when, text, kind }),
               addNatural: (input, kind) => scheduler.addNatural({ chatId, createdBy: sender, input, kind }),
               list: () => scheduler.list(chatId),
+              // Every chat's pending jobs (the owner's oversight view; the command gates it to them).
+              // Unbound to this chat on purpose - it answers "what will Jarvis post anywhere".
+              listAll: () => scheduler.listAll?.() ?? [],
               cancel: (id) => scheduler.cancel(id, chatId),
               clear: () => scheduler.clearChat(chatId),
               setEnabled: (id, on) => scheduler.setEnabled(id, chatId, on),
@@ -612,9 +639,15 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
           const out = await runOne(step.cmd, step.command, step.args, step.rest, step.line);
           if (out) outs.push(out);
         }
-        // A scheduled job posts only the command results (no "Understood:" preamble - no human to teach);
-        // if every step was skipped (e.g. all sensitive), it posts nothing.
-        if (msg.scheduled) return outs.length ? outs.join('\n') : undefined;
+        // A scheduled job posts only the command results (no "Understood:" preamble - no human to
+        // teach); if every step was skipped (e.g. all sensitive), it posts nothing. What it does post
+        // goes through one composition pass, so the owner gets the answer to their instruction rather
+        // than the raw output of whatever commands it mapped to.
+        if (msg.scheduled) {
+          if (!outs.length) return undefined;
+          const raw = outs.join('\n');
+          return (await aiCompose(request, raw, accessContext)) ?? raw;
+        }
         return [understood, ...outs].join('\n');
       }
       if (chatOn && answer) return esc(answer); // chatbot mode (or a scheduled job): a composed reply

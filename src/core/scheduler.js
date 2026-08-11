@@ -150,6 +150,13 @@ export function createScheduler(store, { now = () => Date.now() } = {}) {
   /** This chat's jobs, soonest first. */
   const list = (chatId) => all().filter((j) => j.chatId === chatId).sort((a, b) => a.fireAt - b.fireAt);
 
+  /**
+   * EVERY chat's jobs, soonest first - the owner's oversight view of all pending proactive output.
+   * Per-chat `list` is what a chat's own admins see; this one answers "what will Jarvis post
+   * anywhere", which is the question unattended sending actually raises. Read-only.
+   */
+  const listAll = () => all().sort((a, b) => a.fireAt - b.fireAt);
+
   /** Cancel a job, but only one that belongs to `chatId` (a chat can't cancel another's). */
   function cancel(id, chatId) {
     const j = jobs.get(id);
@@ -226,5 +233,5 @@ export function createScheduler(store, { now = () => Date.now() } = {}) {
     return { fired, failed };
   }
 
-  return { add, addNatural, list, cancel, clearChat, setEnabled, setEnabledAll, tick };
+  return { add, addNatural, list, listAll, cancel, clearChat, setEnabled, setEnabledAll, tick };
 }

@@ -1,4 +1,5 @@
 import { b, code, esc } from '../core/format.js';
+import { misuse } from '../core/reply.js';
 
 /**
  * Manage the single owner slot. Public on purpose: `claim` must work for a
@@ -52,6 +53,6 @@ export default {
       return `You have resigned. Anyone can now claim ownership with ${code('jarvis owner claim')}.`;
     }
 
-    return `Usage: ${code('jarvis owner | owner claim | owner resign')}`;
+    return misuse(`Usage: ${code('jarvis owner | owner claim | owner resign')}`);
   },
 };

@@ -1,4 +1,5 @@
 import { b, code, bullet, esc } from '../core/format.js';
+import { misuse } from '../core/reply.js';
 
 /**
  * Owner/admin: keyword auto-replies for this chat. "jarvis rule add <keyword> <reply...>" makes Jarvis
@@ -36,7 +37,7 @@ export default {
     if (sub === 'add') {
       const keyword = (ctx.args[1] ?? '').toLowerCase();
       const reply = ctx.args.slice(2).join(' ').trim();
-      if (!keyword || !reply) return `Usage: ${code('jarvis rule add <keyword> <reply...>')}`;
+      if (!keyword || !reply) return misuse(`Usage: ${code('jarvis rule add <keyword> <reply...>')}`);
       if (ctx.commands.some((c) => c.name === keyword)) return `${code(esc(keyword))} is a built-in command - pick another keyword.`;
       const r = ctx.rules.add(keyword, reply);
       if (r.ok) return `Auto-reply for ${code(r.keyword)} saved.`;
@@ -51,10 +52,10 @@ export default {
 
     if (sub === 'remove') {
       const keyword = (ctx.args[1] ?? '').toLowerCase();
-      if (!keyword) return `Usage: ${code('jarvis rule remove <keyword>')}`;
+      if (!keyword) return misuse(`Usage: ${code('jarvis rule remove <keyword>')}`);
       return ctx.rules.remove(keyword) ? `Removed auto-reply ${code(keyword)}.` : `No auto-reply "${esc(keyword)}".`;
     }
 
-    return `Usage: ${code('jarvis rule add <keyword> <reply...> | list | remove <keyword>')}`;
+    return misuse(`Usage: ${code('jarvis rule add <keyword> <reply...> | list | remove <keyword>')}`);
   },
 };

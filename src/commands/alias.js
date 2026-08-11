@@ -1,4 +1,5 @@
 import { b, code, bullet, esc } from '../core/format.js';
+import { misuse } from '../core/reply.js';
 
 /**
  * Owner-only: define short command aliases (shortcuts) that expand to a full command line and run
@@ -38,7 +39,7 @@ export default {
     if (sub === 'add') {
       const name = (ctx.args[1] ?? '').toLowerCase();
       const target = ctx.args.slice(2).join(' ').trim();
-      if (!name || !target) return `Usage: ${code('jarvis alias add <name> <command...>')}`;
+      if (!name || !target) return misuse(`Usage: ${code('jarvis alias add <name> <command...>')}`);
       if (ctx.commands.some((c) => c.name === name)) return `${code(esc(name))} is a built-in command - pick another alias name.`;
       const r = ctx.aliases.define(name, target);
       if (r.ok) return `Alias ${code(r.name)} -> ${code(esc(r.target))} saved.`;
@@ -53,10 +54,10 @@ export default {
 
     if (sub === 'remove') {
       const name = (ctx.args[1] ?? '').toLowerCase();
-      if (!name) return `Usage: ${code('jarvis alias remove <name>')}`;
+      if (!name) return misuse(`Usage: ${code('jarvis alias remove <name>')}`);
       return ctx.aliases.remove(name) ? `Removed alias ${code(name)}.` : `No alias "${esc(name)}".`;
     }
 
-    return `Usage: ${code('jarvis alias add <name> <command...> | list | remove <name>')}`;
+    return misuse(`Usage: ${code('jarvis alias add <name> <command...> | list | remove <name>')}`);
   },
 };

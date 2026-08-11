@@ -1,4 +1,5 @@
 import { b, code, number, esc } from '../core/format.js';
+import { misuse } from '../core/reply.js';
 
 // Bounds so a conversation cannot grow the store without limit (the note list is one KV
 // value, rewritten whole on each add): a per-note length cap and a per-conversation count.
@@ -29,7 +30,7 @@ export default {
     switch (sub) {
       case 'add': {
         const text = rest.join(' ').trim();
-        if (!text) return `Usage: ${code('jarvis note add <text>')}`;
+        if (!text) return misuse(`Usage: ${code('jarvis note add <text>')}`);
         if (text.length > MAX_NOTE_LEN) return `Note too long (max ${MAX_NOTE_LEN} characters).`;
         if (notes.length >= MAX_NOTES) return `Too many notes here (max ${MAX_NOTES}); delete some first.`;
         notes.push(text);
@@ -57,7 +58,7 @@ export default {
         return `Cleared all ${notes.length} notes here.`;
       }
       default:
-        return `Usage: ${code('jarvis note add <text> | list | get <n> | del <n> | clear')}`;
+        return misuse(`Usage: ${code('jarvis note add <text> | list | get <n> | del <n> | clear')}`);
     }
   },
 };

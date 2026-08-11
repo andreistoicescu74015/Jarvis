@@ -1,4 +1,5 @@
 import { b, code, esc } from '../core/format.js';
+import { misuse } from '../core/reply.js';
 
 /** Map a link failure reason to a clear message. */
 function linkError(r) {
@@ -65,7 +66,7 @@ export default {
     }
     if (sub === 'accept') {
       const linkCode = ctx.args[1];
-      if (!linkCode) return `Usage: ${code('jarvis link accept <code>')}`;
+      if (!linkCode) return misuse(`Usage: ${code('jarvis link accept <code>')}`);
       const r = ctx.links.accept(linkCode);
       if (!r.ok) return linkError(r);
       return r.redundant
@@ -76,6 +77,6 @@ export default {
       const r = ctx.links.unlink();
       return r.ok ? 'Unlinked - this group is back to its own data.' : 'This group is not linked.';
     }
-    return `Usage: ${code('jarvis link | link new | link accept <code> | link remove')}`;
+    return misuse(`Usage: ${code('jarvis link | link new | link accept <code> | link remove')}`);
   },
 };

@@ -51,6 +51,18 @@ export function buildChatSystem(persona) {
 
 const CHAT_SYSTEM_PROMPT = buildChatSystem();
 
+// Composition for a SCHEDULED instruction: the commands it mapped to have already run, and this turns
+// their raw output into the message to post. No tools are offered - the model may only phrase what the
+// commands returned - so a timer can summarize Jarvis's own data without the model ever reaching for it
+// directly. Used only on the scheduled path (one extra call, never in interactive chat).
+const COMPOSE_SYSTEM = [
+  'You are Jarvis, a WhatsApp assistant, writing a scheduled message for the person who set it up.',
+  'You are given their instruction and the raw output of the commands that just ran for it.',
+  'Write the message to post: short, plain text (no markdown), in the language of the instruction.',
+  '- Use ONLY the facts in the command output. Never add anything it does not contain.',
+  '- If the output is empty or reports nothing, say that plainly in one line.',
+].join('\n');
+
 /** Attach the provider's token usage to a translate result when the response reports it. */
 const withUsage = (out, usage) => (usage ? { ...out, usage } : out);
 
@@ -66,7 +78,7 @@ const withUsage = (out, usage) => (usage ? { ...out, usage } : out);
  *   system?: string,
  *   chatSystem?: string,
  * }} [opts]
- * @returns {{ translate: (input: { text: string, tools: object[], chat?: boolean }) => Promise<{ commands: Array<{ command: string, args: object }>, answer: string | null, usage?: object, limit?: { type: string, retryAfterSec: number }, failed?: boolean }> } | null}
+ * @returns {{ translate: (input: { text: string, tools: object[], chat?: boolean }) => Promise<{ commands: Array<{ command: string, args: object }>, answer: string | null, usage?: object, limit?: { type: string, retryAfterSec: number }, failed?: boolean }>, compose: (input: { request: string, results: string }) => Promise<{ answer: string | null, usage?: object, failed?: boolean }> } | null}
  *   The client is null when no token is configured - AI is simply off and the caller stays
  *   deterministic-only. `translate` resolves to the model's tool calls (`commands`, a chain in order)
  *   and, in chat mode when nothing maps, a plain-text `answer`. Both empty/null on any failure. A 429
@@ -89,8 +101,12 @@ export function createAiClient({
   if (!token) return null;
   const EMPTY = { commands: [], answer: null };
 
-  async function translate({ text, tools, chat = false } = {}) {
-    if (!text || !Array.isArray(tools) || !tools.length) return EMPTY;
+  /**
+   * One provider call: the shared timeout, 429 capture and error isolation, so `translate` and
+   * `compose` can never drift on any of it. Resolves `{ ok: true, data }`, or `{ ok: false }` with an
+   * optional `limit` - it never throws.
+   */
+  async function post(body) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -100,15 +116,10 @@ export function createAiClient({
         body: JSON.stringify({
           model,
           temperature: 0,
-          // Bound one completion (cost discipline): tool calls are tiny, and a chat-mode answer on
-          // WhatsApp should be short anyway - without this, a runaway answer's size is unbounded.
+          // Bound one completion (cost discipline): tool calls are tiny, and an answer on WhatsApp
+          // should be short anyway - without this, a runaway answer's size is unbounded.
           max_tokens: maxTokens,
-          messages: [
-            { role: 'system', content: chat ? chatSystem : system },
-            { role: 'user', content: text },
-          ],
-          tools,
-          tool_choice: 'auto', // map to a tool, decline, or (in chat mode) answer in plain text
+          ...body,
         }),
         signal: controller.signal,
       });
@@ -116,7 +127,7 @@ export function createAiClient({
         // A 429 is the provider's rate limiter: capture what its headers say (the quota that tripped,
         // e.g. `UserByModelByDay`, and the advised wait) so the owner can SEE the throttle from
         // `jarvis ai` instead of guessing why the AI went quiet. Other failures stay a plain warn.
-        // Every non-ok response carries `failed`, so callers can tell "the model was never really
+        // Every non-ok response is a failure, so callers can tell "the model was never really
         // consulted" apart from "it ran and mapped nothing" (scheduled AI jobs retry on the former).
         if (res.status === 429) {
           const limit = {
@@ -124,40 +135,76 @@ export function createAiClient({
             retryAfterSec: Number(res.headers?.get?.('retry-after')) || 0,
           };
           log.warn('ai: provider rate limit hit', { status: 429, ...limit });
-          return { ...EMPTY, limit, failed: true };
+          return { ok: false, limit };
         }
         log.warn('ai: request failed', { status: res.status });
-        return { ...EMPTY, failed: true };
+        return { ok: false };
       }
-      const data = await res.json();
-      const message = data?.choices?.[0]?.message;
-      const calls = message?.tool_calls;
-      if (Array.isArray(calls) && calls.length) {
-        const commands = [];
-        for (const call of calls) {
-          const name = call?.function?.name;
-          if (!name) continue;
-          let args = {};
-          try {
-            const parsed = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-            if (parsed && typeof parsed === 'object') args = parsed;
-          } catch {
-            args = {}; // a malformed argument blob still yields a valid (argument-less) proposal
-          }
-          commands.push({ command: name, args });
-        }
-        return withUsage({ commands, answer: null }, data?.usage);
-      }
-      // No tool call: in chat mode the model's own text is the conversational answer; otherwise none.
-      const content = typeof message?.content === 'string' ? message.content.trim() : '';
-      return withUsage({ commands: [], answer: chat && content ? content : null }, data?.usage);
+      return { ok: true, data: await res.json() };
     } catch (err) {
       log.warn('ai: request error', { error: err?.message ?? String(err) });
-      return { ...EMPTY, failed: true }; // network error / timeout - the model was never consulted
+      return { ok: false }; // network error / timeout - the model was never consulted
     } finally {
       clearTimeout(timer);
     }
   }
 
-  return { translate };
+  async function translate({ text, tools, chat = false } = {}) {
+    if (!text || !Array.isArray(tools) || !tools.length) return EMPTY;
+    const r = await post({
+      messages: [
+        { role: 'system', content: chat ? chatSystem : system },
+        { role: 'user', content: text },
+      ],
+      tools,
+      tool_choice: 'auto', // map to a tool, decline, or (in chat mode) answer in plain text
+    });
+    if (!r.ok) return { ...EMPTY, ...(r.limit ? { limit: r.limit } : {}), failed: true };
+    const data = r.data;
+    const message = data?.choices?.[0]?.message;
+    const calls = message?.tool_calls;
+    if (Array.isArray(calls) && calls.length) {
+      const commands = [];
+      for (const call of calls) {
+        const name = call?.function?.name;
+        if (!name) continue;
+        let args = {};
+        try {
+          const parsed = call.function.arguments ? JSON.parse(call.function.arguments) : {};
+          if (parsed && typeof parsed === 'object') args = parsed;
+        } catch {
+          args = {}; // a malformed argument blob still yields a valid (argument-less) proposal
+        }
+        commands.push({ command: name, args });
+      }
+      return withUsage({ commands, answer: null }, data?.usage);
+    }
+    // No tool call: in chat mode the model's own text is the conversational answer; otherwise none.
+    const content = typeof message?.content === 'string' ? message.content.trim() : '';
+    return withUsage({ commands: [], answer: chat && content ? content : null }, data?.usage);
+  }
+
+  /**
+   * Turn a scheduled instruction plus the raw output of the commands it ran into the message to post.
+   * No tools, so the model can only phrase what the commands returned. Best-effort like `translate`:
+   * a failure resolves to no answer and the caller posts the raw output instead of nothing.
+   *
+   * @param {{ request: string, results: string }} input
+   * @returns {Promise<{ answer: string | null, usage?: object, failed?: boolean }>}
+   */
+  async function compose({ request, results } = {}) {
+    if (!request || !results) return { answer: null };
+    const r = await post({
+      messages: [
+        { role: 'system', content: COMPOSE_SYSTEM },
+        { role: 'user', content: `Instruction: ${request}\n\nCommand output:\n${results}` },
+      ],
+    });
+    if (!r.ok) return { answer: null, failed: true };
+    const content = r.data?.choices?.[0]?.message?.content;
+    const answer = typeof content === 'string' && content.trim() ? content.trim() : null;
+    return withUsage({ answer }, r.data?.usage);
+  }
+
+  return { translate, compose };
 }

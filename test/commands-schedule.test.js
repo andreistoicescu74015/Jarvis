@@ -144,3 +144,54 @@ test('schedule: plain-language recurrence points back to "every"', async () => {
   const { handle } = setup();
   assert.match(await handle(msg('jarvis schedule daily standup')), /every <N>/i);
 });
+
+test('schedule: "list all" shows the owner every chat\'s pending jobs, grouped and named', async () => {
+  const { scheduler, handle } = setup(0, {
+    owner: 'boss',
+    listGroups: async () => [{ id: 'A', name: 'Study Group' }],
+  });
+  scheduler.add({ chatId: 'A', when: 'in 1h', text: 'stand up' });
+  scheduler.add({ chatId: 'B', when: 'in 2h', text: 'other room' });
+  scheduler.add({ chatId: 'A', when: 'in 3h', text: 'summarize', kind: 'ai' });
+  const out = await handle(msg('jarvis schedule list all', { sender: 'boss' }));
+  assert.match(out, /Scheduled everywhere \(3 in 2 chats\)/);
+  assert.match(out, /Study Group A:/); // named from the platform's group list
+  assert.match(out, /^B:$/m); // a chat that list cannot name still shows by id
+  assert.match(out, /-> "other room"/); // another chat's job is visible from here - the point of the view
+  assert.match(out, /\[ai\] -> "summarize"/); // an AI instruction is marked as one
+});
+
+test('schedule: "list all" is owner-only; a group admin sees only their own chat', async () => {
+  const { scheduler, handle } = setup(0, { owner: 'boss' });
+  scheduler.add({ chatId: 'A', when: 'in 1h', text: 'mine' });
+  scheduler.add({ chatId: 'B', when: 'in 1h', text: 'theirs' });
+  assert.match(await handle(msg('jarvis schedule list all')), /Only the owner/i); // sender 'u' is an admin, not the owner
+  const own = await handle(msg('jarvis schedule list'));
+  assert.match(own, /-> "mine"/);
+  assert.doesNotMatch(own, /theirs/); // the per-chat view never leaks another chat's jobs
+});
+
+test('schedule: "list all" says so plainly when nothing is scheduled anywhere', async () => {
+  const { handle } = setup(0, { owner: 'boss' });
+  assert.match(await handle(msg('jarvis schedule list all', { sender: 'boss' })), /Nothing scheduled anywhere/);
+});
+
+test('schedule: "list all" survives a platform that cannot list groups (ids still answer)', async () => {
+  const { scheduler, handle } = setup(0, {
+    owner: 'boss',
+    listGroups: async () => { throw new Error('socket down'); },
+  });
+  scheduler.add({ chatId: 'A', when: 'in 1h', text: 'stand up' });
+  const out = await handle(msg('jarvis schedule list all', { sender: 'boss' }));
+  assert.match(out, /Scheduled everywhere \(1 in 1 chat\)/);
+  assert.match(out, /-> "stand up"/);
+});
+
+test('schedule: a bare "all" is still a natural-language reminder, not the global view', async () => {
+  // "schedule all hands meeting tomorrow at 9am" must schedule, not list - which is why the global
+  // view lives under the explicit `list` verb.
+  const { handle } = setup(new Date('2026-06-17T08:00').getTime(), { owner: 'boss' });
+  const out = await handle(msg('jarvis schedule all hands meeting tomorrow at 9am', { sender: 'boss' }));
+  assert.match(out, /Scheduled s1 for 2026-06-18 09:00/);
+  assert.doesNotMatch(out, /Scheduled everywhere/);
+});
