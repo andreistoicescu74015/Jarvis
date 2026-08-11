@@ -16,7 +16,10 @@ import { esc } from './format.js';
 
 const MAX_REPLY_LEN = 1000; // characters in a rule's reply
 const MAX_RULES = 100; // rules kept per chat
-const KEYWORD_RE = /^[a-z0-9][a-z0-9_-]*$/; // a single lowercase token (like an alias name)
+// A single lowercase token, like an alias name: letters are Unicode, so a group can trigger an
+// auto-reply with a word in its own language. The '|' this is stored around is not a letter or digit,
+// so a keyword can never contain it.
+const KEYWORD_RE = /^[\p{L}\p{N}][\p{L}\p{N}_-]*$/u;
 const SEP = '|'; // chat/keyword key separator: never in a jid or a keyword (which is [a-z0-9_-])
 
 /**

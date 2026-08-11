@@ -158,3 +158,17 @@ test('dispatch+access: a per-command denial stays silent even the first time', a
   assert.equal(await handle({ text: 'jarvis note list', sender: 'rando', chatId: 'c1', level: 'group' }), undefined);
   assert.equal(await handle({ text: 'jarvis ping', sender: 'rando', chatId: 'c1', level: 'group' }), 'pong'); // the rest still works
 });
+
+test('dispatch+access: a torn-down chat forgets who it has already turned away', async () => {
+  // The notice is once per person per chat. A chat that is deactivated, or that the bot is removed
+  // from, should start over if it ever comes back, rather than stay silently mute to the same people.
+  const { handle, access } = setup({ commands: [ping] });
+  access.enable('whitelist', '*', 'c1');
+  assert.match(await handle({ text: 'jarvis ping', sender: 'rando', chatId: 'c1', level: 'group' }), /only answer certain people/i);
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'rando', chatId: 'c1', level: 'group' }), undefined);
+
+  handle.chatRemoved('c1'); // the platform hook: kicked from the group, or the owner deactivated it
+  access.enable('whitelist', '*', 'c1'); // the teardown cleared the lists too; lock it again
+
+  assert.match(await handle({ text: 'jarvis ping', sender: 'rando', chatId: 'c1', level: 'group' }), /only answer certain people/i);
+});
