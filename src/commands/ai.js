@@ -1,4 +1,5 @@
 import { b, code } from '../core/format.js';
+import { misuse } from '../core/reply.js';
 
 const group = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
@@ -70,8 +71,8 @@ export default {
     const sub = (ctx.args[0] ?? '').toLowerCase();
     const scope = (ctx.args[1] ?? '').toLowerCase();
     const note = ctx.aiGate.available ? '' : `\n${b('No AI provider is configured')} - set GITHUB_MODELS_TOKEN for this to take effect.`;
-    if (sub && sub !== 'on' && sub !== 'off') return `Usage: ${code('jarvis ai | ai on [all] | ai off [all]')}`;
-    if (sub && scope && scope !== 'all') return `Usage: ${code('jarvis ai | ai on [all] | ai off [all]')}`;
+    if (sub && sub !== 'on' && sub !== 'off') return misuse(`Usage: ${code('jarvis ai | ai on [all] | ai off [all]')}`);
+    if (sub && scope && scope !== 'all') return misuse(`Usage: ${code('jarvis ai | ai on [all] | ai off [all]')}`);
     if (sub === 'on') {
       if (scope === 'all') {
         ctx.aiGate.onAll();

@@ -265,3 +265,24 @@ test('parseNatural: a mid-sentence "every" is refused, but a "daily" adjective m
   assert.equal(r.ok, true);
   assert.equal(r.message, 'send the daily report');
 });
+
+test('scheduler: listAll spans every chat, soonest first (the owner oversight view)', () => {
+  const store = createStore({ path: ':memory:' });
+  const now = new Date('2026-06-17T12:00').getTime();
+  const s = createScheduler(store, { now: () => now });
+  s.add({ chatId: 'B', when: 'in 3h', text: 'late' });
+  s.add({ chatId: 'A', when: 'in 1h', text: 'early' });
+  s.add({ chatId: 'A', when: 'in 2h', text: 'middle' });
+  const all = s.listAll();
+  assert.deepEqual(all.map((j) => j.text), ['early', 'middle', 'late']); // ordered by fire time, not by chat
+  assert.deepEqual(all.map((j) => j.chatId), ['A', 'A', 'B']);
+  assert.equal(s.list('A').length, 2); // the per-chat view is unchanged
+  assert.ok(!all.some((j) => j.id === '#seq')); // the id counter is not a job
+  store.close();
+});
+
+test('scheduler: listAll is empty with nothing scheduled anywhere', () => {
+  const store = createStore({ path: ':memory:' });
+  assert.deepEqual(createScheduler(store).listAll(), []);
+  store.close();
+});

@@ -1,4 +1,5 @@
 import { b, code, esc } from '../core/format.js';
+import { misuse } from '../core/reply.js';
 
 /**
  * Detailed help for one command: its summary, usage, who may use it (derived from
@@ -17,10 +18,13 @@ export default {
   params: [{ name: 'command', desc: 'the command to explain, e.g. "whitelist" (omit to show usage)' }],
   run: (ctx) => {
     const name = (ctx.args[0] ?? '').toLowerCase();
+    // A bare `man` is not a mis-usage: the intent is clear and the reply already points at the list,
+    // so there is nothing for the AI layer to guess. A name it does not know IS one - the model can
+    // map what the caller meant onto a real command.
     if (!name) return `Usage: ${code('jarvis man <command>')}. Try ${code('jarvis help')} for the list.`;
 
     const cmd = ctx.commands.find((c) => c.name === name);
-    if (!cmd) return `No such command: ${code(esc(name))}. Try ${code('jarvis help')}.`;
+    if (!cmd) return misuse(`No such command: ${code(esc(name))}. Try ${code('jarvis help')}.`);
 
     const lines = [`${b(cmd.name)} - ${esc(cmd.summary)}`];
     if (cmd.usage) lines.push(`${b('Usage')}: ${code(cmd.usage)}`);

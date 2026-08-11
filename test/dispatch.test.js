@@ -138,3 +138,14 @@ test('dispatch: a command requiring an absent capability is reported unavailable
   const withCap = createDispatcher(createRegistry([needs]), { lifecycle: {} });
   assert.equal(await withCap({ text: 'jarvis needs', sender: 'x' }), 'ran');
 });
+
+test('dispatch: a command is never handed a raw send (unattended output goes through the scheduler)', async () => {
+  // A command with `send` could post into a chat the activation gate would refuse, bypassing the
+  // deliver path every proactive message goes through. Nothing used it, so nothing gets it.
+  let seen;
+  const probe = { name: 'probe', summary: 'p', run: (ctx) => { seen = ctx; return 'ok'; } };
+  const handle = createDispatcher(createRegistry([probe]), { send: () => 'sent' });
+  assert.equal(await handle({ text: 'jarvis probe', sender: 'u', level: 'private', chatId: 'dm' }), 'ok');
+  assert.equal(seen.send, undefined);
+  assert.equal(typeof seen.listGroups, 'function'); // the read-only platform capabilities stay
+});

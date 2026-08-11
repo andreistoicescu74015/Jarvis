@@ -1,4 +1,5 @@
 import { b, i, code, esc } from '../core/format.js';
+import { misuse } from '../core/reply.js';
 
 /** A readable id for a sender: the phone number for a WhatsApp user, else the bare user part. */
 function friendlyId(sender) {
@@ -28,7 +29,7 @@ export default {
     if ((ctx.args[0] ?? '').toLowerCase() === 'forget') {
       if (typeof ctx.forgetIdentity !== 'function') return 'Identity management is unavailable here.';
       const target = ctx.mentions?.[0] ?? (ctx.args[1] || '');
-      if (!target) return `Usage: ${code('jarvis whoami forget <@user|number>')}`;
+      if (!target) return misuse(`Usage: ${code('jarvis whoami forget <@user|number>')}`);
       return ctx.forgetIdentity(target)
         ? `Forgot the stored identity mapping for ${b(friendlyId(String(target)))} - it will be re-learned from their next message.`
         : 'Nothing stored for that person.';

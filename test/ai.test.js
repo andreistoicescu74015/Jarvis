@@ -174,3 +174,46 @@ test('ai: every request bounds the completion size (max_tokens), with an overrid
   await ai2.translate({ text: 'x', tools });
   assert.equal(JSON.parse(tight.init.body).max_tokens, 200);
 });
+
+test('ai: compose turns command output into the message to post, offering no tools', async () => {
+  const capture = {};
+  const ai = createAiClient({
+    token: 't',
+    fetchImpl: fakeFetch({ choices: [{ message: { content: 'You have 2 notes: milk and bread.' } }] }, { capture }),
+  });
+  const out = await ai.compose({ request: 'summarize the notes', results: 'Notes\n1. milk\n2. bread' });
+  assert.equal(out.answer, 'You have 2 notes: milk and bread.');
+  const body = JSON.parse(capture.init.body);
+  assert.equal(body.tools, undefined); // composition may only phrase what the commands already returned
+  assert.equal(body.temperature, 0);
+  assert.equal(body.max_tokens, 800); // the same cost bound as every other call
+  assert.match(body.messages[1].content, /Instruction: summarize the notes/);
+  assert.match(body.messages[1].content, /1\. milk/); // the raw command output is what it works from
+});
+
+test('ai: compose without an instruction or without results never calls out', async () => {
+  let called = false;
+  const ai = createAiClient({ token: 't', fetchImpl: async () => { called = true; return { ok: true, json: async () => ({}) }; } });
+  assert.deepEqual(await ai.compose({ request: '', results: 'x' }), { answer: null });
+  assert.deepEqual(await ai.compose({ request: 'x', results: '' }), { answer: null });
+  assert.deepEqual(await ai.compose(), { answer: null });
+  assert.equal(called, false);
+});
+
+test('ai: a failed compose resolves to no answer (the caller posts the raw output)', async () => {
+  const ai = createAiClient({ token: 't', fetchImpl: fakeFetch({}, { ok: false, status: 500 }) });
+  assert.deepEqual(await ai.compose({ request: 'x', results: 'y' }), { answer: null, failed: true });
+  const dead = createAiClient({ token: 't', fetchImpl: async () => { throw new Error('network down'); } });
+  assert.deepEqual(await dead.compose({ request: 'x', results: 'y' }), { answer: null, failed: true });
+});
+
+test('ai: an empty composition is no answer, not an empty message', async () => {
+  const ai = createAiClient({ token: 't', fetchImpl: fakeFetch({ choices: [{ message: { content: '   ' } }] }) });
+  assert.deepEqual(await ai.compose({ request: 'x', results: 'y' }), { answer: null });
+});
+
+test('ai: compose reports the provider token usage like translate does', async () => {
+  const usage = { prompt_tokens: 50, completion_tokens: 8, total_tokens: 58 };
+  const ai = createAiClient({ token: 't', fetchImpl: fakeFetch({ choices: [{ message: { content: 'done' } }], usage }) });
+  assert.deepEqual(await ai.compose({ request: 'x', results: 'y' }), { answer: 'done', usage });
+});

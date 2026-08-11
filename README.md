@@ -45,7 +45,8 @@ what *you* can run where you are; `jarvis man <command>` explains one in detail.
 - `jarvis community [activate|deactivate [<id>]]` - show a community, or authorize all its groups at once.
 - `jarvis ai [on|off [all]]` - chatbot mode per chat, or everywhere with `all`; `jarvis ai` alone shows the state, tokens/requests used, and the provider's documented rate limits.
 - `jarvis alias add <name> <command...> | list | remove <name>` - define command shortcuts that expand and run with no AI.
-- `jarvis schedule ai in <2h>|at <date> <time>|every <1d> <instruction>` - schedule a natural-language instruction Jarvis runs at that time (through the same guards).
+- `jarvis schedule ai in <2h>|at <date> <time>|every <1d> <instruction>` - schedule a natural-language instruction Jarvis runs at that time (through the same guards), then answers in its own words from what the commands returned.
+- `jarvis schedule list all` - every chat's pending scheduled messages in one view, so you can see everything Jarvis is going to post anywhere.
 - `jarvis reset [all]` - clear this chat's data, or wipe everything (the WhatsApp login and the ownership are kept).
 - `jarvis shutdown` / `jarvis restart` / `jarvis logout` - lifecycle (details under [Owner commands](#owner-commands-in-chat)).
 
@@ -53,7 +54,8 @@ what *you* can run where you are; `jarvis man <command>` explains one in detail.
 
 Deterministic conveniences run first, with no AI and no tokens: a mistyped command gets a
 `Did you mean ...?` suggestion (never auto-run), owner-defined aliases expand to full commands, and
-keyword rules post their auto-reply.
+keyword rules post their auto-reply. When a real command cannot read the arguments you gave it, it
+shows its usage - and, with a provider configured, what you most likely meant, for you to type.
 
 With an AI provider configured (`GITHUB_MODELS_TOKEN`), an addressed message that isn't an exact
 command is mapped to one or more commands - for anyone who may use Jarvis there, each still subject to
