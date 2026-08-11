@@ -5,6 +5,7 @@ import { createRegistry } from '../src/core/registry.js';
 import { createDispatcher } from '../src/core/dispatch.js';
 import { createApp } from '../src/core/app.js';
 import { createTestAdapter } from './helpers.js';
+import { toPlain } from '../src/core/format.js';
 import ping from '../src/commands/ping.js';
 import help from '../src/commands/help.js';
 
@@ -134,7 +135,7 @@ test('dispatch: a command can reply via ctx.reply (lines collected and joined)',
 test('dispatch: a command requiring an absent capability is reported unavailable', async () => {
   const needs = { name: 'needs', summary: 'needs lifecycle', requires: ['lifecycle'], run: () => 'ran' };
   const without = createDispatcher(createRegistry([needs]));
-  assert.match(await without({ text: 'jarvis needs', sender: 'x' }), /unavailable here/i);
+  assert.match(await without({ text: 'jarvis needs', sender: 'x' }), /can't do that in this chat/i);
   const withCap = createDispatcher(createRegistry([needs]), { lifecycle: {} });
   assert.equal(await withCap({ text: 'jarvis needs', sender: 'x' }), 'ran');
 });
@@ -148,4 +149,30 @@ test('dispatch: a command is never handed a raw send (unattended output goes thr
   assert.equal(await handle({ text: 'jarvis probe', sender: 'u', level: 'private', chatId: 'dm' }), 'ok');
   assert.equal(seen.send, undefined);
   assert.equal(typeof seen.listGroups, 'function'); // the read-only platform capabilities stay
+});
+
+test('app: the reply carries the message it answers, so a platform can thread it', async () => {
+  const sends = [];
+  const adapter = {
+    start(h) { this.onMessage = h.onMessage; },
+    send(chatId, message, opts) { sends.push({ chatId, message, opts }); },
+    stop() {},
+  };
+  const app = createApp(adapter, { handle: createDispatcher(createRegistry([ping])) });
+  await app.start();
+  const raw = { key: { id: 'ABC' }, message: { conversation: 'jarvis ping' } };
+  await adapter.onMessage({ text: 'jarvis ping', sender: 'u', chatId: 'G@g.us', level: 'group', raw });
+  assert.equal(sends[0].message, 'pong');
+  assert.equal(sends[0].opts.replyTo, raw); // the platform decides what to do with it
+});
+
+test('dispatch: a sentence gets the nudge; only a lone word is reported as an unknown command', async () => {
+  // "jarvis cat e ceasul" naming `cat` an unknown command reads as nonsense - the user did not try
+  // to run `cat`. A single word, though, really is an attempted command.
+  const handle = createDispatcher(createRegistry([ping]));
+  const sentence = await handle({ text: 'jarvis cat e ceasul', sender: 'u', level: 'private', chatId: 'dm' });
+  assert.match(toPlain(sentence), /didn't catch a command in that/i);
+  assert.doesNotMatch(toPlain(sentence), /Unknown command/);
+  const oneWord = await handle({ text: 'jarvis frobnicate', sender: 'u', level: 'private', chatId: 'dm' });
+  assert.match(toPlain(oneWord), /Unknown command frobnicate/);
 });

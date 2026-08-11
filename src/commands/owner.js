@@ -14,9 +14,11 @@ export default {
   summary: 'Claim or resign bot ownership (and show who owns it).',
   usage: 'jarvis owner | owner claim | owner resign',
   man:
-    'Bare "jarvis owner" shows whether the bot is owned (the contact itself is shown only to the ' +
-    'owner). "claim" takes a free owner slot; "resign" gives it up. The owner can also be set via ' +
-    'OWNER_JID, in which case it cannot resign from chat.',
+    'The owner is whoever manages Jarvis. They can use every command, in every chat.\n' +
+    `${code('jarvis owner')} says whether the bot has one; who it is shows only to the owner themselves.\n` +
+    `${code('jarvis owner claim')} takes the slot while it is free, and only from a private chat.\n` +
+    `${code('jarvis owner resign')} gives it up again.\n` +
+    'An owner set through the OWNER_JID setting cannot resign from chat - change the setting instead.',
   // Sensitive (it changes who controls the bot): the AI translator never auto-runs it from a guess -
   // claiming or resigning ownership must be typed.
   confirm: true,

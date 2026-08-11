@@ -82,10 +82,55 @@ test('groups: activate rejects an unknown id and needs an id from a private chat
   const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, listGroups: twoGroups });
 
   const bad = toPlain(await handle({ text: 'jarvis groups activate z@g.us', sender: 'boss', level: 'private' }));
-  assert.match(bad, /No such group/);
+  assert.match(bad, /not in a group called/i);
 
   const noId = toPlain(await handle({ text: 'jarvis groups activate', sender: 'boss', level: 'private' }));
   assert.match(noId, /name it/i);
+  store.close();
+});
+
+test('groups: a group can be named by NAME, so nobody has to retype a jid on a phone', async () => {
+  const store = createStore({ path: ':memory:' });
+  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, listGroups: twoGroups });
+  const on = toPlain(await handle({ text: 'jarvis groups activate Beta', sender: 'boss', level: 'private' }));
+  assert.match(on, /Activated Jarvis in Beta/);
+  assert.equal(store.scoped('activation').has('b@g.us'), true); // the right group, resolved from its name
+  // A distinctive part of the name is enough, and matching ignores case.
+  const off = toPlain(await handle({ text: 'jarvis groups deactivate bet', sender: 'boss', level: 'private' }));
+  assert.match(off, /Deactivated Jarvis in Beta/);
+  store.close();
+});
+
+test('groups: a name that fits more than one group is refused, never guessed', async () => {
+  // The same argument drives `deactivate`, which tears a group down - guessing here is not an option.
+  const store = createStore({ path: ':memory:' });
+  const many = async () => [
+    { id: 'a@g.us', name: 'Proiect licenta' },
+    { id: 'b@g.us', name: 'Proiect PA' },
+  ];
+  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, listGroups: many });
+  const out = toPlain(await handle({ text: 'jarvis groups deactivate Proiect', sender: 'boss', level: 'private' }));
+  assert.match(out, /fits 2 groups/);
+  assert.match(out, /Proiect licenta/);
+  assert.equal(store.scoped('activation').has('a@g.us'), false); // nothing was touched
+  store.close();
+});
+
+test('groups: a name cannot be resolved while the group list is unreachable', async () => {
+  const store = createStore({ path: ':memory:' });
+  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, listGroups: async () => [] });
+  const out = toPlain(await handle({ text: 'jarvis groups activate Beta', sender: 'boss', level: 'private' }));
+  assert.match(out, /can't fetch the group list/i);
+  store.close();
+});
+
+test('groups: a long membership list is capped, saying how many it left out', async () => {
+  const store = createStore({ path: ':memory:' });
+  const lots = async () => Array.from({ length: 42 }, (_, n) => ({ id: `g${n}@g.us`, name: `Grup ${String(n).padStart(2, '0')}` }));
+  const handle = createDispatcher(createRegistry([groups]), { owner: 'boss', store, listGroups: lots });
+  const out = toPlain(await handle({ text: 'jarvis groups', sender: 'boss', level: 'private' }));
+  assert.match(out, /Showing 30 of 42/);
+  assert.ok(out.split('\n').length < 36, 'the listing stays within one readable message');
   store.close();
 });
 

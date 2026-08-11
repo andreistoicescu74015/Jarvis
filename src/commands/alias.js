@@ -1,5 +1,7 @@
-import { b, code, bullet, esc } from '../core/format.js';
+import { b, i, code, bullet, page, esc } from '../core/format.js';
 import { misuse } from '../core/reply.js';
+
+const PAGE = 20; // shortcuts shown by one listing; the owner may hold 200, which no message fits
 
 /**
  * Owner-only: define short command aliases (shortcuts) that expand to a full command line and run
@@ -15,12 +17,12 @@ export default {
   summary: 'Owner: define command shortcuts that expand to a full command.',
   usage: 'jarvis alias add <name> <command...> | list | remove <name>',
   man:
-    'Owner-only shortcuts. "alias add gm note add Good morning" makes "jarvis gm" run "jarvis note add ' +
-    'Good morning" - deterministically, with no AI. Anything you type after the alias is appended, so ' +
-    '"alias add w whitelist" lets you run "jarvis w * disable". "alias list" (or "alias" alone) shows ' +
-    'them; "alias remove <name>" deletes one. A name must be a single word and cannot shadow a built-in ' +
-    'command. Anyone who may use Jarvis here can trigger an alias, but its target still passes every ' +
-    'permission check.',
+    'Owner-only shortcuts, run without any AI.\n' +
+    `${code('jarvis alias add gm note add Good morning')} makes ${code('jarvis gm')} save that note.\n` +
+    `Whatever you type after the shortcut is added on, so ${code('jarvis alias add w whitelist')} lets you run ${code('jarvis w * disable')}.\n` +
+    `${code('jarvis alias list')} shows them, ${code('jarvis alias remove <name>')} deletes one.\n` +
+    'A name is a single word and can never shadow a real command.\n' +
+    'Anyone who may use Jarvis here can trigger a shortcut, but what it runs still passes every permission check.',
   scope: { owner: true },
   requires: ['aliases'],
   params: [
@@ -33,7 +35,10 @@ export default {
     if (!sub || sub === 'list') {
       const all = ctx.aliases.list();
       if (!all.length) return 'No aliases defined.';
-      return [b('Aliases'), bullet(all.map((a) => `${code(a.name)} -> ${esc(a.target)}`))].join('\n');
+      const { shown, hidden, total } = page(all, { limit: PAGE });
+      const out = [b('Aliases'), bullet(shown.map((a) => `${code(a.name)} -> ${esc(a.target)}`))];
+      if (hidden) out.push(i(`Showing ${shown.length} of ${total}, alphabetically.`));
+      return out.join('\n');
     }
 
     if (sub === 'add') {

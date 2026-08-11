@@ -217,7 +217,7 @@ test('ai dispatch: a non-destructive subcommand (note add) still runs from a tra
   const out = toPlain(await handle({ text: 'jarvis noteaza from ai', sender: 'boss', level: 'private', chatId: 'dm' }));
   assert.match(out, /Understood: jarvis note add from ai/);
   assert.match(out, /Added note #1/); // the benign verb is auto-run
-  assert.deepEqual(store.scoped('private:dm').get('notes'), ['from ai']);
+  assert.deepEqual(store.scoped('private:dm').get('notes').items.map((n) => n.text), ['from ai']);
   store.close();
 });
 
@@ -393,7 +393,7 @@ test('alias dispatch: text after the alias name is appended to its target', asyn
   store.scoped('aliases').set('n', 'note add'); // `n <text>` -> note add <text>
   const handle = createDispatcher(createRegistry([note]), { owner: 'boss', store });
   await handle({ text: 'jarvis n buy milk', sender: 'boss', level: 'private', chatId: 'dm' });
-  assert.deepEqual(store.scoped('private:dm').get('notes'), ['buy milk']); // the appended text became the note
+  assert.deepEqual(store.scoped('private:dm').get('notes').items.map((n) => n.text), ['buy milk']); // the appended text became the note
   store.close();
 });
 

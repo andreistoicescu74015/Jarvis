@@ -125,10 +125,13 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
   // command and the owner's auto-activation in the gate below.
   const activationNotice = () =>
     [
+      // One idea per line: this is the first thing a whole group reads, on a phone, and a paragraph
+      // of instructions is a paragraph nobody reads.
       b('Jarvis is active here.'),
-      `Admins can use me right away. By default only admins can - to let others in an admin runs ` +
-        `${code(`${prefix} whitelist * add @person`)}, or opens me to everyone with ${code(`${prefix} whitelist * disable`)}. ` +
-        `Type ${code(`${prefix} help`)} to see what I can do.`,
+      'For now only the group admins can use me.',
+      `An admin lets one person in with ${code(`${prefix} whitelist * add @person`)}, ` +
+        `or opens me to everyone with ${code(`${prefix} whitelist * disable`)}.`,
+      `Type ${code(`${prefix} help`)} to see what I can do.`,
     ].join('\n');
 
   async function activateGroup(id, by) {
@@ -395,7 +398,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       }
       const scoped = checkScope(cmd.scope, { level, isAdmin, isOwner });
       if (!scoped.ok) return `Not allowed: ${scoped.reason}.`;
-      if (cmd.requires?.some((cap) => !capable[cap])) return 'That command is unavailable here.';
+      if (cmd.requires?.some((cap) => !capable[cap])) return "I can't do that in this chat.";
 
       // INDIRECT invocation (aiLine set = an AI translation OR an alias expansion): a SENSITIVE command -
       // one that affects the bot itself (owner/reset/shutdown/restart/logout) or destroys data (a
@@ -409,7 +412,7 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
         const needsConfirm = typeof cmd.confirm === 'function' ? cmd.confirm(args) : !!cmd.confirm;
         if (needsConfirm) {
           if (msg.scheduled) { log.info('scheduled: skipped a sensitive command', { command }); return undefined; }
-          return `I won't auto-run a sensitive command indirectly - type ${code(`${prefix} ${aiLine}`)} yourself to confirm.`;
+          return `That one changes things I shouldn't guess at. Type ${code(`${prefix} ${aiLine}`)} yourself to confirm.`;
         }
       }
 
@@ -658,6 +661,10 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
       if (msg.scheduled) return failed ? false : undefined;
       return `I didn't catch a command in that. Try ${code(`${prefix} help`)} to see what I can do.`;
     }
+    // Only a lone word reads as an attempted command. Anything longer is a sentence, and calling its
+    // first word an unknown command ("Unknown command `cat`" for "cat e ceasul") is nonsense to the
+    // reader - so a sentence gets the same friendly nudge the AI path gives when nothing maps.
+    if (rest) return `I didn't catch a command in that. Try ${code(`${prefix} help`)} to see what I can do.`;
     return `Unknown command ${code(esc(command))}. Try ${code(`${prefix} help`)}.`;
   }
 

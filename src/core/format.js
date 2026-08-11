@@ -39,6 +39,26 @@ export const number = (items) => items.map((x, n) => `${n + 1}. ${x}`).join('\n'
 export const quote = (t) => String(t).split('\n').map((l) => `> ${l}`).join('\n');
 
 /**
+ * Cap a listing to what one chat message can usefully carry. A reply is read on a phone, and the
+ * stores behind these listings hold hundreds of entries - at their caps a full listing runs past
+ * WhatsApp's per-message limit, the send fails, and the reader gets nothing at all. So every listing
+ * shows a slice and says what it left out.
+ *
+ * `tail` takes the LAST items instead of the first, for append-only lists (notes) where the newest
+ * matter most; a list already sorted by relevance (soonest schedule, alphabetical rules) keeps the head.
+ *
+ * @param {T[]} items
+ * @param {{ limit?: number, tail?: boolean }} [opts]
+ * @returns {{ shown: T[], hidden: number, total: number }}
+ * @template T
+ */
+export function page(items, { limit = 20, tail = false } = {}) {
+  const all = Array.isArray(items) ? items : [];
+  if (all.length <= limit) return { shown: all, hidden: 0, total: all.length };
+  return { shown: tail ? all.slice(-limit) : all.slice(0, limit), hidden: all.length - limit, total: all.length };
+}
+
+/**
  * Neutralize interpolated user content: strip our sentinels (so it cannot inject styling)
  * and break WhatsApp marker pairing with a zero-width space (best-effort, so a `*`/`_`/`~`/
  * `` ` `` typed by a user cannot bold/italicize or hijack the rest of the reply).

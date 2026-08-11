@@ -44,3 +44,12 @@ test('rule cmd: needs owner or a group admin', async () => {
   );
   store.close();
 });
+
+test('rule: a long list is capped, saying what it left out', async () => {
+  const { store, handle } = setup();
+  for (let n = 1; n <= 25; n++) await asOwner(handle, `jarvis rule add kw${String(n).padStart(2, '0')} reply ${n}`);
+  const out = await asOwner(handle, 'jarvis rule list');
+  assert.match(out, /Showing 20 of 25, alphabetically/);
+  assert.ok(out.split('\n').length <= 22);
+  store.close();
+});

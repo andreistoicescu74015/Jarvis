@@ -85,7 +85,7 @@ export function createWhatsAppAdapter({
     readReceipts = true,
     readDelayMs = 1000,
     typingPerCharMs = 50,
-    typingMaxMs = 6000,
+    typingMaxMs = 2500,
     sendJitterMs = 400,
   } = humanize;
   const waLog = socketLogger(log);
@@ -393,11 +393,16 @@ export function createWhatsAppAdapter({
     // the pacing wait, or a send error). The proactive scheduler relies on this: a false leaves the job
     // pending (retried next tick) instead of being silently counted as delivered and dropped. The reply
     // path ignores the return value, so reporting an outcome here is harmless to it.
-    async send(chatId, message) {
+    async send(chatId, message, { replyTo } = {}) {
       const s = sock; // capture: the pacing wait can span a reconnect; don't send on a new/dead socket
       if (!s || stopped) return false;
       try {
         const content = toContent(message);
+        // Thread the answer onto the message that asked for it, in GROUPS: a reply arriving as its own
+        // message in a busy group belongs to nobody. In a one-to-one chat the conversation already is
+        // the context, so quoting there would only add clutter. Only a real inbound message can be
+        // quoted (it needs a key), so anything else is ignored rather than passed to the socket.
+        const quoted = replyTo?.key && isJidGroup(chatId) ? replyTo : undefined;
         // Look like a person composing: show "typing..." then send. The wait is the global
         // spacing floor (so sends never burst, even across chats) PLUS a "typing time" roughly
         // proportional to the reply length (capped) and a little jitter. Folding the typing time
@@ -406,7 +411,7 @@ export function createWhatsAppAdapter({
         await s.sendPresenceUpdate('composing', chatId);
         await sleep(rateLimiter.nextWaitMs(typing + Math.floor(random() * sendJitterMs)));
         if (stopped || sock !== s) return false; // a reconnect/teardown happened during the pacing wait
-        await s.sendMessage(chatId, content);
+        await s.sendMessage(chatId, content, quoted ? { quoted } : undefined);
         await s.sendPresenceUpdate('paused', chatId);
         return true;
       } catch (err) {

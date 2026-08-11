@@ -58,3 +58,12 @@ test('alias command: an alias to a SENSITIVE command is not auto-run - the owner
   assert.match(out, /type .*jarvis reset.* yourself to confirm/i); // gated via the alias path, not executed
   store.close();
 });
+
+test('alias: a long list is capped, saying what it left out', async () => {
+  const { store, handle } = setup();
+  for (let n = 1; n <= 25; n++) await handle(boss(`jarvis alias add a${String(n).padStart(2, '0')} ping`));
+  const out = toPlain(await handle(boss('jarvis alias list')));
+  assert.match(out, /Showing 20 of 25, alphabetically/);
+  assert.ok(out.split('\n').length <= 22);
+  store.close();
+});

@@ -1,4 +1,5 @@
 import { accessContextFor } from './access.js';
+import { code } from './format.js';
 import { misuse } from './reply.js';
 
 /**
@@ -35,11 +36,15 @@ export function makeAccessCommand(list) {
         : 'Block specific people from a command (this chat).',
     usage: `jarvis ${list} | ${list} <command|*> add|remove <@user|number|*> | enable | disable | clear`,
     man:
-      `Manage the ${list} for a command - or the whole bot (*) - in THIS chat (your DM with Jarvis, ` +
-      `or this group). Run "jarvis ${list}" with no command (or "${list} list") to see the current rules. ` +
-      `Verbs: add/remove <person>, enable, disable, clear. A person is an @mention, ` +
-      `a phone number, or * (everyone). Whitelist and blacklist are exclusive per target; the owner ` +
-      `is never affected; the owner command cannot be restricted, and the bot cannot be added.`,
+      `Controls who may use a command - or the whole bot, written ${code('*')} - in THIS chat: your ` +
+      'private chat with Jarvis, or this group.\n' +
+      `${code(`jarvis ${list}`)} shows what is set here.\n` +
+      `${code(`jarvis ${list} <command> add <@user>`)} puts someone on the list, ${code('remove')} takes them off.\n` +
+      `${code(`jarvis ${list} <command> enable`)} turns the list on, ${code('disable')} turns it off but keeps the names, ` +
+      `${code('clear')} empties it.\n` +
+      `A person is an @mention, a phone number, or ${code('*')} for everyone.\n` +
+      'Whitelist and blacklist are exclusive per command. The owner is never affected, the owner ' +
+      'command can never be restricted, and Jarvis itself cannot be put on a list.',
     scope: { ownerOrAdmin: true },
     requires: ['access'],
     params: [
@@ -88,7 +93,7 @@ function run(ctx, list) {
         return `The ${list} for ${label(target)} is not on.`;
       }
       ctx.access.disable(target, context);
-      return `Turned off the ${list} for ${label(target)} (members kept).`;
+      return `Turned off the ${list} for ${label(target)}. The names on it are kept, so you can turn it back on.`;
     }
     case 'clear': {
       ctx.access.clear(list, target, context);

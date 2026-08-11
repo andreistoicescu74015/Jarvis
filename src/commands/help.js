@@ -7,9 +7,9 @@ export default {
   summary: 'List available commands.',
   usage: 'jarvis help | help owner | help admin',
   man:
-    'List the commands you can run here. "jarvis help owner" narrows it to the owner-only commands and ' +
-    '"jarvis help admin" to the admin-level ones (only those you can actually use). Use ' +
-    '"jarvis man <command>" for one command\'s detail.',
+    'Lists the commands you can run in this chat, grouped by who each one is for.\n' +
+    `${code('jarvis help owner')} narrows it to the owner-only ones, ${code('jarvis help admin')} to the admin-level ones - only those you can actually use.\n` +
+    `${code('jarvis man <command>')} explains a single command in detail.`,
   params: [{ name: 'role', enum: ['owner', 'admin'], desc: 'show only owner-only or admin-level commands, or omit for everything you can run here' }],
   run: (ctx) => {
     const role = (ctx.args[0] ?? '').toLowerCase();
@@ -32,11 +32,21 @@ export default {
       if (!items.length) return `No ${role} commands available to you here.`;
       return [b(heading), bullet(items), `Try ${code('jarvis man <command>')} for details.`].join('\n');
     }
-    return [
-      `I'm Jarvis. Address me with ${code('jarvis <command>')} or by @mentioning me.`,
-      b('Commands'),
-      bullet(items),
-      `Try ${code('jarvis man <command>')} for details.`,
-    ].join('\n');
+    // The full list is grouped by who a command is for, not alphabetical: someone reading `help` for
+    // the first time should meet what anyone can use before the owner's lifecycle switches, and the
+    // headings tell them which of the three they are.
+    const rank = (c) => (c.scope?.owner ? 2 : c.scope?.admin || c.scope?.ownerOrAdmin || c.scope?.proactive ? 1 : 0);
+    const sections = [
+      ['Commands', 0],
+      ['For group admins', 1],
+      ['For the owner', 2],
+    ];
+    const out = [`I'm Jarvis. Address me with ${code('jarvis <command>')} or by @mentioning me.`];
+    for (const [title, r] of sections) {
+      const of = cmds.filter((c) => rank(c) === r);
+      if (of.length) out.push(b(title), bullet(of.map((c) => `${b(c.name)}: ${esc(c.summary)}`)));
+    }
+    out.push(`Try ${code('jarvis man <command>')} for details.`);
+    return out.join('\n');
   },
 };

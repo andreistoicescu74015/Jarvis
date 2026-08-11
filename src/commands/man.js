@@ -13,8 +13,9 @@ export default {
   summary: 'Show detailed help for a command.',
   usage: 'jarvis man <command>',
   man:
-    'Show the manual for a command: its summary, usage, who may use it, and any extra ' +
-    'detail. Example: "jarvis man whitelist". Use "jarvis help" for the full list.',
+    'Shows one command in full: what it does, how to type it, who may use it, and the details.\n' +
+    `Example: ${code('jarvis man whitelist')}.\n` +
+    `${code('jarvis help')} lists every command instead.`,
   params: [{ name: 'command', desc: 'the command to explain, e.g. "whitelist" (omit to show usage)' }],
   run: (ctx) => {
     const name = (ctx.args[0] ?? '').toLowerCase();
@@ -29,7 +30,10 @@ export default {
     const lines = [`${b(cmd.name)} - ${esc(cmd.summary)}`];
     if (cmd.usage) lines.push(`${b('Usage')}: ${code(cmd.usage)}`);
     lines.push(`${b('Who')}: ${audience(cmd.scope)}`);
-    if (cmd.man) lines.push('', esc(cmd.man));
+    // The man text is written by us, not typed by a user, so it is NOT escaped: escaping would strip
+    // the formatting these pages rely on to stay readable on a phone (each rule on its own line, the
+    // commands in monospace). `esc` guards interpolated user content; there is none here.
+    if (cmd.man) lines.push('', cmd.man);
     return lines.join('\n');
   },
 };

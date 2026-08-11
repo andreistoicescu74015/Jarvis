@@ -28,13 +28,12 @@ export default {
   summary: 'Link this group with another to share one context.',
   usage: 'jarvis link | link new | link accept <code> | link remove',
   man:
-    'Share one overlay context (DATA: the notes) between two GROUPS. Both must be active, and ' +
-    'an admin on each side agrees: run "link new" here for a one-time code, share it, and an admin in ' +
-    'the other group runs "link accept <code>". The overlay covers each group\'s own data without ' +
-    'merging it - unlinking returns each group to its own data. Links are transitive (a third group ' +
-    'can join); a link between two already-linked groups is just insurance. "link remove" leaves the ' +
-    'link; if that disconnects the rest, the whole overlay dissolves and every group reverts to its ' +
-    'own data. Access lists are NOT shared - only data. "link" alone shows the status.',
+    'Lets two GROUPS share one set of notes. An admin on each side has to agree, and both groups must be active.\n' +
+    `${code('jarvis link new')} here gives you a code that is good for ten minutes; an admin in the other group runs ${code('jarvis link accept <code>')}.\n` +
+    `${code('jarvis link')} alone says whether this group is linked and to what.\n` +
+    `${code('jarvis link remove')} leaves the link. Each group gets its own notes back - they were set aside, not merged, so nothing is lost.\n` +
+    'A third group can join the same link. If one leaving would split the rest, the whole thing dissolves and the shared notes go with it.\n' +
+    'Only data is shared. Who may use Jarvis in each group stays that group\'s business.',
   // admin-level, and group-only: linking is between groups, so it is refused in a private chat - and,
   // via `proactive`, hidden there from `help` and the AI tool catalog too (both filter by scope). The
   // owner bypasses scope and still reaches the body's clearer "only between groups" message.
