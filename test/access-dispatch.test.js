@@ -98,8 +98,10 @@ test('dispatch+access: the global gate and a per-command list both apply (two ti
   access.add('blacklist', 'note', 'c1', 'alice'); // ...but alice is barred from note there
   access.enable('blacklist', 'note', 'c1');
   assert.equal(await handle({ text: 'jarvis ping', sender: 'alice', chatId: 'c1', level: 'group' }), 'pong');
-  assert.equal(await handle({ text: 'jarvis note list', sender: 'alice', chatId: 'c1', level: 'group' }), undefined);
-  assert.equal(await handle({ text: 'jarvis ping', sender: 'bob', chatId: 'c1', level: 'group' }), undefined); // fails the global gate
+  assert.equal(await handle({ text: 'jarvis note list', sender: 'alice', chatId: 'c1', level: 'group' }), undefined); // a per-command denial stays silent
+  // bob fails the bot-wide gate: told once that he is not on the list, then silent for good.
+  assert.match(await handle({ text: 'jarvis ping', sender: 'bob', chatId: 'c1', level: 'group' }), /only answer certain people/i);
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'bob', chatId: 'c1', level: 'group' }), undefined);
 });
 
 test('dispatch+access: a denial is logged for audit (never chatted)', async () => {
@@ -123,4 +125,36 @@ test('dispatch+access: every DM shares one "private" context (not one per contac
   assert.equal(await handle({ text: 'jarvis ping', sender: 'bob', chatId: 'dmB', level: 'private' }), undefined);
   // a group is its own context, unaffected by the private policy
   assert.equal(await handle({ text: 'jarvis ping', sender: 'bob', chatId: 'gX', level: 'group' }), 'pong');
+});
+
+test('dispatch+access: someone turned away in a live group is told once, and never again there', async () => {
+  // Silence is what protects the bot from being probed, but in a group where it visibly answers other
+  // people it protects nothing - it just reads as broken to the one person who is not on the list.
+  const { handle, access } = setup({ commands: [ping, note] });
+  access.enable('whitelist', '*', 'c1'); // empty whitelist: nobody but the owner and admins
+
+  assert.match(await handle({ text: 'jarvis ping', sender: 'rando', chatId: 'c1', level: 'group' }), /only answer certain people/i);
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'rando', chatId: 'c1', level: 'group' }), undefined); // once, then quiet
+  assert.equal(await handle({ text: 'jarvis note list', sender: 'rando', chatId: 'c1', level: 'group' }), undefined);
+  // Another person in the same chat gets their own single notice.
+  assert.match(await handle({ text: 'jarvis ping', sender: 'other', chatId: 'c1', level: 'group' }), /only answer certain people/i);
+  // The notice never names a command, so it cannot be used to probe what exists.
+  const first = await handle({ text: 'jarvis ping', sender: 'third', chatId: 'c1', level: 'group' });
+  assert.doesNotMatch(first, /ping|note|whitelist/i);
+});
+
+test('dispatch+access: a private chat stays completely silent - that is where a stranger probes', async () => {
+  const { handle, access } = setup({ commands: [ping] });
+  access.enable('whitelist', '*', 'private');
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'stranger', chatId: 'dm', level: 'private' }), undefined);
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'stranger', chatId: 'dm', level: 'private' }), undefined);
+});
+
+test('dispatch+access: a per-command denial stays silent even the first time', async () => {
+  // Telling someone WHICH command is restricted is exactly the leak this layer exists to prevent.
+  const { handle, access } = setup({ commands: [ping, note] });
+  access.add('blacklist', 'note', 'c1', 'rando');
+  access.enable('blacklist', 'note', 'c1');
+  assert.equal(await handle({ text: 'jarvis note list', sender: 'rando', chatId: 'c1', level: 'group' }), undefined);
+  assert.equal(await handle({ text: 'jarvis ping', sender: 'rando', chatId: 'c1', level: 'group' }), 'pong'); // the rest still works
 });

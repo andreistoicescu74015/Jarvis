@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from '../src/store/index.js';
-import { createScheduler, parseWhen, parseNatural } from '../src/core/scheduler.js';
+import { createScheduler, parseWhen, parseNatural, toParsableTime } from '../src/core/scheduler.js';
 
 const M = 60_000;
 const H = 3_600_000;
@@ -285,4 +285,49 @@ test('scheduler: listAll is empty with nothing scheduled anywhere', () => {
   const store = createStore({ path: ':memory:' });
   assert.deepEqual(createScheduler(store).listAll(), []);
   store.close();
+});
+
+test('parseNatural: reads a Romanian line, and leaves the message in Romanian', () => {
+  // chrono ships no Romanian, so the plain-language form failed for exactly the people this bot is
+  // for: the time words are rewritten to English before parsing, and only the time words.
+  const now = new Date('2026-08-11T10:00').getTime(); // a Tuesday
+  const at = (s) => {
+    const r = parseNatural(s, now);
+    assert.equal(r.ok, true, `expected "${s}" to parse`);
+    const d = new Date(r.fireAt);
+    const p = (n) => String(n).padStart(2, '0');
+    return { when: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`, message: r.message };
+  };
+
+  assert.deepEqual(at('suna-l pe tata maine la 9'), { when: '2026-08-12 09:00', message: 'suna-l pe tata' });
+  assert.deepEqual(at('sedinta poimaine la 14:30'), { when: '2026-08-13 14:30', message: 'sedinta' });
+  assert.deepEqual(at('adu painea peste 2 ore'), { when: '2026-08-11 12:00', message: 'adu painea' });
+  assert.deepEqual(at('trimite tema peste 20 de minute'), { when: '2026-08-11 10:20', message: 'trimite tema' });
+  assert.deepEqual(at('examen vineri la 10'), { when: '2026-08-14 10:00', message: 'examen' });
+  assert.deepEqual(at('film diseara la 20'), { when: '2026-08-11 20:00', message: 'film' });
+  assert.deepEqual(at('trezeste-ma maine dimineata la 8'), { when: '2026-08-12 08:00', message: 'trezeste-ma' });
+  assert.deepEqual(at('cumpara lapte la 9 seara'), { when: '2026-08-11 21:00', message: 'cumpara lapte' });
+  assert.deepEqual(at('proiect saptamana viitoare la 10'), { when: '2026-08-18 10:00', message: 'proiect' });
+});
+
+test('parseNatural: diacritics or not, it is the same line', () => {
+  const now = new Date('2026-08-11T10:00').getTime();
+  const plain = parseNatural('suna-l pe tata maine la 9', now);
+  const typed = parseNatural('sună-l pe tata mâine la 9', now);
+  assert.equal(typed.ok, true);
+  assert.equal(typed.fireAt, plain.fireAt);
+});
+
+test('parseNatural: Romanian recurrence gets the same refusal as English', () => {
+  const now = new Date('2026-08-11T10:00').getTime();
+  assert.equal(parseNatural('apa la flori in fiecare zi', now).reason, 'no-nl-recurrence');
+  assert.equal(parseNatural('zilnic la 9 raportul', now).reason, 'no-nl-recurrence'); // leading, like "daily"
+  // ...but the same word inside a one-shot line is just a word, exactly as in English.
+  assert.equal(parseNatural('raport zilnic maine la 9', now).ok, true);
+});
+
+test('toParsableTime: a line with no Romanian time words is handed to chrono untouched', () => {
+  assert.equal(toParsableTime('call mom tomorrow at 9am'), 'call mom tomorrow at 9am');
+  assert.equal(toParsableTime('buy 100 de metri de cablu'), 'buy 100 de metri de cablu'); // 3 digits is not a clock time
+  assert.equal(toParsableTime(''), '');
 });

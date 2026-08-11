@@ -2,6 +2,7 @@ import ping from './ping.js';
 import help from './help.js';
 import man from './man.js';
 import whoami from './whoami.js';
+import status from './status.js';
 import note from './note.js';
 import owner from './owner.js';
 import whitelist from './whitelist.js';
@@ -28,6 +29,7 @@ export const commands = [
   help,
   man,
   whoami,
+  status,
   note,
   owner,
   whitelist,

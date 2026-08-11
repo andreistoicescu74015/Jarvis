@@ -33,7 +33,8 @@ what *you* can run where you are; `jarvis man <command>` explains one in detail.
 **Group admins** (in an active group; the owner too, anywhere)
 
 - `jarvis whitelist ...` / `jarvis blacklist ...` - control who may use a command (or the whole bot, `*`) here; `jarvis whitelist` alone shows the rules.
-- `jarvis schedule <call mom tomorrow 9am> | in <2h> <msg> | at <date> <time> <msg> | every <1d> <msg> | list | cancel <id|all> | disable|enable <id|all>` - post a message later; a one-shot can be phrased in plain language (no AI - deterministic date parsing).
+- `jarvis schedule <call mom tomorrow 9am> | in <2h> <msg> | at <date> <time> <msg> | every <1d> <msg> | list | cancel <id|all> | disable|enable <id|all>` - post a message later; a one-shot can be phrased in plain language, English or Romanian (`suna-l pe tata maine la 9`), with no AI and no tokens.
+- `jarvis status` - how Jarvis is set up in this chat: on or off, who may use it, what it is holding, whether it shares notes with another group.
 - `jarvis rule add <keyword> <reply...> | list | remove <keyword>` - keyword auto-replies for this chat (`jarvis <keyword>` posts the reply; deterministic, no AI).
 - `jarvis link | link new | link accept <code> | link remove` - share one data context with another group (both must be active, individually or via their community).
 
@@ -53,8 +54,9 @@ what *you* can run where you are; `jarvis man <command>` explains one in detail.
 ### Natural language
 
 Deterministic conveniences run first, with no AI and no tokens: a mistyped command gets a
-`Did you mean ...?` suggestion (never auto-run), owner-defined aliases expand to full commands, and
-keyword rules post their auto-reply. When a real command cannot read the arguments you gave it, it
+`Did you mean ...?` suggestion (never auto-run), owner-defined aliases expand to full commands,
+keyword rules post their auto-reply, and `jarvis schedule` reads a time written in plain English or
+Romanian. When a real command cannot read the arguments you gave it, it
 shows its usage - and, with a provider configured, what you most likely meant, for you to type.
 
 With an AI provider configured (`GITHUB_MODELS_TOKEN`), an addressed message that isn't an exact

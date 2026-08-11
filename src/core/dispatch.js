@@ -143,6 +143,23 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     if (send) await send(id, activationNotice());
     return true;
   }
+  // A denial is silent by design: someone who is not allowed must not be able to probe the bot for
+  // what it is or who runs it. In a group where Jarvis visibly answers other people, though, silence
+  // protects nothing - it just reads as a broken bot to the one person who is not on the list. So the
+  // FIRST time someone is turned away in a group Jarvis is live in, say so once and never again in
+  // that chat. Deliberately narrow: only the bot-wide list (the "I answer nobody here but the listed"
+  // case), never a per-command denial - naming which commands are restricted would be the leak this
+  // layer exists to prevent - and never in a private chat, which is where a stranger would probe.
+  const DENIAL_NS = 'denial-notice';
+  function denialNotice(chatId, sender) {
+    if (!store) return undefined;
+    const seen = store.scoped(DENIAL_NS);
+    const key = `${chatId}|${sender}`; // a chat id never contains '|'
+    if (seen.has(key)) return undefined;
+    seen.set(key, true);
+    return 'I only answer certain people in this group. Ask an admin to add you.';
+  }
+
   // Full teardown of one chat's footprint - shared by the owner's deactivate and the platform's
   // removal hook (`handle.chatRemoved`), so the two paths can never drift apart. Everything a chat
   // accumulates goes with it.
@@ -164,6 +181,10 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     if (store) {
       store.clearNamespace(`group:${id}`); // wipe the chat's own data too - a teardown is a full reset
       store.clearNamespace(`community:${id}`);
+      // ...including who has already been told they are not on the list here, so a chat that comes
+      // back later starts over rather than staying silently mute to the same people.
+      const notices = store.scoped(DENIAL_NS);
+      for (const { key } of notices.list()) if (key.startsWith(`${id}|`)) notices.delete(key);
     }
   }
   function deactivateGroup(id, parentCommunity) {
@@ -351,7 +372,9 @@ export function createDispatcher(registry, { prefix = 'jarvis', owner = '', stor
     const globalExempt = isOwner || isAdmin || (command === 'owner' && !ownerResolver.current);
     if (access && !globalExempt && !access.passes('*', accessContext, sender)) {
       log.info('access deny (global)', { sender, chatId });
-      return undefined;
+      // Silent everywhere except once, in a group where Jarvis is live and answering (see denialNotice).
+      const live = (level === 'group' || level === 'community') && (!requireActivation || activeHere);
+      return live ? denialNotice(chatId, sender) : undefined;
     }
 
     if (!command) return `Try ${code(`${prefix} help`)}.`;

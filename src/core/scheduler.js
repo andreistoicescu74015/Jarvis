@@ -64,8 +64,63 @@ export function parseWhen(input, now) {
 // one-shot with a dangling "every" left in the message). "every" is caught ANYWHERE in the line (it almost
 // always means recurrence); the other frequency words only when they LEAD, so a one-shot that merely
 // contains "daily"/"weekly" as an adjective ("send the daily report tomorrow") still goes through. The
-// user is pointed back to the strict `every <N>{m|h|d}` form.
-const RECURRENCE_RE = /\bevery\b|^(?:each|daily|weekly|monthly|hourly|annually|yearly)\b/i;
+// user is pointed back to the strict `every <N>{m|h|d}` form. Romanian is checked too, on the
+// diacritic-folded text, so "in fiecare zi" gets the same hint instead of a silent one-shot.
+const RECURRENCE_RE = /\b(?:every|fiecare)\b|^(?:each|daily|weekly|monthly|hourly|annually|yearly|zilnic|saptamanal|lunar|anual)\b/i;
+
+// Drop diacritics, so a line typed with them and one typed without are the same to everything below.
+// Decomposing first turns each accented letter into letter + combining mark, and `\p{M}` removes the
+// marks; written as a property escape so this file stays plain ASCII.
+const fold = (s) => s.normalize('NFD').replace(/\p{M}/gu, '');
+
+/**
+ * chrono reads a fixed set of languages and Romanian is not among them, so the plain-language form
+ * ("suna-l pe tata maine la 9") silently failed for exactly the people this bot is for. Rather than a
+ * second date parser, the handful of Romanian time words is rewritten into the English chrono already
+ * understands, and the rewritten line is what gets parsed. Only time words change, so the leftover
+ * message stays the user's own Romanian - just without the time.
+ *
+ * Order matters: durations and clock times are rewritten before the part-of-day words, so "la 9 seara"
+ * becomes "at 9 pm" rather than "at 9 evening".
+ */
+const RO_TIME = [
+  [/\bpoimaine\b/gi, 'in 2 days'],
+  [/\bmaine\b/gi, 'tomorrow'],
+  [/\b(?:astazi|azi)\b/gi, 'today'],
+  [/\b(?:diseara|deseara)\b/gi, 'tonight'],
+  [/\bsaptamana viitoare\b/gi, 'next week'],
+  [/\bpeste\s+(\d+)\s+(?:de\s+)?minute?\b/gi, 'in $1 minutes'],
+  [/\bpeste\s+(\d+)\s+(?:de\s+)?(?:ore|ora)\b/gi, 'in $1 hours'],
+  [/\bpeste\s+(\d+)\s+(?:de\s+)?(?:zile|zi)\b/gi, 'in $1 days'],
+  [/\bpeste\s+(\d+)\s+(?:de\s+)?saptamani\b/gi, 'in $1 weeks'],
+  [/\bluni\b/gi, 'monday'],
+  [/\bmarti\b/gi, 'tuesday'],
+  [/\bmiercuri\b/gi, 'wednesday'],
+  [/\bjoi\b/gi, 'thursday'],
+  [/\bvineri\b/gi, 'friday'],
+  [/\bsambata\b/gi, 'saturday'],
+  [/\bduminica\b/gi, 'sunday'],
+  // "la ora 9" and the bare "la 9". Two digits at most, so "la 100 de metri" is not read as a time.
+  [/\bla\s+ora\s+(\d{1,2})(?:[:.](\d{2}))?\b/gi, (_m, h, mm) => `at ${h}${mm ? `:${mm}` : ''}`],
+  [/\bla\s+(\d{1,2})(?:[:.](\d{2}))?\b/gi, (_m, h, mm) => `at ${h}${mm ? `:${mm}` : ''}`],
+  [/\b(\d{1,2})\s+seara\b/gi, '$1 pm'],
+  [/\b(\d{1,2})\s+dimineata\b/gi, '$1 am'],
+  [/\bdimineata\b/gi, 'morning'],
+  [/\bseara\b/gi, 'evening'],
+];
+
+/**
+ * Rewrite a Romanian line's time words into English. Returns the line unchanged when it holds none,
+ * so an English (or any other) line reaches chrono exactly as it was typed.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function toParsableTime(text) {
+  let out = fold(String(text ?? ''));
+  for (const [re, to] of RO_TIME) out = out.replace(re, to);
+  return out;
+}
 
 /**
  * Parse a FREE natural-language reminder into an absolute fire time AND the leftover message, using
@@ -77,8 +132,11 @@ const RECURRENCE_RE = /\bevery\b|^(?:each|daily|weekly|monthly|hourly|annually|y
  * @returns {{ ok: true, fireAt: number, message: string } | { ok: false, reason: 'no-nl-recurrence' | 'no-time' | 'past' | 'empty-text' }}
  */
 export function parseNatural(input, now) {
-  const text = String(input ?? '').trim();
-  if (!text) return { ok: false, reason: 'empty-text' };
+  const raw = String(input ?? '').trim();
+  if (!raw) return { ok: false, reason: 'empty-text' };
+  // The Romanian time words are rewritten to English before parsing (see toParsableTime); the
+  // recurrence check runs on the rewritten line too, so both languages hit the same refusal.
+  const text = toParsableTime(raw);
   if (RECURRENCE_RE.test(text)) return { ok: false, reason: 'no-nl-recurrence' };
   let results;
   try {
