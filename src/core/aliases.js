@@ -8,7 +8,10 @@
 
 const MAX_TARGET_LEN = 500; // characters in an alias's command line
 const MAX_ALIASES = 200; // aliases kept (owner-global)
-const NAME_RE = /^[a-z0-9][a-z0-9_-]*$/; // a single lowercase token: alnum start, then alnum / - / _
+// A single lowercase token: a letter or digit, then letters / digits / - / _. Letters are Unicode, so
+// a shortcut can be a word in the language the chat actually speaks ("mancare", "mâncare") rather than
+// only in ASCII. The separator characters this name is stored around are excluded by construction.
+const NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N}_-]*$/u;
 
 /**
  * @param {import('../store/index.js').Store} store

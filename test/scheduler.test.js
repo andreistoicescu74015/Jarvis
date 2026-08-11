@@ -331,3 +331,33 @@ test('toParsableTime: a line with no Romanian time words is handed to chrono unt
   assert.equal(toParsableTime('buy 100 de metri de cablu'), 'buy 100 de metri de cablu'); // 3 digits is not a clock time
   assert.equal(toParsableTime(''), '');
 });
+
+test('parseNatural: the message keeps the diacritics the user typed', () => {
+  // The time words are rewritten, and nothing else is: what survives becomes the message the bot
+  // posts later, so stripping a user's diacritics out of it would be the bot editing their words.
+  const now = new Date('2026-08-11T10:00').getTime();
+  assert.equal(parseNatural('sedinta cu profesorii vineri la 10', now).message, 'sedinta cu profesorii');
+  assert.equal(parseNatural('ședință cu profesorii vineri la 10', now).message, 'ședință cu profesorii');
+  assert.equal(parseNatural('adu pâinea și brânza peste 2 ore', now).message, 'adu pâinea și brânza');
+  assert.equal(parseNatural('anunță că întâlnirea e sâmbătă la 11', now).message, 'anunță că întâlnirea e');
+});
+
+test('parseNatural: an English time word wedged inside a Romanian one is not a time', () => {
+  // chrono's word boundary is ASCII-only, so "sun" inside "sună" reads as Sunday to it the moment the
+  // next letter carries a diacritic - which quietly ate the first word of the message.
+  const now = new Date('2026-08-11T10:00').getTime();
+  const r = parseNatural('sună-l pe tata mâine la 9', now);
+  assert.equal(r.ok, true);
+  assert.equal(r.message, 'sună-l pe tata'); // not "ă-l pe tata"
+  const d = new Date(r.fireAt);
+  assert.equal(d.getDate(), 12); // tomorrow, not the coming Sunday
+  assert.equal(d.getHours(), 9);
+  // With nothing but the wedged word, there is no time at all - better than inventing one.
+  assert.equal(parseNatural('sună-l pe tata', now).reason, 'no-time');
+});
+
+test('parseNatural: a Romanian recurrence written with diacritics is refused too', () => {
+  const now = new Date('2026-08-11T10:00').getTime();
+  assert.equal(parseNatural('în fiecare zi la 9 raportul', now).reason, 'no-nl-recurrence');
+  assert.equal(parseNatural('săptămânal raportul', now).reason, 'no-nl-recurrence');
+});

@@ -68,10 +68,19 @@ export function parseWhen(input, now) {
 // diacritic-folded text, so "in fiecare zi" gets the same hint instead of a silent one-shot.
 const RECURRENCE_RE = /\b(?:every|fiecare)\b|^(?:each|daily|weekly|monthly|hourly|annually|yearly|zilnic|saptamanal|lunar|anual)\b/i;
 
-// Drop diacritics, so a line typed with them and one typed without are the same to everything below.
-// Decomposing first turns each accented letter into letter + combining mark, and `\p{M}` removes the
-// marks; written as a property escape so this file stays plain ASCII.
+// Drop diacritics. Used ONLY for testing a line (the recurrence check) - never to rewrite one, since
+// the text that survives the time words becomes the message the bot posts later, and stripping a
+// user's diacritics out of it is not ours to do. Decomposing turns each accented letter into letter +
+// combining mark, and `\p{M}` removes the marks.
 const fold = (s) => s.normalize('NFD').replace(/\p{M}/gu, '');
+
+/**
+ * A word-bounded, case-insensitive pattern. `\b` cannot be used here: it is defined over ASCII word
+ * characters, so it does not hold after a letter like the final "a" of "sambata" when the user typed
+ * "sâmbătă" - the accented letter is a non-word character to it, and the match silently fails. These
+ * guards are Unicode-aware, and they exclude digits too so "la 100" is not read as "la 10".
+ */
+const word = (body) => new RegExp(`(?<![\\p{L}\\p{N}_])(?:${body})(?![\\p{L}\\p{N}_])`, 'giu');
 
 /**
  * chrono reads a fixed set of languages and Romanian is not among them, so the plain-language form
@@ -83,30 +92,34 @@ const fold = (s) => s.normalize('NFD').replace(/\p{M}/gu, '');
  * Order matters: durations and clock times are rewritten before the part-of-day words, so "la 9 seara"
  * becomes "at 9 pm" rather than "at 9 evening".
  */
+// Each spelling covers the accented form and the bare one, because both get typed - and matching the
+// accented text directly is what leaves the rest of the line, the part that becomes the message, exactly
+// as the user wrote it.
 const RO_TIME = [
-  [/\bpoimaine\b/gi, 'in 2 days'],
-  [/\bmaine\b/gi, 'tomorrow'],
-  [/\b(?:astazi|azi)\b/gi, 'today'],
-  [/\b(?:diseara|deseara)\b/gi, 'tonight'],
-  [/\bsaptamana viitoare\b/gi, 'next week'],
-  [/\bpeste\s+(\d+)\s+(?:de\s+)?minute?\b/gi, 'in $1 minutes'],
-  [/\bpeste\s+(\d+)\s+(?:de\s+)?(?:ore|ora)\b/gi, 'in $1 hours'],
-  [/\bpeste\s+(\d+)\s+(?:de\s+)?(?:zile|zi)\b/gi, 'in $1 days'],
-  [/\bpeste\s+(\d+)\s+(?:de\s+)?saptamani\b/gi, 'in $1 weeks'],
-  [/\bluni\b/gi, 'monday'],
-  [/\bmarti\b/gi, 'tuesday'],
-  [/\bmiercuri\b/gi, 'wednesday'],
-  [/\bjoi\b/gi, 'thursday'],
-  [/\bvineri\b/gi, 'friday'],
-  [/\bsambata\b/gi, 'saturday'],
-  [/\bduminica\b/gi, 'sunday'],
-  // "la ora 9" and the bare "la 9". Two digits at most, so "la 100 de metri" is not read as a time.
-  [/\bla\s+ora\s+(\d{1,2})(?:[:.](\d{2}))?\b/gi, (_m, h, mm) => `at ${h}${mm ? `:${mm}` : ''}`],
-  [/\bla\s+(\d{1,2})(?:[:.](\d{2}))?\b/gi, (_m, h, mm) => `at ${h}${mm ? `:${mm}` : ''}`],
-  [/\b(\d{1,2})\s+seara\b/gi, '$1 pm'],
-  [/\b(\d{1,2})\s+dimineata\b/gi, '$1 am'],
-  [/\bdimineata\b/gi, 'morning'],
-  [/\bseara\b/gi, 'evening'],
+  [word('poim[aâ]ine'), 'in 2 days'],
+  [word('m[aâ]ine'), 'tomorrow'],
+  [word('ast[aă]zi|azi'), 'today'],
+  [word('d[ie]se[aă]r[aă]'), 'tonight'],
+  [word('s[aă]pt[aă]m[aâ]na viitoare'), 'next week'],
+  [word('peste\\s+(\\d+)\\s+(?:de\\s+)?minute?'), 'in $1 minutes'],
+  [word('peste\\s+(\\d+)\\s+(?:de\\s+)?(?:ore|or[aă])'), 'in $1 hours'],
+  [word('peste\\s+(\\d+)\\s+(?:de\\s+)?(?:zile|zi)'), 'in $1 days'],
+  [word('peste\\s+(\\d+)\\s+(?:de\\s+)?s[aă]pt[aă]m[aâ]ni'), 'in $1 weeks'],
+  [word('luni'), 'monday'],
+  [word('mar[tțţ]i'), 'tuesday'],
+  [word('miercuri'), 'wednesday'],
+  [word('joi'), 'thursday'],
+  [word('vineri'), 'friday'],
+  [word('s[aâ]mb[aă]t[aă]'), 'saturday'],
+  [word('duminic[aă]'), 'sunday'],
+  // "la ora 9" and the bare "la 9". Two digits at most, and the guard excludes a following digit, so
+  // "la 100 de metri" is not read as a time.
+  [word('la\\s+or[aă]\\s+(\\d{1,2})(?:[:.](\\d{2}))?'), (_m, h, mm) => `at ${h}${mm ? `:${mm}` : ''}`],
+  [word('la\\s+(\\d{1,2})(?:[:.](\\d{2}))?'), (_m, h, mm) => `at ${h}${mm ? `:${mm}` : ''}`],
+  [word('(\\d{1,2})\\s+se[aă]r[aă]'), '$1 pm'],
+  [word('(\\d{1,2})\\s+dimine[aă][tțţ][aă]'), '$1 am'],
+  [word('dimine[aă][tțţ][aă]'), 'morning'],
+  [word('se[aă]r[aă]'), 'evening'],
 ];
 
 /**
@@ -117,7 +130,7 @@ const RO_TIME = [
  * @returns {string}
  */
 export function toParsableTime(text) {
-  let out = fold(String(text ?? ''));
+  let out = String(text ?? '');
   for (const [re, to] of RO_TIME) out = out.replace(re, to);
   return out;
 }
@@ -137,7 +150,8 @@ export function parseNatural(input, now) {
   // The Romanian time words are rewritten to English before parsing (see toParsableTime); the
   // recurrence check runs on the rewritten line too, so both languages hit the same refusal.
   const text = toParsableTime(raw);
-  if (RECURRENCE_RE.test(text)) return { ok: false, reason: 'no-nl-recurrence' };
+  // Folded only for this test, so "saptamanal" and "săptămânal" are the same word to it.
+  if (RECURRENCE_RE.test(fold(text))) return { ok: false, reason: 'no-nl-recurrence' };
   let results;
   try {
     results = chrono.parse(text, new Date(now), { forwardDate: true });
@@ -145,7 +159,14 @@ export function parseNatural(input, now) {
     return { ok: false, reason: 'no-time' };
   }
   if (!results.length) return { ok: false, reason: 'no-time' };
-  const r = results[0];
+  // chrono's own word boundary is ASCII-only, so it happily matches an English time word GLUED to a
+  // letter it does not consider one: "sun" inside "suna-l" is Sunday to it the moment the next letter
+  // is "a" with a diacritic. Take the first match that is not wedged inside a word - by a boundary
+  // that counts accented letters as letters - so a Romanian message cannot be read as a date.
+  const letter = /\p{L}/u;
+  const glued = (m) => letter.test(text[m.index - 1] ?? '') || letter.test(text[m.index + m.text.length] ?? '');
+  const r = results.find((m) => !glued(m));
+  if (!r) return { ok: false, reason: 'no-time' };
   const fireAt = r.date().getTime();
   if (Number.isNaN(fireAt)) return { ok: false, reason: 'no-time' };
   if (fireAt <= now) return { ok: false, reason: 'past' };

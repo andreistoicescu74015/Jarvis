@@ -54,3 +54,13 @@ test('aliases: persist on the same store', () => {
   assert.equal(createAliases(store).get('hi'), 'ping'); // a fresh instance over the same store sees it
   store.close();
 });
+
+test('aliases: a shortcut may be a word in the owner\'s own language', () => {
+  const store = createStore({ path: ':memory:' });
+  const aliases = createAliases(store);
+  assert.equal(aliases.define('mâncare', 'note add pranz').ok, true);
+  assert.equal(aliases.get('mâncare'), 'note add pranz');
+  assert.equal(aliases.get('MÂNCARE'), 'note add pranz'); // looked up case-insensitively, as before
+  assert.equal(aliases.define('two words', 'ping').reason, 'bad-name');
+  store.close();
+});

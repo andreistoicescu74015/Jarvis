@@ -49,3 +49,16 @@ test("rules: clearChat removes only that chat's rules", () => {
   assert.equal(r.list('B').length, 1);
   store.close();
 });
+
+test('rules: a keyword may be a word in the chat\'s own language', () => {
+  // The keyword is what someone types after "jarvis", so restricting it to ASCII meant a Romanian
+  // group could not use a Romanian word for its own auto-reply.
+  const store = createStore({ path: ':memory:' });
+  const rules = createRules(store);
+  assert.equal(rules.add({ chatId: 'g', keyword: 'mâncare', reply: 'Azi: supa' }).ok, true);
+  assert.equal(rules.match('g', 'mâncare').reply, 'Azi: supa');
+  assert.equal(rules.match('g', 'MÂNCARE').reply, 'Azi: supa'); // matched case-insensitively, as before
+  assert.equal(rules.add({ chatId: 'g', keyword: 'two words', reply: 'x' }).reason, 'bad-keyword');
+  assert.equal(rules.add({ chatId: 'g', keyword: 'a|b', reply: 'x' }).reason, 'bad-keyword'); // the key separator
+  store.close();
+});
