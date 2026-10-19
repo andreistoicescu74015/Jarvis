@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "baileys": "7.0.0-rc14",
-    "chrono-node": "^2.10.2",
+    "chrono-node": "^2.10.3",
     "qrcode-terminal": "^0.12.0"
   }
 }
